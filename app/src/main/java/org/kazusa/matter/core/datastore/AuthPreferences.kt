@@ -1,0 +1,134 @@
+package org.kazusa.matter.core.datastore
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
+import java.io.IOException
+
+val Context.authDataStore: DataStore<Preferences> by preferencesDataStore(name = "matter_auth_pref")
+
+class AuthPreferences(private val context: Context) {
+
+    private object Keys {
+        val UID = stringPreferencesKey("uid")
+        val SUB = stringPreferencesKey("sub")
+        val SUBP = stringPreferencesKey("subp")
+        val GSID = stringPreferencesKey("gsid")
+        val RAW_COOKIE = stringPreferencesKey("raw_cookie")
+        val TOKEN = stringPreferencesKey("token")
+        val SCREEN_NAME = stringPreferencesKey("screen_name")
+        val AVATAR_URL = stringPreferencesKey("avatar_url")
+        val DESCRIPTION = stringPreferencesKey("description")
+        val IS_LOGGED_IN = booleanPreferencesKey("is_logged_in")
+        val IS_ONBOARDING_COMPLETED = booleanPreferencesKey("is_onboarding_completed")
+        val LAST_GROUP_ID = stringPreferencesKey("last_group_id")
+        val LAST_GROUP_NAME = stringPreferencesKey("last_group_name")
+    }
+
+    val lastGroupFlow: Flow<Pair<String?, String?>> = context.authDataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences()) else throw exception
+        }
+        .map { prefs ->
+            val gid = prefs[Keys.LAST_GROUP_ID]
+            val name = prefs[Keys.LAST_GROUP_NAME]
+            Pair(gid, name)
+        }
+
+    suspend fun saveSelectedGroup(gid: String?, groupName: String?) {
+        context.authDataStore.edit { prefs ->
+            if (gid != null) {
+                prefs[Keys.LAST_GROUP_ID] = gid
+            } else {
+                prefs.remove(Keys.LAST_GROUP_ID)
+            }
+            if (groupName != null) {
+                prefs[Keys.LAST_GROUP_NAME] = groupName
+            } else {
+                prefs.remove(Keys.LAST_GROUP_NAME)
+            }
+        }
+    }
+
+    val isOnboardingCompletedFlow: Flow<Boolean> = context.authDataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences()) else throw exception
+        }
+        .map { prefs -> prefs[Keys.IS_ONBOARDING_COMPLETED] ?: false }
+
+    suspend fun setOnboardingCompleted() {
+        context.authDataStore.edit { prefs ->
+            prefs[Keys.IS_ONBOARDING_COMPLETED] = true
+        }
+    }
+
+    val sessionFlow: Flow<UserSession> = context.authDataStore.data
+        .catch { exception ->
+            if (exception is IOException) {
+                emit(emptyPreferences())
+            } else {
+                throw exception
+            }
+        }
+        .map { prefs ->
+            UserSession(
+                uid = prefs[Keys.UID] ?: "",
+                sub = prefs[Keys.SUB] ?: "",
+                subp = prefs[Keys.SUBP] ?: "",
+                gsid = prefs[Keys.GSID] ?: "",
+                rawCookie = prefs[Keys.RAW_COOKIE] ?: "",
+                token = prefs[Keys.TOKEN] ?: "",
+                screenName = prefs[Keys.SCREEN_NAME] ?: "",
+                avatarUrl = prefs[Keys.AVATAR_URL] ?: "",
+                description = prefs[Keys.DESCRIPTION] ?: "",
+                isLoggedIn = prefs[Keys.IS_LOGGED_IN] ?: false
+            )
+        }
+
+    suspend fun saveSession(
+        uid: String,
+        sub: String = "",
+        subp: String = "",
+        gsid: String = "",
+        rawCookie: String = "",
+        token: String = "",
+        screenName: String = "",
+        avatarUrl: String = "",
+        description: String = ""
+    ) {
+        context.authDataStore.edit { prefs ->
+            prefs[Keys.UID] = uid
+            if (sub.isNotBlank()) prefs[Keys.SUB] = sub
+            if (subp.isNotBlank()) prefs[Keys.SUBP] = subp
+            if (gsid.isNotBlank()) prefs[Keys.GSID] = gsid
+            if (rawCookie.isNotBlank()) prefs[Keys.RAW_COOKIE] = rawCookie
+            if (token.isNotBlank()) prefs[Keys.TOKEN] = token
+            if (screenName.isNotBlank()) prefs[Keys.SCREEN_NAME] = screenName
+            if (avatarUrl.isNotBlank()) prefs[Keys.AVATAR_URL] = avatarUrl
+            if (description.isNotBlank()) prefs[Keys.DESCRIPTION] = description
+            prefs[Keys.IS_LOGGED_IN] = true
+        }
+    }
+
+    suspend fun updateProfile(screenName: String, avatarUrl: String, description: String = "") {
+        context.authDataStore.edit { prefs ->
+            if (screenName.isNotBlank()) prefs[Keys.SCREEN_NAME] = screenName
+            if (avatarUrl.isNotBlank()) prefs[Keys.AVATAR_URL] = avatarUrl
+            if (description.isNotBlank()) prefs[Keys.DESCRIPTION] = description
+        }
+    }
+
+    suspend fun clearSession() {
+        context.authDataStore.edit { prefs ->
+            prefs.clear()
+        }
+    }
+}
