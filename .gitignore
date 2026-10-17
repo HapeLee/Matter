@@ -16,6 +16,7 @@ gen/
 out/
 build/
 app/build/
+/app/release/
 */build/
 
 # Gradle files
