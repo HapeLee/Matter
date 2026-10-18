@@ -13,10 +13,17 @@ kotlinxSerialization = "1.11.0"
 kotlinxCoroutines = "1.11.0"
 coil = "2.7.0"
 media3 = "1.11.1"
-room = "2.8.4"
-ksp = "2.3.6"
+room3 = "3.0.3"
+ksp = "2.3.12"
+aboutLibraries = "15.3.0"
+koin = "4.2.2"
+reorderable = "3.1.0"
 
 [libraries]
+reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
+koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
+koin-androidx-compose = { module = "io.insert-koin:koin-androidx-compose", version.ref = "koin" }
+aboutlibraries-compose-m3 = { module = "com.mikepenz:aboutlibraries-compose-m3", version.ref = "aboutLibraries" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
 androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycleRuntimeKtx" }
@@ -61,12 +68,12 @@ androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.re
 # AndroidLiquidGlass (Backdrop by Kyant0)
 backdrop = { group = "io.github.kyant0", name = "backdrop", version = "2.0.1" }
 
-# Room (local database, KSP codegen) —— 浏览历史等本地数据
-androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
-androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
-androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+# Room 3 (local database, KSP codegen) —— 浏览历史等本地数据
+androidx-room3-runtime = { group = "androidx.room3", name = "room3-runtime", version.ref = "room3" }
+androidx-room3-compiler = { group = "androidx.room3", name = "room3-compiler", version.ref = "room3" }
 
 [plugins]
+aboutlibraries-android = { id = "com.mikepenz.aboutlibraries.plugin.android", version.ref = "aboutLibraries" }
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

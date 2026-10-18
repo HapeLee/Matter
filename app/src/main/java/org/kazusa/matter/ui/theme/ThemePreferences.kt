@@ -101,7 +101,8 @@ data class AppThemeState(
     val isAmoled: Boolean = false,     // 纯黑 AMOLED 暗黑底
     val seedColor: Color = Color(0xFFFF8200), // 自定义种子颜色 (Kolor)
     val isDarkTheme: Boolean? = null,  // null: 跟随系统, true: 深色, false: 浅色
-    val paletteStyle: PaletteStyle = PaletteStyle.TonalSpot // Kolor 调色板样式
+    val paletteStyle: PaletteStyle = PaletteStyle.TonalSpot, // Kolor 调色板样式
+    val blurEffectsEnabled: Boolean = true // 模糊与液态玻璃效果总开关
 )
 
 class ThemePreferences(private val context: Context) {
@@ -112,6 +113,7 @@ class ThemePreferences(private val context: Context) {
         val SEED_COLOR = intPreferencesKey("seed_color")
         val DARK_THEME_MODE = intPreferencesKey("dark_theme_mode") // 0: 跟随系统, 1: 浅色, 2: 深色
         val PALETTE_STYLE = stringPreferencesKey("palette_style")
+        val BLUR_EFFECTS_ENABLED = booleanPreferencesKey("blur_effects_enabled")
     }
 
     val themeStateFlow: Flow<AppThemeState> = context.themeDataStore.data
@@ -143,9 +145,16 @@ class ThemePreferences(private val context: Context) {
                 isAmoled = isAmoled,
                 seedColor = Color(seedColorArgb),
                 isDarkTheme = isDarkTheme,
-                paletteStyle = paletteStyle
+                paletteStyle = paletteStyle,
+                blurEffectsEnabled = prefs[Keys.BLUR_EFFECTS_ENABLED] ?: true
             )
         }
+
+    suspend fun setBlurEffectsEnabled(enabled: Boolean) {
+        context.themeDataStore.edit { prefs ->
+            prefs[Keys.BLUR_EFFECTS_ENABLED] = enabled
+        }
+    }
 
     suspend fun setDynamicColor(enabled: Boolean) {
         context.themeDataStore.edit { prefs ->

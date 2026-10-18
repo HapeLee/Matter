@@ -24,7 +24,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -68,17 +70,32 @@ import coil.compose.AsyncImagePainter
 import org.kazusa.matter.core.datastore.ImageQualityMode
 import org.kazusa.matter.core.datastore.MediaPreferenceState
 import org.kazusa.matter.core.datastore.MediaPreferences
+import org.kazusa.matter.core.util.ImageProbeResult
 import org.kazusa.matter.core.util.ImageSaver
 import org.kazusa.matter.core.util.NetworkMonitor
+import org.kazusa.matter.core.util.WeiboImageProbe
 import org.kazusa.matter.data.model.WeiboImageSize
 import org.kazusa.matter.data.model.withWeiboImageSize
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
-
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import coil.Coil
+import coil.imageLoader
+import coil.memory.MemoryCache
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import org.kazusa.matter.ui.media.ZoomableImageCalculator
+import org.kazusa.matter.ui.media.ZoomController
+import org.kazusa.matter.ui.media.DefaultZoomController
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * 微博图片 MD3 Morph 形变宿主浮层（参考 legado-with-MD3 经典设计）：
@@ -106,6 +123,20 @@ fun ImageMorphOverlay(
     val backEnabled by remember(morphState) { derivedStateOf { morphState.isOpen } }
     var backSettleJob by remember { mutableStateOf<Job?>(null) }
 
+    var currentZoomScale by remember { mutableFloatStateOf(1f) }
+    var currentZoomOffset by remember { mutableStateOf(Offset.Zero) }
+    var currentDisplayDataUrl by remember { mutableStateOf<String?>(null) }
+    var predictiveBackProgress by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(morphState.isOpen) {
+        if (!morphState.isOpen) {
+            currentDisplayDataUrl = null
+            currentZoomScale = 1f
+            currentZoomOffset = Offset.Zero
+            predictiveBackProgress = 0f
+        }
+    }
+
     key(hostPresent) {
         PredictiveBackHandler(enabled = hostPresent && backEnabled) { events ->
             if (!morphState.isOpen) {
@@ -113,32 +144,52 @@ fun ImageMorphOverlay(
                 return@PredictiveBackHandler
             }
             backSettleJob?.cancel()
-            val startProgress = morphState.progress.value
-            var lastProgress = startProgress
+            // 手势返回：在放大状态下直接退出返回上级，不需要先缩回到 1.0x 原始尺寸！
+            // 立即同步退出时的缩放比例与平移位置
+            morphState.updateCurrentZoom(currentZoomScale, currentZoomOffset, currentDisplayDataUrl)
+            var lastProgress = 0f
             var lastTimeNanos = 0L
             var releaseVelocity = 0f
             try {
-                morphState.progress.stop()
                 morphState.dragging = true
                 events.collect { event ->
-                    val preview = computePredictiveMorphProgress(startProgress, event.progress)
+                    val progress = event.progress
                     val now = System.nanoTime()
                     if (lastTimeNanos != 0L && now > lastTimeNanos) {
-                        releaseVelocity = (preview - lastProgress) /
+                        releaseVelocity = (progress - lastProgress) /
                                 ((now - lastTimeNanos) / 1_000_000_000f)
                     }
-                    lastProgress = preview
+                    lastProgress = progress
                     lastTimeNanos = now
-                    morphState.progress.snapTo(preview)
+                    predictiveBackProgress = progress
                 }
                 morphState.dragging = false
+                // 松手确认退出：从当前微缩放大画面平滑收拢飞回卡片槽位
                 backSettleJob = scope.launch {
-                    morphState.collapse(scope, initialVelocity = releaseVelocity)
+                    val lastBackScale = (1f - lastProgress * 0.12f).coerceIn(0.5f, 1f)
+                    val exitScale = currentZoomScale * lastBackScale
+                    val exitOffset = currentZoomOffset * lastBackScale
+                    val currentBackAlpha = (1f - lastProgress * 0.35f).coerceIn(0f, 1f)
+                    morphState.collapse(
+                        scope = scope,
+                        initialVelocity = -releaseVelocity,
+                        veilAlpha = currentBackAlpha,
+                        initialScale = exitScale,
+                        initialOffset = exitOffset,
+                        displayUrl = currentDisplayDataUrl
+                    )
+                    predictiveBackProgress = 0f
                 }
             } catch (cancelled: CancellationException) {
-                if (morphState.isOpen) {
-                    backSettleJob = scope.launch {
-                        morphState.progress.animateTo(1f, MORPH_SETTLE_SPEC)
+                // 取消手势（推回屏幕边缘）：平滑弹回，画廊层自始至终未被销毁，图片原放大倍数与位置完好无损！
+                backSettleJob = scope.launch {
+                    val startP = predictiveBackProgress
+                    animate(
+                        initialValue = startP,
+                        targetValue = 0f,
+                        animationSpec = MORPH_SETTLE_SPEC
+                    ) { value, _ ->
+                        predictiveBackProgress = value
                     }
                 }
                 throw cancelled
@@ -183,17 +234,34 @@ fun ImageMorphOverlay(
                 ImageQualityMode.THUMBNAIL_ONLY -> false
             }
         }
-        var forceOriginal by remember { mutableStateOf(false) }
+        var forceOriginalUrls by remember { mutableStateOf(setOf<String>()) }
+        var probeResults by remember { mutableStateOf(mapOf<String, ImageProbeResult>()) }
         var originalDisabled by remember { mutableStateOf(false) }
-        var hasShownMedium by remember { mutableStateOf(!autoOriginal) }
         var originalLoadFailed by remember { mutableStateOf(false) }
         var toastMessage by remember { mutableStateOf<String?>(null) }
         var urlAwaitingStoragePermission by remember { mutableStateOf<String?>(null) }
 
-        val showOriginal = (autoOriginal || forceOriginal) && !originalDisabled
-
-        LaunchedEffect(showOriginal) {
-            if (!showOriginal) hasShownMedium = true
+        // 探测当前页与前后相邻页的清晰度档位及文件体积
+        LaunchedEffect(pagerState.currentPage, urls) {
+            val currentUrl = urls.getOrNull(pagerState.currentPage) ?: return@LaunchedEffect
+            if (currentUrl !in probeResults) {
+                val result = WeiboImageProbe.probe(currentUrl)
+                probeResults = probeResults + (currentUrl to result)
+            }
+            val prevUrl = urls.getOrNull(pagerState.currentPage - 1)
+            if (prevUrl != null && prevUrl !in probeResults) {
+                launch {
+                    val result = WeiboImageProbe.probe(prevUrl)
+                    probeResults = probeResults + (prevUrl to result)
+                }
+            }
+            val nextUrl = urls.getOrNull(pagerState.currentPage + 1)
+            if (nextUrl != null && nextUrl !in probeResults) {
+                launch {
+                    val result = WeiboImageProbe.probe(nextUrl)
+                    probeResults = probeResults + (nextUrl to result)
+                }
+            }
         }
 
         LaunchedEffect(toastMessage) {
@@ -247,14 +315,26 @@ fun ImageMorphOverlay(
             }
         }
 
-        // 当前页清晰度判定
+        // 当前页清晰度与尺寸判定
         val currentOriginalUrl = urls[pagerState.currentPage.coerceIn(0, urls.lastIndex)]
+        val currentProbe = probeResults[currentOriginalUrl] ?: WeiboImageProbe.getCached(currentOriginalUrl)
+        val currentTargetUrl = currentProbe?.targetUrl ?: (currentOriginalUrl.withWeiboImageSize(WeiboImageSize.ORIGINAL) ?: currentOriginalUrl)
+        val currentIsOversized = currentProbe?.isOversized ?: false
+        val currentForced = currentOriginalUrl in forceOriginalUrls
         val currentIsAnimated = currentOriginalUrl.contains(".gif", ignoreCase = true)
-        val currentThumbUrl = remember(currentOriginalUrl) {
-            currentOriginalUrl.withWeiboImageSize(WeiboImageSize.THUMBNAIL) ?: currentOriginalUrl
+        val currentShouldAuto = if (currentIsOversized) {
+            false
+        } else if (currentIsAnimated) {
+            true
+        } else {
+            autoOriginal
         }
-        val canLoadOriginal = !currentIsAnimated && currentThumbUrl != currentOriginalUrl
-        val showingOriginal = showOriginal || currentIsAnimated
+        val currentShowingOriginal = (currentShouldAuto || currentForced) && !originalDisabled
+        val currentFormattedSize = currentProbe?.formattedSize
+
+        LaunchedEffect(currentTargetUrl) {
+            currentDisplayDataUrl = currentTargetUrl
+        }
 
         var pageDragAlpha by remember { mutableFloatStateOf(1f) }
         var isPageDragging by remember { mutableStateOf(false) }
@@ -276,14 +356,14 @@ fun ImageMorphOverlay(
                     }
                 }
                 .drawBehind {
-                    val currentVeil = (morphState.veilAlpha * pageDragAlpha).coerceIn(0f, 1f)
+                    val currentVeil = (morphState.veilAlpha * pageDragAlpha * (1f - predictiveBackProgress * 0.35f)).coerceIn(0f, 1f)
                     drawRect(Color.Black.copy(alpha = currentVeil))
                 }
         )
 
-        // 是否处于 100% 完全展开且未触发收拢的纯画廊模式（仅在状态切换时重组）
+        // 是否处于近完全展开且未触发收拢的画廊模式（0.985f 门限使手势状态机提前就绪，消除尾部触摸死区）
         val isGalleryMode by remember(morphState) {
-            derivedStateOf { morphState.progress.value >= 1f && !morphState.isCollapsing }
+            derivedStateOf { morphState.progress.value >= 0.985f && !morphState.isCollapsing }
         }
 
         if (!isGalleryMode) {
@@ -297,25 +377,25 @@ fun ImageMorphOverlay(
                 val widthDp = with(density) { flyingFrame.bounds.width.toDp() }
                 val heightDp = with(density) { flyingFrame.bounds.height.toDp() }
                 val cornerRadiusDp = with(density) { flyingFrame.cornerRadiusPx.toDp() }
-                // 飞行图使用信息流已解码的缩略图档，动画起始帧立即有画面；
-                // 原图交由画廊层承载，避免飞行途中原图未就绪出现“空窗”而丢失动画观感。
-                val stableRequest = rememberStableImageRequest(currentUrl.morphThumbnailUrl())
+                // 退出时优先复用当前正在显示的高清原图/中图，并以缩略图为占位位图，
+                // 保证飞行层接管瞬间与画廊最后一帧的画质、色彩与细节 100% 严丝合缝对齐；
+                // 展开时必须严格使用当前被点击的图片地址，绝不读取任何上一张微博遗留地址！
+                val activeUrl = if (morphState.isCollapsing) {
+                    morphState.currentDisplayUrl ?: currentDisplayDataUrl ?: currentUrl
+                } else {
+                    currentUrl
+                }
+                val stableRequest = rememberStableImageRequest(
+                    dataUrl = activeUrl,
+                    placeholderUrl = currentUrl.morphThumbnailUrl()
+                )
 
                 Box(
                     modifier = Modifier
+                        .wrapContentSize(align = Alignment.TopStart, unbounded = true)
                         .offset { IntOffset(left, top) }
-                        .size(width = widthDp, height = heightDp)
+                        .requiredSize(width = widthDp, height = heightDp)
                         .clip(RoundedCornerShape(cornerRadiusDp))
-                        .pointerInput(Unit) {
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
-                                down.consume()
-                                do {
-                                    val event = awaitPointerEvent()
-                                    event.changes.forEach { it.consume() }
-                                } while (event.changes.any { it.pressed })
-                            }
-                        }
                 ) {
                     AsyncImage(
                         model = stableRequest,
@@ -327,10 +407,10 @@ fun ImageMorphOverlay(
             }
         } else {
             // 第三层：交互式多图画廊（仅在 100% 完全展开且非退出状态时挂载，提供切图、缩放与拖拽退出手势）
-            var currentZoomScale by remember { mutableFloatStateOf(1f) }
-
+            // 预测返回手势预览期间保持全屏尺寸，不缩放 Pager，彻底杜绝左右出现黑色竖缝
             HorizontalPager(
                 state = pagerState,
+                key = { pageIndex -> urls.getOrElse(pageIndex) { pageIndex.toString() } },
                 userScrollEnabled = (currentZoomScale <= 1.05f),
                 modifier = Modifier.fillMaxSize()
             ) { pageIndex ->
@@ -340,16 +420,33 @@ fun ImageMorphOverlay(
                     originalUrl.withWeiboImageSize(WeiboImageSize.MEDIUM) ?: originalUrl
                 }
                 val gridUrl = remember(originalUrl) {
-                    originalUrl.withWeiboImageSize(WeiboImageSize.THUMBNAIL) ?: originalUrl
+                    originalUrl.morphThumbnailUrl()
                 }
-                val displayOriginal = showOriginal || isAnimated
+                val probe = probeResults[originalUrl] ?: WeiboImageProbe.getCached(originalUrl)
+                val targetOriginalUrl = probe?.targetUrl ?: (originalUrl.withWeiboImageSize(WeiboImageSize.ORIGINAL) ?: originalUrl)
+                val isOversized = probe?.isOversized ?: false
+                val isForced = originalUrl in forceOriginalUrls
+
+                val shouldAuto = if (isOversized) {
+                    false
+                } else if (isAnimated) {
+                    true
+                } else {
+                    autoOriginal
+                }
+                val displayOriginal = (shouldAuto || isForced) && !originalDisabled
+
+                val context = LocalContext.current
+                val isMediumCached = remember(mediumUrl) {
+                    context.imageLoader.memoryCache?.get(MemoryCache.Key(mediumUrl)) != null
+                }
 
                 MorphZoomablePage(
                     url = originalUrl,
-                    dataUrl = if (displayOriginal) originalUrl else mediumUrl,
-                    // 原图优先复用刚看过的中等档位图，否则复用信息流宫格已解码的缩略图，
+                    dataUrl = if (displayOriginal) targetOriginalUrl else mediumUrl,
+                    // 原图优先复用刚看过的中等档位图（若在内存缓存中），否则复用信息流宫格已解码的缩略图，
                     // 实现「缩略图 → 原图」的无缝升级，杜绝白屏与闪烁
-                    placeholderUrl = if (displayOriginal && hasShownMedium && mediumUrl != originalUrl) {
+                    placeholderUrl = if (displayOriginal && isMediumCached && mediumUrl != targetOriginalUrl) {
                         mediumUrl
                     } else {
                         gridUrl
@@ -361,14 +458,18 @@ fun ImageMorphOverlay(
                             scope = scope,
                             initialVelocity = initialVelocity,
                             dragOffset = dragOffset,
-                            veilAlpha = veilAlpha
+                            veilAlpha = veilAlpha,
+                            initialScale = currentZoomScale,
+                            initialOffset = currentZoomOffset,
+                            displayUrl = currentDisplayDataUrl
                         )
                         pageDragAlpha = 1f
                         isPageDragging = false
                     },
-                    onScaleChanged = { scale ->
+                    onZoomStateChanged = { scale, offset ->
                         if (pagerState.currentPage == pageIndex) {
                             currentZoomScale = scale
+                            currentZoomOffset = offset
                         }
                     },
                     onDragStateChanged = { offset, alpha ->
@@ -377,7 +478,11 @@ fun ImageMorphOverlay(
                     },
                     onLoadError = {
                         if (displayOriginal && !isAnimated) originalLoadFailed = true
-                    }
+                    },
+                    onImageRatioLoaded = { ratio ->
+                        morphState.updateRatio(pageIndex, ratio)
+                    },
+                    predictiveBackProgress = if (pagerState.currentPage == pageIndex) predictiveBackProgress else 0f
                 )
             }
         }
@@ -391,12 +496,20 @@ fun ImageMorphOverlay(
                     .padding(top = 44.dp, start = 16.dp, end = 16.dp)
                     .graphicsLayer {
                         val progressAlpha = ((morphState.progress.value - 0.60f) / 0.40f).coerceIn(0f, 1f)
-                        alpha = progressAlpha * pageDragAlpha
+                        alpha = (progressAlpha * pageDragAlpha * (1f - predictiveBackProgress * 2.5f)).coerceIn(0f, 1f)
                     },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = { morphState.collapse(scope) },
+                    onClick = {
+                        morphState.updateCurrentZoom(currentZoomScale, currentZoomOffset, currentDisplayDataUrl)
+                        morphState.collapse(
+                            scope = scope,
+                            initialScale = currentZoomScale,
+                            initialOffset = currentZoomOffset,
+                            displayUrl = currentDisplayDataUrl
+                        )
+                    },
                     modifier = Modifier
                         .clip(CircleShape)
                         .background(Color.Black.copy(alpha = 0.5f))
@@ -434,22 +547,28 @@ fun ImageMorphOverlay(
                     .padding(bottom = 44.dp)
                     .graphicsLayer {
                         val progressAlpha = ((morphState.progress.value - 0.60f) / 0.40f).coerceIn(0f, 1f)
-                        alpha = progressAlpha * pageDragAlpha
+                        alpha = (progressAlpha * pageDragAlpha * (1f - predictiveBackProgress * 2.5f)).coerceIn(0f, 1f)
                     },
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (canLoadOriginal && !showingOriginal) {
+                if (!currentShowingOriginal) {
+                    val buttonText = when {
+                        currentIsOversized && currentFormattedSize != null -> "查看超大原图 ($currentFormattedSize)"
+                        currentFormattedSize != null -> if (currentIsAnimated) "查看动图 ($currentFormattedSize)" else "查看原图 ($currentFormattedSize)"
+                        currentIsAnimated -> "查看动图"
+                        else -> "查看原图"
+                    }
                     MorphActionButton(
-                        text = "查看原图",
+                        text = buttonText,
                         filled = true,
-                        onClick = { forceOriginal = true }
+                        onClick = { forceOriginalUrls = forceOriginalUrls + currentOriginalUrl }
                     )
                 }
                 MorphActionButton(
                     text = "保存",
                     filled = false,
-                    onClick = { requestSave(currentOriginalUrl) }
+                    onClick = { requestSave(currentTargetUrl) }
                 )
             }
         }
@@ -462,7 +581,7 @@ fun ImageMorphOverlay(
  * - 1.0x 状态支持下滑与上划任意方向跟手拖拽退出，手指释放时弹性飞回原卡片槽位
  * - 双击 1.0x / 2.5x 缩放切换
  * - 双指捏合自由缩放平移
- * - 单击触发收拢形变
+ * - 单击触发收拢形变直接退出
  */
 @Composable
 private fun MorphZoomablePage(
@@ -472,29 +591,35 @@ private fun MorphZoomablePage(
     pageIndex: Int,
     isCurrentPage: Boolean,
     onCollapse: (dragOffset: Offset, initialVelocity: Float, veilAlpha: Float) -> Unit,
-    onScaleChanged: (Float) -> Unit,
+    onZoomStateChanged: (scale: Float, offset: Offset) -> Unit,
     onDragStateChanged: (Offset, Float) -> Unit,
     onLoadError: () -> Unit,
+    onImageRatioLoaded: (Float) -> Unit = {},
+    predictiveBackProgress: Float = 0f,
     modifier: Modifier = Modifier
 ) {
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    var offsetY by remember { mutableFloatStateOf(0f) }
+    val scaleAnim = remember { Animatable(1f) }
+    val offsetXAnim = remember { Animatable(0f) }
+    val offsetYAnim = remember { Animatable(0f) }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    var imageRatio by remember(url) { mutableFloatStateOf(ImageRatioCache.get(url) ?: 0f) }
     var isLoading by remember { mutableStateOf(true) }
 
-    LaunchedEffect(scale) {
-        onScaleChanged(scale)
+    LaunchedEffect(scaleAnim.value, offsetXAnim.value, offsetYAnim.value, isCurrentPage) {
+        if (isCurrentPage) {
+            onZoomStateChanged(scaleAnim.value, Offset(offsetXAnim.value, offsetYAnim.value))
+        }
     }
 
     LaunchedEffect(isCurrentPage) {
         if (!isCurrentPage) {
-            scale = 1f
-            offsetX = 0f
-            offsetY = 0f
+            scaleAnim.snapTo(1f)
+            offsetXAnim.snapTo(0f)
+            offsetYAnim.snapTo(0f)
             dragOffsetX = 0f
             dragOffsetY = 0f
             isDragging = false
@@ -506,21 +631,53 @@ private fun MorphZoomablePage(
     val dragDistance = Offset(dragOffsetX, dragOffsetY).getDistance()
     val dragScale = (1f - (dragDistance / 1800f)).coerceIn(0.65f, 1f)
 
+    val getCurW = { if (containerSize.width > 0) containerSize.width.toFloat() else 1080f }
+    val getCurH = { if (containerSize.height > 0) containerSize.height.toFloat() else 2400f }
+    val getCurRatio = { if (imageRatio > 0f) imageRatio else (ImageRatioCache.get(url) ?: (getCurW() / getCurH())) }
+
     Box(
         modifier = modifier
             .fillMaxSize()
+            .onSizeChanged { containerSize = it }
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = {
                         onCollapse(Offset.Zero, 0f, 1f)
                     },
-                    onDoubleTap = {
-                        if (scale > 1.05f) {
-                            scale = 1f
-                            offsetX = 0f
-                            offsetY = 0f
+                    onDoubleTap = { tapPosition ->
+                        if (scaleAnim.value > 1.05f) {
+                            ZoomableImageCalculator.animateZoom(
+                                scope = scope,
+                                scaleAnim = scaleAnim,
+                                offsetXAnim = offsetXAnim,
+                                offsetYAnim = offsetYAnim,
+                                targetScale = 1f,
+                                targetOffset = Offset.Zero
+                            )
                         } else {
-                            scale = 2.5f
+                            val cW = getCurW()
+                            val cH = getCurH()
+                            val r = getCurRatio()
+                            val targetScale = ZoomableImageCalculator.calculateTargetDoubleTapScale(
+                                containerWidth = cW,
+                                containerHeight = cH,
+                                imageRatio = r
+                            )
+                            val targetOffset = ZoomableImageCalculator.calculateDoubleTapTargetOffset(
+                                tapPosition = tapPosition,
+                                containerWidth = cW,
+                                containerHeight = cH,
+                                imageRatio = r,
+                                targetScale = targetScale
+                            )
+                            ZoomableImageCalculator.animateZoom(
+                                scope = scope,
+                                scaleAnim = scaleAnim,
+                                offsetXAnim = offsetXAnim,
+                                offsetYAnim = offsetYAnim,
+                                targetScale = targetScale,
+                                targetOffset = targetOffset
+                            )
                         }
                     }
                 )
@@ -536,6 +693,15 @@ private fun MorphZoomablePage(
                     val velocityTracker = VelocityTracker()
                     velocityTracker.addPosition(down.uptimeMillis, down.position)
 
+                    val maxScale = max(
+                        4.5f,
+                        ZoomableImageCalculator.calculateTargetDoubleTapScale(
+                            containerWidth = getCurW(),
+                            containerHeight = getCurH(),
+                            imageRatio = getCurRatio()
+                        ) * 2f
+                    )
+
                     do {
                         val event = awaitPointerEvent()
                         val pointerCount = event.changes.size
@@ -543,10 +709,21 @@ private fun MorphZoomablePage(
                         if (pointerCount >= 2) {
                             // 双指自由缩放
                             val zoomChange = event.calculateZoom()
-                            scale = (scale * zoomChange).coerceIn(0.85f, 4.5f)
                             val panChange = event.calculatePan()
-                            offsetX += panChange.x
-                            offsetY += panChange.y
+                            val newScale = (scaleAnim.value * zoomChange).coerceIn(0.85f, maxScale * 1.25f)
+                            val (maxOffsetX, maxOffsetY) = ZoomableImageCalculator.calculateMaxPanOffset(
+                                containerWidth = getCurW(),
+                                containerHeight = getCurH(),
+                                imageRatio = getCurRatio(),
+                                currentScale = newScale
+                            )
+                            val targetX = (offsetXAnim.value + panChange.x).coerceIn(-maxOffsetX - 150f, maxOffsetX + 150f)
+                            val targetY = (offsetYAnim.value + panChange.y).coerceIn(-maxOffsetY - 150f, maxOffsetY + 150f)
+                            scope.launch {
+                                scaleAnim.snapTo(newScale)
+                                offsetXAnim.snapTo(targetX)
+                                offsetYAnim.snapTo(targetY)
+                            }
                             event.changes.forEach { it.consume() }
                         } else if (pointerCount == 1) {
                             val change = event.changes.first()
@@ -555,11 +732,21 @@ private fun MorphZoomablePage(
                                 val panChange = change.positionChange()
                                 panAcc += panChange
 
-                                if (scale > 1.05f) {
+                                if (scaleAnim.value > 1.05f) {
                                     // 放大状态平移图片
                                     change.consume()
-                                    offsetX += panChange.x
-                                    offsetY += panChange.y
+                                    val (maxOffsetX, maxOffsetY) = ZoomableImageCalculator.calculateMaxPanOffset(
+                                        containerWidth = getCurW(),
+                                        containerHeight = getCurH(),
+                                        imageRatio = getCurRatio(),
+                                        currentScale = scaleAnim.value
+                                    )
+                                    val targetX = (offsetXAnim.value + panChange.x).coerceIn(-maxOffsetX - 120f, maxOffsetX + 120f)
+                                    val targetY = (offsetYAnim.value + panChange.y).coerceIn(-maxOffsetY - 120f, maxOffsetY + 120f)
+                                    scope.launch {
+                                        offsetXAnim.snapTo(targetX)
+                                        offsetYAnim.snapTo(targetY)
+                                    }
                                 } else {
                                     // 1.0x 状态：先判定主导方向，再决定「退出跟手」还是「放行切图」
                                     if (!pastSlop) {
@@ -627,35 +814,54 @@ private fun MorphZoomablePage(
                         }
                     }
 
-                    if (scale < 1f) {
-                        scale = 1f
-                        offsetX = 0f
-                        offsetY = 0f
+                    if (scaleAnim.value < 1f) {
+                        ZoomableImageCalculator.animateZoom(
+                            scope = scope,
+                            scaleAnim = scaleAnim,
+                            offsetXAnim = offsetXAnim,
+                            offsetYAnim = offsetYAnim,
+                            targetScale = 1f,
+                            targetOffset = Offset.Zero
+                        )
+                    } else if (scaleAnim.value > maxScale) {
+                        scope.launch {
+                            scaleAnim.animateTo(maxScale, spring(stiffness = Spring.StiffnessMediumLow))
+                        }
+                    } else if (scaleAnim.value > 1.05f && !isDismissDrag) {
+                        // 放大状态下的手指抬起：惯性 fling 平移与越界平滑回弹
+                        val velocity = velocityTracker.calculateVelocity()
+                        val (maxOffsetX, maxOffsetY) = ZoomableImageCalculator.calculateMaxPanOffset(
+                            containerWidth = getCurW(),
+                            containerHeight = getCurH(),
+                            imageRatio = getCurRatio(),
+                            currentScale = scaleAnim.value
+                        )
+                        ZoomableImageCalculator.flingWithInertia(
+                            scope = scope,
+                            animatable = offsetXAnim,
+                            initialVelocity = velocity.x,
+                            maxBound = maxOffsetX
+                        )
+                        ZoomableImageCalculator.flingWithInertia(
+                            scope = scope,
+                            animatable = offsetYAnim,
+                            initialVelocity = velocity.y,
+                            maxBound = maxOffsetY
+                        )
                     }
                 }
             },
         contentAlignment = Alignment.Center
     ) {
-        // 当前档位的数据地址由外层按「大图清晰度」策略决定，
-        // placeholderUrl 复用已解码的低档位位图，实现无缝升级。
-        val stableRequest = rememberStableImageRequest(dataUrl, placeholderUrl = placeholderUrl)
-        AsyncImage(
-            model = stableRequest,
-            contentDescription = "查看大图",
-            contentScale = ContentScale.Fit,
-            onState = { state ->
-                // 已有缩略图占位时不显示加载指示器，实现“缩略图→原图”的无缝升级
-                isLoading = state is AsyncImagePainter.State.Loading && state.painter == null
-                if (state is AsyncImagePainter.State.Success) {
-                    val w = state.result.drawable.intrinsicWidth
-                    val h = state.result.drawable.intrinsicHeight
-                    if (w > 0 && h > 0) {
-                        val ratio = w.toFloat() / h.toFloat()
-                        ImageRatioCache.put(url, ratio)
-                    }
-                }
-                if (state is AsyncImagePainter.State.Error) onLoadError()
-            },
+        val context = LocalContext.current
+        val isDataCached = remember(dataUrl) {
+            context.imageLoader.memoryCache?.get(MemoryCache.Key(dataUrl)) != null
+        }
+        val highResAlpha = remember(dataUrl) {
+            Animatable(if (isDataCached) 1f else 0f)
+        }
+
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
@@ -665,13 +871,62 @@ private fun MorphZoomablePage(
                         scaleX = dragScale
                         scaleY = dragScale
                     } else {
-                        translationX = offsetX
-                        translationY = offsetY
-                        scaleX = scale
-                        scaleY = scale
+                        val backScale = (1f - predictiveBackProgress * 0.12f).coerceIn(0.5f, 1f)
+                        translationX = offsetXAnim.value * backScale
+                        translationY = offsetYAnim.value * backScale
+                        scaleX = scaleAnim.value * backScale
+                        scaleY = scaleAnim.value * backScale
                     }
-                }
-        )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            // 第一层：稳态缩略图垫底层（Base Thumbnail Layer）
+            // 始终复用已存在于 Coil MemoryCache 中的缩略图/中图，以 100% 不透明度垫底，
+            // 彻底杜绝白屏、黑闪或透明穿透，保证从展开飞行动画结束的那一帧起就有画面！
+            if (highResAlpha.value < 1f && placeholderUrl != dataUrl) {
+                val baseRequest = rememberStableImageRequest(dataUrl = placeholderUrl)
+                AsyncImage(
+                    model = baseRequest,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // 第二层：高清大图/原图顶层（High-Res Overlay Layer）
+            // 若已命中内存缓存则瞬时 100% 呈现；若需异步网络加载/磁盘解码，就绪后以 180ms 单向平滑淡入覆盖在缩略图上，
+            // 产生如相机对焦般从微弱模糊自然过渡到极度锐利的无感视觉体验，零跳变、零闪烁！
+            val stableRequest = rememberStableImageRequest(dataUrl = dataUrl, placeholderUrl = placeholderUrl)
+            AsyncImage(
+                model = stableRequest,
+                contentDescription = "查看大图",
+                contentScale = ContentScale.Fit,
+                onState = { state ->
+                    isLoading = state is AsyncImagePainter.State.Loading && highResAlpha.value == 0f && placeholderUrl == dataUrl
+                    if (state is AsyncImagePainter.State.Success) {
+                        val w = state.result.drawable.intrinsicWidth
+                        val h = state.result.drawable.intrinsicHeight
+                        if (w > 0 && h > 0) {
+                            val ratio = w.toFloat() / h.toFloat()
+                            imageRatio = ratio
+                            ImageRatioCache.put(url, ratio)
+                            onImageRatioLoaded(ratio)
+                        }
+                        if (highResAlpha.value < 1f) {
+                            scope.launch {
+                                highResAlpha.animateTo(1f, tween(180, easing = FastOutSlowInEasing))
+                            }
+                        }
+                    }
+                    if (state is AsyncImagePainter.State.Error) onLoadError()
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = highResAlpha.value
+                    }
+            )
+        }
 
         if (isLoading) {
             CircularProgressIndicator(

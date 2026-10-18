@@ -1,4 +1,4 @@
-﻿package org.kazusa.matter.data.model
+package org.kazusa.matter.data.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -28,4 +28,11 @@ data class WeiboGroupDto(
 
     val displayName: String
         get() = if (name.isNotBlank()) name else title ?: "未命名分组"
+
+    val isSystem: Boolean
+        get() = identifier == "all" || identifier == "special" || identifier == "friends" ||
+                identifier == "quiet" || identifier == "original" ||
+                displayName == "全部关注" || displayName.contains("特别关注") ||
+                displayName.contains("互相关注") || displayName.contains("悄悄关注") ||
+                displayName.contains("原创") || displayName.contains("最新微博")
 }

@@ -73,7 +73,7 @@ import org.kazusa.matter.ui.effect.liquid.LiquidGlassCapsule
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIconButton
 import org.kazusa.matter.ui.effect.liquid.liquidTextShadow
-import com.kyant.backdrop.isRuntimeShaderSupported
+import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -151,7 +151,7 @@ fun UserProfileScreen(
     val pullRefreshState = rememberPullToRefreshState()
     val listState = rememberLazyListState()
     // 设备能力探测结果恒定，记忆化以避免每次重组重复探测（内部可能编译 RuntimeShader）。
-    val runtimeShaderSupported = remember { isRuntimeShaderSupported() }
+    val runtimeShaderSupported = rememberBlurEffectsEnabled()
     val backdrop = if (runtimeShaderSupported) {
         rememberLayerBackdrop()
     } else null

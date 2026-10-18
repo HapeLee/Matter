@@ -64,8 +64,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.isRuntimeShaderSupported
+import org.kazusa.matter.ui.effect.rememberScreenBackdrop
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -177,9 +176,7 @@ fun SearchResultScreen(
     // 搜索记录列表自己的滚动状态：空词时顶栏遮罩跟着它联动
     val historyListState = rememberLazyListState()
 
-    // 设备能力探测结果恒定，记忆化以避免重复编译 RuntimeShader
-    val runtimeShaderSupported = remember { isRuntimeShaderSupported() }
-    val backdrop = if (runtimeShaderSupported) rememberLayerBackdrop() else null
+    val backdrop = rememberScreenBackdrop()
 
     val safeIndex = selectedIndex.coerceIn(0, tabs.lastIndex.coerceAtLeast(0))
     val currentTab = tabs[safeIndex]
@@ -606,7 +603,8 @@ private fun SearchHistoryPanel(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
+            .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
+            .background(MaterialTheme.colorScheme.surface),
         contentPadding = PaddingValues(
             start = 12.dp,
             top = topPadding + 8.dp,

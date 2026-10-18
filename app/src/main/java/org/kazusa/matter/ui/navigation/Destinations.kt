@@ -46,7 +46,13 @@ sealed interface Screen : NavKey {
     data object BrowsingHistory : Screen
 
     @Serializable
+    data object SavedPosts : Screen
+
+    @Serializable
     data object Settings : Screen
+
+    @Serializable
+    data object OpenSourceLibraries : Screen
 
     @Serializable
     data object Appearance : Screen

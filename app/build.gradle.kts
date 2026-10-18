@@ -4,6 +4,14 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     // Room 注解处理（浏览历史等本地表）
     alias(libs.plugins.ksp)
+    alias(libs.plugins.aboutlibraries.android)
+}
+
+aboutLibraries {
+    collect {
+        // BOM 用于约束版本，不作为应用中的组件展示。
+        includePlatform = false
+    }
 }
 
 android {
@@ -42,6 +50,9 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 // Room 导出版本化 schema，方便后续写 Migration 时有据可查
@@ -78,10 +89,9 @@ dependencies {
     // DataStore
     implementation(libs.androidx.datastore.preferences)
 
-    // Room（本地数据库：浏览历史等）
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler)
+    // Room 3（本地数据库：浏览历史等）
+    implementation(libs.androidx.room3.runtime)
+    ksp(libs.androidx.room3.compiler)
 
     // Ktor Client
     implementation(libs.ktor.client.core)
@@ -107,6 +117,20 @@ dependencies {
     // AndroidLiquidGlass (Kyant0 Backdrop)
     implementation(libs.backdrop)
 
+    // Reorderable Drag-and-drop List
+    implementation(libs.reorderable)
+
+    implementation(libs.aboutlibraries.compose.m3)
+    implementation(libs.koin.android)
+    implementation(libs.koin.androidx.compose)
+
     debugImplementation(libs.androidx.ui.tooling)
     testImplementation("junit:junit:4.13.2")
+    testImplementation("io.ktor:ktor-client-mock:${libs.versions.ktor.get()}")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:${libs.versions.kotlinxCoroutines.get()}")
+    testImplementation("org.robolectric:robolectric:4.17")
+}
+
+tasks.withType<Test>().configureEach {
+    systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
 }

@@ -1,93 +1,100 @@
-# Matter (基于 Jetpack Compose + Ktor + DataStore 的现代客户端)
+# Matter (基于 Jetpack Compose + Koin + Ktor + DataStore 的现代客户端)
 
-本项目采用 Android 现代技术栈（**Jetpack Compose + Material 3 + Type-Safe Navigation + Jetpack DataStore + Ktor Client + Kotlin Coroutines & Flow**）构建，实现高效流畅的第三方微博客户端体验。
-
----
-
-## 一、微博后端通信协议概览
-
-应用主要与以下微博服务集群进行数据交互：
-
-### 1. 通信架构与核心域名
-* **私有移动客户端 API**：`https://api.weibo.cn/2/` 与 `https://api.weibo.com/2/`
-* **移动端轻量级 API 与 H5 体系**：`https://m.weibo.cn/`
-* **网页/扫码授权认证网关**：`https://passport.weibo.cn/signin/`
-
-### 2. 核心 API 端点映射
-| 业务场景 | 内部端点 | 请求方式与关键参数 | 功能说明 |
-| :--- | :--- | :--- | :--- |
-| **登录与鉴权** | `/2/account/login`<br>`account/login_sendcode`<br>`account/login_smsverify`<br>`/2/qtcode/login` | POST / GET<br>`SUB`, `SUBP`, `gsid`, `token` | 验证码登录、扫码登录及会话校验 |
-| **会话/用户信息** | `https://m.weibo.cn/api/config`<br>`users/show` | GET (携带 Cookie) | 验证当前会话有效性，拉取当前登录 UID、昵称、头像 |
-| **好友/关注流** | `2/statuses/container_timeline`<br>`statuses/friends/timeline`<br>`https://m.weibo.cn/feed/friends` | GET<br>`page`, `max_id`, `since_id`, `count` | 获取首页关注博主发布的最新的微博信息流（支持基于 max_id 游标分页） |
-| **分组微博流** | `groups/timeline`<br>`https://m.weibo.cn/feed/group` | GET<br>`gid`/`list_id`, `page`, `max_id` | 获取指定关注分组下的微博流 |
-| **关注分组管理** | `groups/allgroups/v2`<br>`https://api.weibo.com/2/friendships/groups.json` | GET (携带 Cookie/Token) | 获取用户自定义与系统关注分组列表（如特别关注、互相关注等） |
-| **详情与互动** | `comments/build_comments`<br>`friendships/create`<br>`remind/unread_count` | GET / POST<br>`id`, `uid` | 评论流拉取、关注/取关、未读红点同步 |
-
-### 3. 会话保持与凭据存储机制
-关键凭据即为 `SUB`、`SUBP` 与 `gsid`。本地采用 Jetpack DataStore 响应式持久化管理用户会话。
+本项目采用现代 Android 架构规范与最新技术栈（**Jetpack Compose + Material 3 + Koin 依赖注入 + Ktor Client + Jetpack DataStore + Room + Kotlin Coroutines & Flow**）构建，致力于提供高效、优雅且流畅的社交信息流阅读体验。
 
 ---
 
-## 二、应用架构与技术栈选型
+## 一、应用架构与技术选型
 
-本项目使用现代 Android 技术栈进行完整实现：
+项目遵循官方推荐的 **单向数据流 (UDF)** 与分层架构设计，通过 **Koin** 进行统一的依赖注入装配，实现各模块间的彻底解耦与高可测试性：
 
 ```
 app/src/main/java/org/kazusa/matter/
 ├── core/
-│   ├── datastore/         # Jetpack DataStore (UserSession 偏好与凭据存储)
-│   ├── di/                # AppContainer 手工依赖注入容器
-│   └── network/           # Ktor Client 3.0 + OkHttp 引擎 + ContentNegotiation
+│   ├── datastore/         # Jetpack DataStore (用户会话偏好与媒体/主题配置)
+│   ├── di/                # Koin 依赖注入模块 (dataModule, viewModelModule, appModule)
+│   └── network/           # Ktor Client 3.x 网络抽象层 + OkHttp 引擎 + ContentNegotiation
 ├── data/
-│   ├── model/             # Kotlinx Serialization 数据契约 (Auth, Timeline, Group)
-│   └── repository/        # 仓库层 (AuthRepository, TimelineRepository, GroupRepository)
+│   ├── cache/             # 时间线与列表内存/磁盘缓存管理
+│   ├── local/             # Room 本地持久化数据库 (浏览历史、搜索记录)
+│   ├── model/             # Kotlinx Serialization 数据模型契约
+│   └── repository/        # 仓库层 (Auth, Timeline, Group, History, Favorites)
 ├── ui/
-│   ├── components/        # 基础组件 (WeiboPostCard, ImageGrid, CommonTopBar)
+│   ├── components/        # 基础可复用组件 (PostCard, ImageGrid, CommonTopBar 等)
 │   ├── group/             # 关注分组列表页与 ViewModel
-│   ├── login/             # 登录页 (WebView 自动捕获 Cookie + 手动导入) 与 ViewModel
-│   ├── navigation/        # Type-Safe Navigation (Screen.Login, Screen.Timeline, Screen.GroupList)
-│   ├── theme/             # Material 3 主题、色板与排版系统
-│   └── timeline/          # 首页时间线流 (下拉刷新 + 无限加载) 与 ViewModel
-├── MainActivity.kt        # 边缘到边缘 (Edge-to-Edge) 单 Activity 容器
-└── MatterApplication.kt  # 全局 Application 初始化
+│   ├── history/           # 浏览/搜索历史页与 ViewModel
+│   ├── login/             # 多方式登录页与 ViewModel
+│   ├── navigation/        # Type-Safe Navigation 路由定义
+│   ├── saved/             # 收藏与离线保存
+│   ├── theme/             # Material 3 动态色彩与主题排版系统
+│   └── timeline/          # 首页主信息流 (下拉刷新 + 无限分页) 与 ViewModel
+├── MainActivity.kt        # 边缘到边缘 (Edge-to-Edge) 单 Activity 导航容器
+└── MatterApplication.kt  # 全局 Application 入口 (初始化 Koin 与系统配置)
 ```
 
 ### 技术栈亮点：
-1. **Jetpack Compose + Material 3**：纯声明式 UI，完整实现了微博九宫格图片布局、带富文本解析的微博卡片、转发微博内嵌卡片及操作栏。
-2. **Type-Safe Navigation**：使用 Kotlinx Serialization 驱动的现代路由声明，消除了字符串路径拼接与类型转换隐患。
-3. **Jetpack DataStore (Preferences)**：响应式 `Flow<UserSession>` 状态流，提供现代化的凭据持久化管理，支持退出清空、启动自动分发路由。
-4. **Ktor Client 3.0**：轻量异步非阻塞网络库，集成 OkHttp 引擎、ContentNegotiation JSON 自动反序列化及拦截器自动补全 Header/Cookie。
+1. **Koin 4.x 依赖注入**：
+   * 采用纯 Kotlin DSL 进行依赖声明，无注解处理器 (kapt) 开销，启动轻量疾速。
+   * 优雅管理网络单例 (`HttpClient`)、数据仓库 (`Repository`)、本地数据库 (`Room DAO`) 以及界面控制器 (`viewModel`)。
+   * 支持带参工厂模式 (`factory { parameters -> ... }`)，精细化控制多账号下会话隔离组件的生命周期。
+2. **Jetpack Compose + Material 3**：
+   * 纯声明式 UI，完整适配 Edge-to-Edge 沉浸式视觉规范。
+   * 自定义自适应多媒体布局（单图大图自适应比例、4 图 2x2 矩阵、多图九宫格排布）。
+   * 结合 `MaterialKolor` 实现动态色彩提取与丰富的主题定制。
+3. **Ktor Client 3.x + OkHttp**：
+   * 现代化轻量级异步非阻塞网络客户端，集成 `ContentNegotiation` 与 `Kotlinx Serialization` 极速反序列化。
+   * 统一网络拦截器处理请求鉴权、通用 Header 组装与异常重试。
+4. **Jetpack DataStore & Room 本地持久化**：
+   * **DataStore (Preferences)**：响应式 `Flow<UserSession>` 状态流管理用户凭据与个性化配置，保证多线程安全与数据一致性。
+   * **Room 数据库**：结构化存储用户浏览足迹与检索历史，配合 KSP 代码生成兼顾高效与稳定。
+5. **Type-Safe Navigation**：
+   * 摒弃传统字符串路由，依托类型安全数据类声明页面跳转参数，杜绝传参类型转换崩溃。
 
 ---
 
-## 三、核心功能演示与说明
+## 二、核心功能特性
 
-1. **初始新手引导页 (Onboarding)**
-   * **首次启动检测**：基于 Jetpack DataStore 监听 `isOnboardingCompletedFlow`，初次启动呈现沉浸式全屏引导画廊。
-   * **功能特性速览**：采用 Compose `HorizontalPager`，包含「纯净时间线」「关注分组管理」「多样登录接入」三幕特性介绍与圆点进度条。
-   * **跳过与完成**：支持右上角跳过或翻页至末尾点击「进入应用 · 开启体验」，记录完成状态并进入登录页。
+1. **初始新手引导 (Onboarding)**
+   * **首启检测**：基于 DataStore 响应式检测引导完成状态，为新用户呈现沉浸式全屏引导画廊。
+   * **特性速览**：采用 Compose `HorizontalPager`，流畅演示「纯净流」「分组管理」「便捷接入」等核心亮点。
+   * **跳过与体验**：支持灵活跳过或随进度自然过渡至登录体验。
 
-2. **多方式账号登录 (Login)**
-   * **手机短信验证码登录**：针对国内手机号（`+86`），提供 60 秒倒计时防重发机制，调用 `passport.weibo.cn/sso/sendcode` 与 `passport.weibo.cn/sso/login`，自动从响应头 `Set-Cookie` 提取并持久化 `SUB` 会话凭据。
-   * **网页快捷授权登录**：内嵌专属授权 WebView，监听重定向并自动从 `CookieManager` 提取 `SUB`、`SUBP` 会话凭据，免密无缝保存。
-   * **Cookie / SUB 导入**：支持开发者直接填入网页端复制的 Cookie 或 `SUB` 凭据，自动请求 `m.weibo.cn/api/config` 校验合法性并绑定账号。
-   * **访客免密体验模式**：支持一键进入访客模式直接浏览公共动态。
-2. **基础微博浏览 (Timeline)**
-   * 支持关注流与主时间线展示。
-   * 下拉刷新 (`PullToRefreshBox`) 与触底智能加载更多。
-   * 自适应微博图片网格（单图自适应大图、4图2x2矩阵、2/3/5-9图九宫格排布）。
-   * 转发微博折叠展示、转评赞计数格式化。
-3. **关注分组管理 (Groups)**
-   * 拉取用户云端关注分组（特别关注、互相关注、原创、自定义兴趣组等）。
-   * 点击分组无缝切换时间线上下文，动态加载分组微博。
+2. **多方式会话接入 (Authentication)**
+   * **短信验证登录**：提供标准倒计时防重机制，通过短信验证快速完成登录并安全持久化用户会话。
+   * **授权页快速登录**：内嵌专属授权容器，自动解析重定向结果无缝同步登录态。
+   * **凭证快速导入**：面向极客与开发者提供会话凭证快速导入能力，经安全校验后即刻绑定。
+   * **免密访客模式**：无需绑定账号，一键即可浏览公共精选动态。
+
+3. **动态时间线浏览 (Timeline)**
+   * **智能流加载**：下拉刷新 (`PullToRefreshBox`) 与触底智能游标分页。
+   * **丰富富文本与多媒体**：支持表情、超链接富文本渲染，自适应九宫格图片预览及内置视频播放支持。
+   * **微博互动展示**：折叠嵌套转发引用、转评赞计数智能格式化。
+   * **滚动位置与缓存**：退出后保留列表浏览进度，保障二次启动与进出详情页的平滑无感知体验。
+
+4. **分组与动态分类 (Groups)**
+   * 动态拉取云端关注分组列表（特别关注、原创、自定义兴趣组等）。
+   * 侧边栏/顶部切换标签快速无缝筛选对应分组微博，满足差异化阅读场景。
+
+5. **本地足迹与收藏 (History & Saved)**
+   * 自动记录浏览足迹，支持快捷检索历史动态。
+   * 本地收藏箱能力，随时回味心仪内容。
 
 ---
 
-## 四、编译与构建要求
-* **Gradle Wrapper**: 9.8.1（最新主流分支）
-* **Android Gradle Plugin (AGP)**: 9.4.1（内置 Kotlin 支持）
+## 三、编译与运行环境
+
+* **Gradle Wrapper**: 9.8.1
+* **Android Gradle Plugin (AGP)**: 9.4.1
 * **Kotlin**: 2.4.21
-* **Android Studio**: 最新正式版及预览版支持
+* **Koin**: 4.2.2
 * **JDK**: 21+
 * **Compile SDK**: 35
 * **Min SDK**: 26
+
+---
+
+## 四、免责声明 (Disclaimer)
+
+1. **学习与交流用途**：本项目仅作为 Android 现代技术栈（Jetpack Compose、Koin、Ktor 等）的工程化实践、架构探索与开源学习交流使用，不作任何商业营利用途。
+2. **协议与知识产权**：项目代码中不包含、不传播任何第三方专有商业资源或逆向破解成果。第三方平台的相关商标、版权及服务知识产权归其所属公司或权利人所有。
+3. **数据与合规**：使用本项目时，请使用者严格遵守相关国家法律法规以及相关网络服务协议与条款，切勿用于任何非法数据抓取、攻击测试或破坏网络安全秩序的行为。

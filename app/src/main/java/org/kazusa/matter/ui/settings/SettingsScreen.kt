@@ -15,27 +15,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -53,12 +40,14 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.isRuntimeShaderSupported
+import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import kotlinx.coroutines.launch
 import org.kazusa.matter.core.datastore.ImageQualityMode
 import org.kazusa.matter.core.datastore.MediaPreferenceState
 import org.kazusa.matter.core.datastore.MediaPreferences
 import org.kazusa.matter.ui.components.ImmersiveTopBar
+import org.kazusa.matter.ui.components.SettingGroup
+import org.kazusa.matter.ui.components.SettingItem
 import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.theme.AppThemeState
 import org.kazusa.matter.ui.theme.ThemePreferences
@@ -72,13 +61,14 @@ fun SettingsScreen(
     mediaPreferences: MediaPreferences,
     onNavigateToAppearance: () -> Unit,
     onBackClick: () -> Unit,
+    onNavigateToOpenSource: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val themeState by themePreferences.themeStateFlow.collectAsStateWithLifecycle(initialValue = AppThemeState())
     val mediaState by mediaPreferences.mediaStateFlow.collectAsStateWithLifecycle(initialValue = MediaPreferenceState())
     val coroutineScope = rememberCoroutineScope()
 
-    val isBlurSupported = remember { isRuntimeShaderSupported() }
+    val isBlurSupported = rememberBlurEffectsEnabled()
     val backdrop = if (isBlurSupported) rememberLayerBackdrop() else null
     val scrollState = rememberScrollState()
 
@@ -113,261 +103,74 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // 1. 外观个性化
-            Text(
-                text = "外观与个性化",
-                style = MaterialTheme.typography.titleSmallEmphasized,
-                color = MaterialTheme.colorScheme.primary
-            )
-
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                ListItem(
-                    modifier = Modifier.clickable { onNavigateToAppearance() },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    leadingContent = {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Palette,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    },
-                    headlineContent = {
-                        Text(
-                            text = "主题与调色板",
-                            style = MaterialTheme.typography.bodyLargeEmphasized
-                        )
-                    },
-                    supportingContent = {
-                        Text(
-                            text = if (themeState.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                                "系统壁纸 Monet 动态色彩"
-                            else
-                                "种子色 ${themeState.seedColor.toHexString()} · ${themeState.paletteStyle.displayName()} 风格",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
-                    trailingContent = {
-                        Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+            SettingGroup(title = "外观与个性化") {
+                SettingItem(
+                    title = "主题与调色板",
+                    description = if (themeState.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                        "系统壁纸 Monet 动态色彩"
+                    else
+                        "种子色 ${themeState.seedColor.toHexString()} · ${themeState.paletteStyle.displayName()} 风格",
+                    onClick = onNavigateToAppearance
                 )
             }
 
             // 2. 图片与流量
-            Text(
-                text = "图片与流量",
-                style = MaterialTheme.typography.titleSmallEmphasized,
-                color = MaterialTheme.colorScheme.primary
-            )
-
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                var qualityMenuExpanded by remember { mutableStateOf(false) }
-
-                ListItem(
-                    modifier = Modifier.clickable { qualityMenuExpanded = true },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    leadingContent = {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    },
-                    headlineContent = {
-                        Text(
-                            text = "大图清晰度",
-                            style = MaterialTheme.typography.bodyLargeEmphasized
-                        )
-                    },
-                    supportingContent = {
-                        Text(
-                            text = mediaState.imageQualityMode.description(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
-                    trailingContent = {
-                        Box {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { qualityMenuExpanded = true }
-                                    .padding(horizontal = 8.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = mediaState.imageQualityMode.label(),
-                                    style = MaterialTheme.typography.labelLargeEmphasized,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Icon(
-                                    imageVector = Icons.Default.KeyboardArrowDown,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = qualityMenuExpanded,
-                                onDismissRequest = { qualityMenuExpanded = false }
-                            ) {
-                                ImageQualityMode.entries.forEach { mode ->
-                                    val isSelected = mediaState.imageQualityMode == mode
-                                    DropdownMenuItem(
-                                        text = {
-                                            Column {
-                                                Text(
-                                                    text = mode.label(),
-                                                    style = if (isSelected) MaterialTheme.typography.bodyMediumEmphasized else MaterialTheme.typography.bodyMedium
-                                                )
-                                                Text(
-                                                    text = mode.description(),
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        },
-                                        trailingIcon = if (isSelected) {
-                                            {
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                            }
-                                        } else null,
-                                        onClick = {
-                                            coroutineScope.launch {
-                                                mediaPreferences.setImageQualityMode(mode)
-                                            }
-                                            qualityMenuExpanded = false
-                                        }
-                                    )
+            SettingGroup(title = "图片与流量") {
+                SettingItem(
+                    title = "大图清晰度",
+                    description = mediaState.imageQualityMode.label(),
+                    dropdownMenu = { onDismiss ->
+                        ImageQualityMode.entries.forEach { mode ->
+                            val isSelected = mediaState.imageQualityMode == mode
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            text = mode.label(),
+                                            style = if (isSelected) MaterialTheme.typography.bodyMediumEmphasized else MaterialTheme.typography.bodyMedium
+                                        )
+                                        Text(
+                                            text = mode.description(),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                trailingIcon = if (isSelected) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                } else null,
+                                onClick = {
+                                    coroutineScope.launch {
+                                        mediaPreferences.setImageQualityMode(mode)
+                                    }
+                                    onDismiss()
                                 }
-                            }
+                            )
                         }
                     }
                 )
             }
 
             // 3. 关于与系统信息
-            Text(
-                text = "关于应用",
-                style = MaterialTheme.typography.titleSmallEmphasized,
-                color = MaterialTheme.colorScheme.primary
-            )
-
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                ListItem(
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    leadingContent = {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    },
-                    headlineContent = {
-                        Text(
-                            text = "应用版本",
-                            style = MaterialTheme.typography.bodyLargeEmphasized
-                        )
-                    },
-                    trailingContent = {
-                        Text(
-                            text = "v1.0.0 (Compose M3)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+            SettingGroup(title = "关于应用") {
+                SettingItem(
+                    title = "开源组件",
+                    description = "组件版本、项目链接与开源许可证",
+                    onClick = onNavigateToOpenSource
                 )
-
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(horizontal = 16.dp)
+                SettingItem(
+                    title = "应用版本",
+                    description = "v1.0.0 (Compose M3)"
                 )
-
-                ListItem(
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    leadingContent = {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PhoneAndroid,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    },
-                    headlineContent = {
-                        Text(
-                            text = "架构与依赖",
-                            style = MaterialTheme.typography.bodyLargeEmphasized
-                        )
-                    },
-                    trailingContent = {
-                        Text(
-                            text = "Ktor + DataStore + Kolor + Media3",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                SettingItem(
+                    title = "架构与依赖",
+                    description = "Ktor + DataStore + Kolor + Media3"
                 )
             }
         }

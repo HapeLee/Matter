@@ -1,4 +1,4 @@
-﻿package org.kazusa.matter.ui.media.morph
+package org.kazusa.matter.ui.media.morph
 
 import android.util.LruCache
 import androidx.compose.animation.core.spring

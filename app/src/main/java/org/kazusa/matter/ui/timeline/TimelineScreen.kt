@@ -22,7 +22,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import android.widget.Toast
+import org.kazusa.matter.ui.components.LocalSnackbarHostState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -116,6 +117,7 @@ fun TimelineScreen(
     onTopicClick: (String) -> Unit = {},
     onSearchClick: () -> Unit = {},
     onLogout: () -> Unit = {},
+    onNavigateToGroups: () -> Unit = {},
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
     backdrop: LayerBackdrop? = null,
@@ -154,7 +156,7 @@ fun TimelineScreen(
                         val lastReadIdx = uiState.lastReadPostId?.let { id ->
                             uiState.posts.indexOfFirst { (it.idStr ?: it.id?.toString()) == id }
                         } ?: -1
-                        val postIdx = if (lastReadIdx in 0..firstIndex) firstIndex - 1 else firstIndex
+                        val postIdx = if (lastReadIdx > 0 && firstIndex >= lastReadIdx) firstIndex - 1 else firstIndex
                         uiState.posts.getOrNull(postIdx)?.let { it.idStr ?: it.id?.toString() }
                     }
                 }
@@ -205,7 +207,10 @@ fun TimelineScreen(
     // 首次载入或切换分组时恢复持久化保存的上次浏览记忆位置（单次消费，决不重复执行）
     val restoreIndex = uiState.pendingRestoreIndex
     if (restoreIndex != null && posts.isNotEmpty()) {
-        val hasDivider = posts.any { (it.idStr ?: it.id?.toString()) == uiState.lastReadPostId }
+        val hasDivider = uiState.lastReadPostId?.let { id ->
+            val idx = posts.indexOfFirst { (it.idStr ?: it.id?.toString()) == id }
+            idx > 0
+        } ?: false
         val targetIndex = restoreIndex.coerceIn(0, posts.lastIndex + if (hasDivider) 1 else 0)
         SideEffect {
             // Apply the viewport in the next measure, before the list draws its first frame.
@@ -281,11 +286,13 @@ fun TimelineScreen(
             onSelectGroup = { gid, groupName ->
                 viewModel.setGroup(gid, groupName)
             },
-            onDismissRequest = { showGroupSheet = false }
+            onDismissRequest = { showGroupSheet = false },
+            onNavigateToManagement = onNavigateToGroups
         )
     }
 
-    Scaffold(
+    CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
+        Scaffold(
         snackbarHost = {
             SnackbarHost(
                 hostState = snackbarHostState,
@@ -416,13 +423,18 @@ fun TimelineScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             val clipboardManager = LocalClipboardManager.current
-                            val context = LocalContext.current
 
                             OutlinedButton(
                                 onClick = {
                                     uiState.errorMessage?.let { msg ->
                                         clipboardManager.setText(AnnotatedString(msg))
-                                        Toast.makeText(context, "错误信息已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                                        coroutineScope.launch {
+                                            snackbarHostState.currentSnackbarData?.dismiss()
+                                            snackbarHostState.showSnackbar(
+                                                message = "错误信息已复制到剪贴板",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                        }
                                     }
                                 }
                             ) {
@@ -493,36 +505,18 @@ fun TimelineScreen(
 
                             item(key = "last_read_divider", contentType = "divider") {
                                 LastReadDividerPrompt(
-                                    onClickRefresh = { viewModel.loadTimeline(isRefresh = true) },
+                                    onClickRefresh = {
+                                        coroutineScope.launch {
+                                            listState.animateScrollToItem(0, 0)
+                                        }
+                                        viewModel.loadTimeline(isRefresh = true)
+                                    },
                                     isRefreshing = uiState.isRefreshing
                                 )
                             }
 
                             items(
                                 items = posts.subList(lastReadIndex, posts.size),
-                                key = { it.listKey },
-                                contentType = { "post" }
-                            ) { post ->
-                                WeiboPostCard(
-                                    post = post,
-                                    onUserClick = onUserClick,
-                                    onPostClick = handlePostClick,
-                                    onCommentClick = handleCommentClick,
-                                    onImageClick = onImageClick,
-                                    onVideoClick = onVideoClick,
-                                    onMentionClick = onMentionClick,
-                                    onTopicClick = onTopicClick
-                                )
-                            }
-                        } else if (lastReadIndex == 0) {
-                            item(key = "last_read_divider", contentType = "divider") {
-                                LastReadDividerPrompt(
-                                    onClickRefresh = { viewModel.loadTimeline(isRefresh = true) },
-                                    isRefreshing = uiState.isRefreshing
-                                )
-                            }
-                            items(
-                                items = posts,
                                 key = { it.listKey },
                                 contentType = { "post" }
                             ) { post ->
@@ -593,6 +587,7 @@ fun TimelineScreen(
 
         }
     }
+}
 }
 }
 

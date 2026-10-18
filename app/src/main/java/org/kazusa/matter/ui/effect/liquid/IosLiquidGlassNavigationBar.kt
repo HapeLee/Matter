@@ -81,6 +81,7 @@ import kotlin.math.abs
 import kotlin.math.sign
 import kotlin.math.roundToInt
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
@@ -107,7 +108,7 @@ fun IosLiquidGlassNavigationBar(
     modifier: Modifier = Modifier,
     badge: (Int) -> (@Composable () -> Unit)? = { null },
 ) {
-    val isBlurActive = backdrop != null
+    val isBlurActive = rememberBlurEffectsEnabled() && backdrop != null
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val pillShape = remember { CircleShape }
     val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
@@ -210,7 +211,7 @@ fun IosLiquidGlassNavigationBar(
         dampedDrag.animateToValue(index.toFloat())
     }
 
-    val interactiveHighlight = remember(animationScope, isLtr, dampedDrag) {
+    val interactiveHighlight = if (isBlurActive) remember(animationScope, isLtr, dampedDrag) {
         InteractiveHighlight(
             animationScope = animationScope,
             position = { layerSize, _ ->
@@ -224,7 +225,7 @@ fun IosLiquidGlassNavigationBar(
                 )
             },
         )
-    }
+    } else null
 
     val baseHighlight = remember {
         Highlight(
@@ -354,7 +355,7 @@ fun IosLiquidGlassNavigationBar(
                             },
                         )
                         .then(
-                            if (isBlurActive) {
+                            if (interactiveHighlight != null) {
                                 interactiveHighlight.modifier.then(interactiveHighlight.gestureModifier)
                             } else {
                                 Modifier

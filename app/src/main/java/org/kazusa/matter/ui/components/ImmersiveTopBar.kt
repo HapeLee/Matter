@@ -88,6 +88,7 @@ fun ImmersiveTopBar(
     modifier: Modifier = Modifier,
     listState: LazyListState? = null,
     scrollState: ScrollState? = null,
+    scrollOffsetProvider: (() -> Float)? = null,
     navigationIcon: @Composable (TopBarScrollState) -> Unit = {},
     actions: @Composable RowScope.(TopBarScrollState) -> Unit = {},
     scrollDistance: Dp = 96.dp,
@@ -98,14 +99,15 @@ fun ImmersiveTopBar(
     animationLabel: String = "ImmersiveTopBarScrim"
 ) {
     val scrollDistancePx = with(LocalDensity.current) { scrollDistance.toPx() }
-    val hasScrollSource = listState != null || scrollState != null
+    val hasScrollSource = listState != null || scrollState != null || scrollOffsetProvider != null
 
     // 目标可见度：位于顶部时为 0，滚过 scrollDistance 后为 1；
     // 无滚动状态时恒为 1（实心常显）。用 derivedStateOf 收窄依赖，
     // 滚动过程中只有本顶栏作用域参与计算。
-    val targetAlphaState = remember(listState, scrollState, scrollDistancePx) {
+    val targetAlphaState = remember(listState, scrollState, scrollOffsetProvider, scrollDistancePx) {
         derivedStateOf {
             val scrolledPx = when {
+                scrollOffsetProvider != null -> scrollOffsetProvider()
                 listState != null ->
                     if (listState.firstVisibleItemIndex > 0) Float.MAX_VALUE
                     else listState.firstVisibleItemScrollOffset.toFloat()

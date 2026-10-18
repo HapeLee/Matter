@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
-import com.kyant.backdrop.isRuntimeShaderSupported
+import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -52,6 +52,7 @@ import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.highlight.HighlightStyle
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.backdrop.shadow.InnerShadow
+import org.kazusa.matter.ui.effect.LocalBlurEffectsEnabled
 
 internal val buttonSpecularLight: Highlight = Highlight(
     width = 0.6.dp,
@@ -176,7 +177,7 @@ fun LiquidGlassIconButton(
     content: @Composable () -> Unit,
 ) {
     // 设备能力探测结果恒定，记忆化以避免每次重组重复探测（内部可能编译 RuntimeShader）。
-    val isBlurSupported = remember { isRuntimeShaderSupported() }
+    val isBlurSupported = rememberBlurEffectsEnabled()
     val blurActive = isBlurSupported && backdrop != null
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val surfaceContainerHigh = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -276,7 +277,9 @@ fun LiquidGlassIconButton(
             Surface(
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surface.copy(
-                    alpha = ((if (isDark) 0.35f else 0.40f) + extraAlpha).coerceAtMost(0.75f),
+                    alpha = if (LocalBlurEffectsEnabled.current) {
+                        ((if (isDark) 0.35f else 0.40f) + extraAlpha).coerceAtMost(0.75f)
+                    } else 1f,
                 ),
                 modifier = Modifier
                     .matchParentSize()
@@ -301,11 +304,13 @@ fun LiquidGlassCapsule(
     content: @Composable RowScope.() -> Unit,
 ) {
     // 设备能力探测结果恒定，记忆化以避免每次重组重复探测。
-    val isBlurSupported = remember { isRuntimeShaderSupported() }
+    val isBlurSupported = rememberBlurEffectsEnabled()
     val blurActive = isBlurSupported && backdrop != null
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     // 更轻透的基础表面
-    val surfaceColor = if (isDark) {
+    val surfaceColor = if (!LocalBlurEffectsEnabled.current) {
+        MaterialTheme.colorScheme.surfaceContainer
+    } else if (isDark) {
         MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.20f)
     } else {
         Color.White.copy(alpha = 0.22f)

@@ -6,11 +6,15 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.viewmodel.compose.viewModel
+import org.koin.compose.koinInject
+import org.koin.compose.getKoin
+import org.koin.compose.viewmodel.koinViewModel
+import org.koin.core.parameter.parametersOf
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.runtime.CompositionLocalProvider
@@ -20,7 +24,18 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.navigation3.ui.NavDisplay
-import org.kazusa.matter.core.di.AppContainer
+import org.kazusa.matter.core.datastore.AuthPreferences
+import org.kazusa.matter.core.datastore.MediaPreferences
+import org.kazusa.matter.core.network.WeiboApiService
+import org.kazusa.matter.data.repository.AuthRepository
+import org.kazusa.matter.data.repository.BrowsingHistoryRepository
+import org.kazusa.matter.data.repository.SearchHistoryRepository
+import org.kazusa.matter.ui.theme.ThemePreferences
+import org.kazusa.matter.data.repository.FavoritesRepository
+import org.kazusa.matter.ui.components.LocalFavoritesRepository
+import org.kazusa.matter.ui.components.LocalFavoriteActionScope
+import org.kazusa.matter.ui.saved.SavedPostsScreen
+import org.kazusa.matter.ui.saved.SavedPostsViewModel
 import org.kazusa.matter.data.local.BrowsingCategory
 import org.kazusa.matter.ui.detail.PostDetailScreen
 import org.kazusa.matter.ui.history.BrowsingHistoryScreen
@@ -39,16 +54,24 @@ import org.kazusa.matter.ui.onboarding.OnboardingScreen
 import org.kazusa.matter.ui.profile.UserProfileScreen
 import org.kazusa.matter.ui.search.SearchResultScreen
 import org.kazusa.matter.ui.settings.SettingsScreen
+import org.kazusa.matter.ui.settings.OpenSourceLibrariesScreen
 import org.kazusa.matter.ui.theme.AppearanceScreen
+import org.kazusa.matter.ui.timeline.TimelineViewModel
 import org.kazusa.matter.ui.topic.TopicStatusScreen
 import kotlinx.coroutines.launch
 
 @Composable
-fun MatterNavGraph(
-    container: AppContainer
-) {
-    val session by container.authPreferences.sessionFlow.collectAsStateWithLifecycle(initialValue = null)
-    val isOnboardingCompleted by container.authPreferences.isOnboardingCompletedFlow.collectAsStateWithLifecycle(initialValue = null)
+fun MatterNavGraph() {
+    val authPreferences = koinInject<AuthPreferences>()
+    val authRepository = koinInject<AuthRepository>()
+    val themePreferences = koinInject<ThemePreferences>()
+    val mediaPreferences = koinInject<MediaPreferences>()
+    val apiService = koinInject<WeiboApiService>()
+    val historyRepository = koinInject<BrowsingHistoryRepository>()
+    val searchHistoryRepository = koinInject<SearchHistoryRepository>()
+    val koin = getKoin()
+    val session by authPreferences.sessionFlow.collectAsStateWithLifecycle(initialValue = null)
+    val isOnboardingCompleted by authPreferences.isOnboardingCompletedFlow.collectAsStateWithLifecycle(initialValue = null)
     val coroutineScope = rememberCoroutineScope()
 
     // 状态加载中保护，防止 DataStore 首次空流导致欢迎页闪现
@@ -78,10 +101,23 @@ fun MatterNavGraph(
         backStack.clear()
         backStack.add(ScreenEntry(screen))
     }
+    val navigateToPostDetail: (org.kazusa.matter.data.model.WeiboStatusDto?, String, Boolean) -> Unit = { post, idStr, scrollToComments ->
+        if (post != null) {
+            org.kazusa.matter.ui.detail.PostDetailCache.put(post)
+        }
+        if (idStr.isNotBlank()) {
+            navigate(Screen.PostDetail(id = idStr, scrollToComments = scrollToComments))
+        }
+    }
     val morphState = rememberImageMorphState()
+    val favoritesRepository = remember(session?.uid, session?.cookieHeader, session?.isLoggedIn, koin) {
+        koin.get<FavoritesRepository> { parametersOf(requireNotNull(session)) }
+    }
 
     CompositionLocalProvider(
-        LocalImageMorphState provides morphState
+        LocalImageMorphState provides morphState,
+        LocalFavoritesRepository provides favoritesRepository,
+        LocalFavoriteActionScope provides coroutineScope
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             @OptIn(ExperimentalSharedTransitionApi::class)
@@ -107,10 +143,12 @@ fun MatterNavGraph(
                                 metadata = {
                                     when (it.screen) {
                                         is Screen.ImageViewer, is Screen.VideoPlayer -> NavTransitions.mediaMetadata
+                                        is Screen.PostDetail -> NavTransitions.detailMetadata
                                         else -> emptyMap()
                                     }
                                 }
                             ) { destination ->
+
                                 CompositionLocalProvider(
                                     LocalNavAnimatedVisibilityScope provides LocalNavAnimatedContentScope.current
                                 ) {
@@ -119,7 +157,7 @@ fun MatterNavGraph(
                                             OnboardingScreen(
                                                 onComplete = {
                                                     coroutineScope.launch {
-                                                        container.authRepository.completeOnboarding()
+                                                        authRepository.completeOnboarding()
                                                         replaceRoot(Screen.Login)
                                                     }
                                                 }
@@ -127,9 +165,7 @@ fun MatterNavGraph(
                                         }
 
                                         Screen.Login -> {
-                                            val loginViewModel: LoginViewModel = viewModel(
-                                                factory = LoginViewModel.provideFactory(container.authRepository)
-                                            )
+                                            val loginViewModel: LoginViewModel = koinViewModel()
                                             LoginScreen(
                                                 viewModel = loginViewModel,
                                                 onLoginSuccess = {
@@ -141,7 +177,6 @@ fun MatterNavGraph(
                                         Screen.MainTabs -> {
                                             run {
                                                 MainTabsScreen(
-                                                    container = container,
                                                     onNavigateToGroups = {
                                                         navigate(Screen.GroupList)
                                                     },
@@ -154,6 +189,9 @@ fun MatterNavGraph(
                                                     onNavigateToHistory = {
                                                         navigate(Screen.BrowsingHistory)
                                                     },
+                                                    onNavigateToSavedPosts = {
+                                                        navigate(Screen.SavedPosts)
+                                                    },
                                                     onUserClick = { uid ->
                                                         if (uid != null) {
                                                             navigate(Screen.UserProfile(uid = uid.toString()))
@@ -161,15 +199,11 @@ fun MatterNavGraph(
                                                     },
                                                     onPostClick = { post ->
                                                         val idStr = post.idStr ?: post.mid ?: post.id?.toString() ?: ""
-                                                        if (idStr.isNotBlank()) {
-                                                            navigate(Screen.PostDetail(id = idStr, scrollToComments = false))
-                                                        }
+                                                        navigateToPostDetail(post, idStr, false)
                                                     },
                                                     onCommentClick = { post ->
                                                         val idStr = post.idStr ?: post.mid ?: post.id?.toString() ?: ""
-                                                        if (idStr.isNotBlank()) {
-                                                            navigate(Screen.PostDetail(id = idStr, scrollToComments = true))
-                                                        }
+                                                        navigateToPostDetail(post, idStr, true)
                                                     },
                                                     onImageClick = { urls, index ->
                                                         navigate(Screen.ImageViewer(initialIndex = index, urls = urls))
@@ -204,8 +238,8 @@ fun MatterNavGraph(
                                             UserProfileScreen(
                                                 uid = args.uid,
                                                 initialScreenName = args.screenName,
-                                                apiService = container.apiService,
-                                                historyRepository = container.browsingHistoryRepository,
+                                                apiService = apiService,
+                                                historyRepository = historyRepository,
                                                 onBackClick = {
                                                     navigateBack()
                                                 },
@@ -216,9 +250,7 @@ fun MatterNavGraph(
                                                 },
                                                 onPostClick = { post ->
                                                     val idStr = post.idStr ?: post.mid ?: post.id?.toString() ?: ""
-                                                    if (idStr.isNotBlank()) {
-                                                        navigate(Screen.PostDetail(id = idStr))
-                                                    }
+                                                    navigateToPostDetail(post, idStr, false)
                                                 },
                                                 onImageClick = { urls, index ->
                                                     navigate(Screen.ImageViewer(initialIndex = index, urls = urls))
@@ -239,8 +271,8 @@ fun MatterNavGraph(
                                             SearchResultScreen(
                                                 query = args.query,
                                                 title = args.title,
-                                                apiService = container.apiService,
-                                                searchHistoryRepository = container.searchHistoryRepository,
+                                                apiService = apiService,
+                                                searchHistoryRepository = searchHistoryRepository,
                                                 onBackClick = {
                                                     navigateBack()
                                                 },
@@ -251,9 +283,7 @@ fun MatterNavGraph(
                                                 },
                                                 onPostClick = { post ->
                                                     val idStr = post.idStr ?: post.mid ?: post.id?.toString() ?: ""
-                                                    if (idStr.isNotBlank()) {
-                                                        navigate(Screen.PostDetail(id = idStr))
-                                                    }
+                                                    navigateToPostDetail(post, idStr, false)
                                                 },
                                                 onImageClick = { urls, index ->
                                                     navigate(Screen.ImageViewer(initialIndex = index, urls = urls))
@@ -276,8 +306,8 @@ fun MatterNavGraph(
                                                 keyword = args.keyword,
                                                 topicId = args.topicId,
                                                 title = args.title.ifBlank { args.keyword },
-                                                apiService = container.apiService,
-                                                searchHistoryRepository = container.searchHistoryRepository,
+                                                apiService = apiService,
+                                                searchHistoryRepository = searchHistoryRepository,
                                                 onBackClick = {
                                                     navigateBack()
                                                 },
@@ -288,9 +318,7 @@ fun MatterNavGraph(
                                                 },
                                                 onPostClick = { post ->
                                                     val idStr = post.idStr ?: post.mid ?: post.id?.toString() ?: ""
-                                                    if (idStr.isNotBlank()) {
-                                                        navigate(Screen.PostDetail(id = idStr))
-                                                    }
+                                                    navigateToPostDetail(post, idStr, false)
                                                 },
                                                 onImageClick = { urls, index ->
                                                     navigate(Screen.ImageViewer(initialIndex = index, urls = urls))
@@ -305,12 +333,12 @@ fun MatterNavGraph(
                                         }
 
                                         Screen.GroupList -> {
-                                            val groupViewModel: GroupViewModel = viewModel(
-                                                factory = GroupViewModel.provideFactory(container.groupRepository)
-                                            )
+                                            val groupViewModel: GroupViewModel = koinViewModel()
+                                            val timelineViewModel: TimelineViewModel = koinViewModel()
                                             GroupListScreen(
                                                 viewModel = groupViewModel,
                                                 onSelectGroup = { gid, groupName ->
+                                                    timelineViewModel.setGroup(gid, groupName)
                                                     navigateBack()
                                                 },
                                                 onBackClick = {
@@ -320,11 +348,7 @@ fun MatterNavGraph(
                                         }
 
                                         Screen.BrowsingHistory -> {
-                                            val historyViewModel: BrowsingHistoryViewModel = viewModel(
-                                                factory = BrowsingHistoryViewModel.provideFactory(
-                                                    container.browsingHistoryRepository
-                                                )
-                                            )
+                                            val historyViewModel: BrowsingHistoryViewModel = koinViewModel()
                                             BrowsingHistoryScreen(
                                                 viewModel = historyViewModel,
                                                 onBackClick = {
@@ -348,10 +372,42 @@ fun MatterNavGraph(
                                             )
                                         }
 
+                                        Screen.SavedPosts -> {
+                                            val savedPostsViewModel: SavedPostsViewModel = koinViewModel {
+                                                parametersOf(favoritesRepository)
+                                            }
+                                            SavedPostsScreen(
+                                                viewModel = savedPostsViewModel,
+                                                onBackClick = navigateBack,
+                                                onPostClick = { post ->
+                                                    val id = post.idStr ?: post.mid ?: post.id?.toString().orEmpty()
+                                                    navigateToPostDetail(post, id, false)
+                                                },
+                                                onCommentClick = { post ->
+                                                    val id = post.idStr ?: post.mid ?: post.id?.toString().orEmpty()
+                                                    navigateToPostDetail(post, id, true)
+                                                },
+                                                onUserClick = { uid ->
+                                                    if (uid != null) navigate(Screen.UserProfile(uid.toString()))
+                                                },
+                                                onImageClick = { urls, index ->
+                                                    navigate(Screen.ImageViewer(initialIndex = index, urls = urls))
+                                                },
+                                                onVideoClick = { url, title ->
+                                                    navigate(Screen.VideoPlayer(url, title))
+                                                },
+                                                onMentionClick = { name -> navigate(Screen.UserProfile(name, name)) },
+                                                onTopicClick = { topic -> navigate(Screen.TopicStatus(topic, title = "#$topic#")) }
+                                            )
+                                        }
+
                                         Screen.Settings -> {
                                             SettingsScreen(
-                                                themePreferences = container.themePreferences,
-                                                mediaPreferences = container.mediaPreferences,
+                                                themePreferences = themePreferences,
+                                                mediaPreferences = mediaPreferences,
+                                                onNavigateToOpenSource = {
+                                                    navigate(Screen.OpenSourceLibraries)
+                                                },
                                                 onNavigateToAppearance = {
                                                     navigate(Screen.Appearance)
                                                 },
@@ -361,9 +417,13 @@ fun MatterNavGraph(
                                             )
                                         }
 
+                                        Screen.OpenSourceLibraries -> {
+                                            OpenSourceLibrariesScreen(onBackClick = navigateBack)
+                                        }
+
                                         Screen.Appearance -> {
                                             AppearanceScreen(
-                                                themePreferences = container.themePreferences,
+                                                themePreferences = themePreferences,
                                                 onBackClick = {
                                                     navigateBack()
                                                 }
@@ -375,8 +435,8 @@ fun MatterNavGraph(
                                                 PostDetailScreen(
                                                     postId = args.id,
                                                     scrollToComments = args.scrollToComments,
-                                                    apiService = container.apiService,
-                                                    historyRepository = container.browsingHistoryRepository,
+                                                    apiService = apiService,
+                                                    historyRepository = historyRepository,
                                                     onBackClick = {
                                                         navigateBack()
                                                     },
@@ -396,17 +456,22 @@ fun MatterNavGraph(
                                                     },
                                                     onTopicClick = { topicName ->
                                                         navigate(Screen.TopicStatus(keyword = topicName, title = "#$topicName#"))
+                                                    },
+                                                    onPostClick = { clickedPost ->
+                                                        val idStr = clickedPost.idStr ?: clickedPost.mid ?: clickedPost.id?.toString() ?: ""
+                                                        navigateToPostDetail(clickedPost, idStr, false)
                                                     }
                                                 )
                                             }
                                         }
+
 
                                         is Screen.ImageViewer -> {
                                             run {
                                                 ImageViewerScreen(
                                                     initialIndex = args.initialIndex,
                                                     urls = args.urls,
-                                                    mediaPreferences = container.mediaPreferences,
+                                                    mediaPreferences = mediaPreferences,
                                                     onBackClick = {
                                                         navigateBack()
                                                     }
@@ -434,7 +499,7 @@ fun MatterNavGraph(
 
             ImageMorphOverlay(
                 morphState = morphState,
-                mediaPreferences = container.mediaPreferences
+                mediaPreferences = mediaPreferences
             )
         }
     }

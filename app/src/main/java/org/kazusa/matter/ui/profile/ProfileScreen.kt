@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -70,6 +71,7 @@ fun ProfileScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToAppearance: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
+    onNavigateToSavedPosts: () -> Unit = {},
     onLogout: () -> Unit,
     backdrop: LayerBackdrop? = null,
     bottomBarPadding: Dp = 0.dp,
@@ -216,6 +218,12 @@ fun ProfileScreen(
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
                     ProfileMenuRow(
+                        icon = Icons.Default.Bookmark,
+                        title = "赞过与收藏",
+                        subtitle = "查看我赞过和收藏过的微博",
+                        onClick = onNavigateToSavedPosts
+                    )
+                    ProfileMenuRow(
                         icon = Icons.Default.History,
                         title = "浏览记录",
                         subtitle = "本机保存的微博与博主浏览历史",
@@ -230,7 +238,7 @@ fun ProfileScreen(
                     ProfileMenuRow(
                         icon = Icons.Default.FilterList,
                         title = "关注分组管理",
-                        subtitle = "切换与浏览不同分组微博动态",
+                        subtitle = "配置动态顶部展示分组、排序与管理",
                         onClick = onNavigateToGroups
                     )
                     ProfileMenuRow(

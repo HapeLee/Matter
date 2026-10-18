@@ -10,11 +10,13 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.materialkolor.DynamicMaterialTheme
 import com.materialkolor.PaletteStyle
+import org.kazusa.matter.ui.effect.LocalBlurEffectsEnabled
 
 private val FallbackDarkColorScheme = darkColorScheme(
     primary = WeiboOrange,
@@ -78,7 +80,11 @@ fun MatterTheme(
         if (activeColorScheme != null) {
             MaterialTheme(
                 colorScheme = activeColorScheme,
-                content = content
+                content = {
+                    CompositionLocalProvider(LocalBlurEffectsEnabled provides appThemeState.blurEffectsEnabled) {
+                        content()
+                    }
+                }
             )
         } else {
             DynamicMaterialTheme(
@@ -87,7 +93,11 @@ fun MatterTheme(
                 isAmoled = isDark && appThemeState.isAmoled,
                 style = appThemeState.paletteStyle,
                 animate = true,
-                content = content
+                content = {
+                    CompositionLocalProvider(LocalBlurEffectsEnabled provides appThemeState.blurEffectsEnabled) {
+                        content()
+                    }
+                }
             )
         }
     }

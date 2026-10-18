@@ -39,7 +39,7 @@ import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.isRuntimeShaderSupported
+import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 
 /**
  * 分栏数量不超过该值时分段等宽铺满（原设计外观）；
@@ -78,7 +78,7 @@ fun LiquidGlassTabRow(
     if (tabs.isEmpty()) return
 
     // 设备能力探测结果恒定，记忆化以避免重复编译 RuntimeShader
-    val isRuntimeShaderOk = remember { isRuntimeShaderSupported() }
+    val isRuntimeShaderOk = rememberBlurEffectsEnabled()
     val isBlurActive = isRuntimeShaderOk && backdrop != null
 
     val pillShape = remember { CircleShape }
