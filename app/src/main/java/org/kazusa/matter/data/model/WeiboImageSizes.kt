@@ -17,8 +17,17 @@ enum class WeiboImageSize(val segment: String) {
     /** 查看器中等档（约 720px，长图 / 超大图更省内存） */
     MEDIUM("wap720"),
 
-    /** 原图档 */
-    ORIGINAL("large")
+    /** 标准大图档（约 1080p~2048p，兼容性 100%） */
+    LARGE("large"),
+
+    /** 超清 2000px 限宽档 */
+    MW2000("mw2000"),
+
+    /** 微相册 / 早期网页原图档 */
+    WORIGINAL("woriginal"),
+
+    /** 纯原图档（未经二次压缩的原始上传文件） */
+    ORIGINAL("original")
 }
 
 private const val WEIBO_IMAGE_HOST_SUFFIX = "sinaimg.cn"

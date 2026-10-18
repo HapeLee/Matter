@@ -59,6 +59,7 @@ import org.kazusa.matter.ui.effect.liquid.animation.inspectDragGestures
 import kotlinx.coroutines.launch
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.drawBackdrop
+import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
@@ -100,7 +101,7 @@ fun LegadoLiquidFloatingBottomBar(
      */
     widthScale: Float = 1f,
 ) {
-    val isBlurEnabled = backdrop != null
+    val isBlurEnabled = rememberBlurEffectsEnabled() && backdrop != null
     val isInLightTheme = MaterialTheme.colorScheme.surface.luminance() >= 0.5f
     val isDark = !isInLightTheme
     val buttonHighlight = if (isDark) buttonSpecularDark else buttonSpecularLight

@@ -1,4 +1,4 @@
-﻿package org.kazusa.matter.ui.media.morph
+package org.kazusa.matter.ui.media.morph
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
@@ -55,6 +55,14 @@ class ImageMorphState(
 
     var isCollapsing by mutableStateOf(false)
         private set
+
+    var collapseScale by mutableFloatStateOf(1f)
+        private set
+
+    var collapseOffset by mutableStateOf(Offset.Zero)
+        private set
+
+    var currentDisplayUrl by mutableStateOf<String?>(null)
 
     var urls by mutableStateOf<List<String>>(emptyList())
         private set
@@ -122,7 +130,7 @@ class ImageMorphState(
 
     fun onPageChanged(newPage: Int) {
         currentIndex = newPage
-        val cachedRatio = slotRatioMap[newPage] ?: urls.getOrNull(newPage)?.let { ImageRatioCache.get(it) }
+        val cachedRatio = urls.getOrNull(newPage)?.let { ImageRatioCache.get(it) } ?: slotRatioMap[newPage]
         if (cachedRatio != null) {
             imageRatio = cachedRatio
             slotRatioMap[newPage] = cachedRatio
@@ -157,6 +165,9 @@ class ImageMorphState(
         this.imageRatio = imageRatio
         this.dragOffset = Offset.Zero
         this.dragVeilAlpha = 1f
+        this.collapseScale = 1f
+        this.collapseOffset = Offset.Zero
+        this.currentDisplayUrl = null
 
         slotBoundsMap.clear()
         slotCornerRadiusMap.clear()
@@ -204,16 +215,30 @@ class ImageMorphState(
         }
     }
 
+    fun updateCurrentZoom(scale: Float, offset: Offset, displayUrl: String? = null) {
+        this.collapseScale = scale
+        this.collapseOffset = offset
+        if (displayUrl != null) {
+            this.currentDisplayUrl = displayUrl
+        }
+    }
+
     /**
      * 收起大图形变动画：平滑收拢回信息流卡片原始位置
-     * 支持 dragOffset 拖拽释放偏移量与初始手势速度
+     * 支持在放大状态下直接飞回收拢（保留 scale 与 offset，无缝过渡，绝不跳闪）
      */
     fun collapse(
         scope: CoroutineScope,
         initialVelocity: Float = 0f,
         dragOffset: Offset = Offset.Zero,
-        veilAlpha: Float = 1f
+        veilAlpha: Float = 1f,
+        initialScale: Float? = null,
+        initialOffset: Offset? = null,
+        displayUrl: String? = null
     ) {
+        if (initialScale != null) this.collapseScale = initialScale
+        if (initialOffset != null) this.collapseOffset = initialOffset
+        if (displayUrl != null) this.currentDisplayUrl = displayUrl
         this.dragOffset = dragOffset
         this.dragVeilAlpha = veilAlpha
         this.isCollapsing = true
@@ -229,6 +254,9 @@ class ImageMorphState(
             isCollapsing = false
             this@ImageMorphState.dragOffset = Offset.Zero
             this@ImageMorphState.dragVeilAlpha = 1f
+            this@ImageMorphState.collapseScale = 1f
+            this@ImageMorphState.collapseOffset = Offset.Zero
+            this@ImageMorphState.currentDisplayUrl = null
         }
     }
 
@@ -237,13 +265,30 @@ class ImageMorphState(
         val curStart = slotBoundsMap[currentIndex] ?: startBounds
         if (curStart.isEmpty) return null
         val curRadius = slotCornerRadiusMap[currentIndex] ?: startCornerRadiusPx
-        val curRatio = slotRatioMap[currentIndex] ?: imageRatio
+        val curRatio = urls.getOrNull(currentIndex)?.let { ImageRatioCache.get(it) } ?: slotRatioMap[currentIndex] ?: imageRatio
         val targetEnd = computeTargetEndBounds(screenBounds, curRatio)
+
+        // 若退出时处于缩放（放大或手势微缩）或平移状态，飞行的终点矩形直接使用当前真实的屏幕物理外包围盒，
+        // 彻底消除从画廊层切入飞行层瞬间突然闪回 1.0x 原始尺寸的跳跃！
+        val effectiveEnd = if (kotlin.math.abs(collapseScale - 1f) > 0.001f || collapseOffset != Offset.Zero) {
+            val actualW = targetEnd.width * collapseScale
+            val actualH = targetEnd.height * collapseScale
+            val actualCx = targetEnd.center.x + collapseOffset.x
+            val actualCy = targetEnd.center.y + collapseOffset.y
+            Rect(
+                actualCx - actualW / 2f,
+                actualCy - actualH / 2f,
+                actualCx + actualW / 2f,
+                actualCy + actualH / 2f
+            )
+        } else {
+            targetEnd
+        }
 
         return computeFlyingImageFrame(
             progress = progress.value,
             start = curStart,
-            end = targetEnd,
+            end = effectiveEnd,
             startCornerRadiusPx = curRadius,
             endCornerRadiusPx = 0f,
             dragOffset = dragOffset

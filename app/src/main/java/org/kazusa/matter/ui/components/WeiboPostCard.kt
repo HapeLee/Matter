@@ -52,6 +52,10 @@ import org.kazusa.matter.core.util.TimeUtils
 import org.kazusa.matter.core.util.WeiboTextFormatter
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.media.morph.LocalImageMorphState
+import androidx.compose.ui.graphics.RectangleShape
+import org.kazusa.matter.ui.detail.PostDetailCache
+import org.kazusa.matter.ui.detail.getCardSharedKey
+import org.kazusa.matter.ui.navigation.weiboCardSharedBounds
 import coil.compose.AsyncImage
 
 @Composable
@@ -68,15 +72,22 @@ fun WeiboPostCard(
     onTopicClick: (String) -> Unit = {}
 ) {
     val morphState = LocalImageMorphState.current
+    val cardSharedKey = remember(post.idStr, post.mid, post.id) { post.getCardSharedKey() }
+
     if (isCard) {
         Card(
             onClick = {
                 if (morphState?.isPresent != true) {
+                    PostDetailCache.put(post)
                     onPostClick(post)
                 }
             },
             modifier = modifier
                 .fillMaxWidth()
+                .weiboCardSharedBounds(
+                    key = cardSharedKey,
+                    shape = MaterialTheme.shapes.medium
+                )
                 .clip(MaterialTheme.shapes.medium),
             shape = MaterialTheme.shapes.medium, // M3E 20.dp 表现力圆角
             colors = CardDefaults.cardColors(
@@ -91,8 +102,14 @@ fun WeiboPostCard(
                 post = post,
                 isCard = true,
                 onUserClick = onUserClick,
-                onPostClick = onPostClick,
-                onCommentClick = onCommentClick,
+                onPostClick = {
+                    PostDetailCache.put(it)
+                    onPostClick(it)
+                },
+                onCommentClick = {
+                    PostDetailCache.put(it)
+                    onCommentClick(it)
+                },
                 onImageClick = onImageClick,
                 onVideoClick = onVideoClick,
                 onMentionClick = onMentionClick,
@@ -103,14 +120,24 @@ fun WeiboPostCard(
         Column(
             modifier = modifier
                 .fillMaxWidth()
+                .weiboCardSharedBounds(
+                    key = cardSharedKey,
+                    shape = RectangleShape
+                )
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
             PostCardContent(
                 post = post,
                 isCard = false,
                 onUserClick = onUserClick,
-                onPostClick = onPostClick,
-                onCommentClick = onCommentClick,
+                onPostClick = {
+                    PostDetailCache.put(it)
+                    onPostClick(it)
+                },
+                onCommentClick = {
+                    PostDetailCache.put(it)
+                    onCommentClick(it)
+                },
                 onImageClick = onImageClick,
                 onVideoClick = onVideoClick,
                 onMentionClick = onMentionClick,
@@ -119,6 +146,7 @@ fun WeiboPostCard(
         }
     }
 }
+
 
 @Composable
 private fun PostCardContent(
@@ -289,7 +317,7 @@ private fun PostCardContent(
             )
         }
 
-        // 底部操作栏：转发、评论、点赞 (简约通透风格，通过细竖分割线分隔，带水波纹点击反馈)
+        // 底部操作栏：转发、评论、赞居左（按钮间带细竖分割线），弹性留白，收藏居右（无分割线）
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -305,11 +333,10 @@ private fun PostCardContent(
                 icon = Icons.Outlined.Repeat,
                 count = post.repostsCount,
                 defaultLabel = "转发",
-                onClick = {},
-                modifier = Modifier.weight(1f)
+                onClick = {}
             )
             VerticalDivider(
-                modifier = Modifier.height(14.dp),
+                modifier = Modifier.height(8.dp),
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                 thickness = 0.8.dp
             )
@@ -321,11 +348,10 @@ private fun PostCardContent(
                     if (morphState?.isPresent != true) {
                         onCommentClick(post)
                     }
-                },
-                modifier = Modifier.weight(1f)
+                }
             )
             VerticalDivider(
-                modifier = Modifier.height(14.dp),
+                modifier = Modifier.height(8.dp),
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                 thickness = 0.8.dp
             )
@@ -333,9 +359,10 @@ private fun PostCardContent(
                 icon = Icons.Outlined.ThumbUp,
                 count = post.attitudesCount,
                 defaultLabel = "赞",
-                onClick = {},
-                modifier = Modifier.weight(1f)
+                onClick = {}
             )
+            Spacer(modifier = Modifier.weight(1f))
+            FavoriteActionButton(post = post)
         }
     }
 }
@@ -465,7 +492,7 @@ private fun ActionButton(
             .height(38.dp)
             .clip(MaterialTheme.shapes.small)
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp),
+            .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {

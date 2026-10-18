@@ -1,4 +1,4 @@
-﻿package org.kazusa.matter.ui.navigation
+package org.kazusa.matter.ui.navigation
 
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.EnterTransition
@@ -129,6 +129,25 @@ object NavTransitions {
                 (scaleOut(targetScale = 0.70f, animationSpec = tween(easing = FastOutSlowInEasing)) +
                     fadeOut(tween()))
         }
+
+    /**
+     * 微博正文详情页容器变换（Card Morph）协同转场元数据：
+     * 消除整页大范围横滑视差，改用柔和的交叉淡入淡出，
+     * 使得处于 sharedBounds 顶层的卡片飞行动画成为视觉中心，
+     * 避免横向位移与卡片形变相互拉扯，达成如打开大图般丝滑的沉浸感。
+     */
+    val detailMetadata: Map<String, Any> =
+        NavDisplay.transitionSpec {
+            fadeIn(animationSpec = tween(durationMillis = 300, easing = LinearOutSlowInEasing)) togetherWith
+                fadeOut(animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing))
+        } + NavDisplay.popTransitionSpec {
+            fadeIn(animationSpec = tween(durationMillis = 260, easing = LinearOutSlowInEasing)) togetherWith
+                fadeOut(animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing))
+        } + NavDisplay.predictivePopTransitionSpec { _ ->
+            fadeIn(animationSpec = tween(durationMillis = 200)) togetherWith
+                fadeOut(animationSpec = tween(durationMillis = 200))
+        }
+
 
     /**
      * 图片查看器 / 视频全屏播放等沉浸式全屏媒体页面的缩放放大进场 (0.70x 自然放大展开)

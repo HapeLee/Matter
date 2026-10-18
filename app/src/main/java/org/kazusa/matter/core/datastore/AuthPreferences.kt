@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -31,6 +32,8 @@ class AuthPreferences(private val context: Context) {
         val IS_ONBOARDING_COMPLETED = booleanPreferencesKey("is_onboarding_completed")
         val LAST_GROUP_ID = stringPreferencesKey("last_group_id")
         val LAST_GROUP_NAME = stringPreferencesKey("last_group_name")
+        val HIDDEN_GROUP_IDS = stringSetPreferencesKey("hidden_group_ids")
+        val GROUP_CUSTOM_ORDER = stringPreferencesKey("group_custom_order")
     }
 
     val lastGroupFlow: Flow<Pair<String?, String?>> = context.authDataStore.data
@@ -54,6 +57,44 @@ class AuthPreferences(private val context: Context) {
                 prefs[Keys.LAST_GROUP_NAME] = groupName
             } else {
                 prefs.remove(Keys.LAST_GROUP_NAME)
+            }
+        }
+    }
+
+    val hiddenGroupIdsFlow: Flow<Set<String>> = context.authDataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences()) else throw exception
+        }
+        .map { prefs -> prefs[Keys.HIDDEN_GROUP_IDS] ?: emptySet() }
+
+    suspend fun setGroupVisibility(gid: String, isVisible: Boolean) {
+        if (gid == "all" || gid.isBlank()) return // 全部关注不能被隐藏
+        context.authDataStore.edit { prefs ->
+            val currentHidden = prefs[Keys.HIDDEN_GROUP_IDS]?.toMutableSet() ?: mutableSetOf()
+            if (isVisible) {
+                currentHidden.remove(gid)
+            } else {
+                currentHidden.add(gid)
+            }
+            prefs[Keys.HIDDEN_GROUP_IDS] = currentHidden
+        }
+    }
+
+    val groupCustomOrderFlow: Flow<List<String>> = context.authDataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences()) else throw exception
+        }
+        .map { prefs ->
+            val raw = prefs[Keys.GROUP_CUSTOM_ORDER]
+            if (!raw.isNullOrBlank()) raw.split(",").filter { it.isNotBlank() } else emptyList()
+        }
+
+    suspend fun saveGroupCustomOrder(order: List<String>) {
+        context.authDataStore.edit { prefs ->
+            if (order.isNotEmpty()) {
+                prefs[Keys.GROUP_CUSTOM_ORDER] = order.joinToString(",")
+            } else {
+                prefs.remove(Keys.GROUP_CUSTOM_ORDER)
             }
         }
     }

@@ -54,7 +54,7 @@ import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.isRuntimeShaderSupported
+import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import androidx.compose.ui.zIndex
@@ -107,7 +107,7 @@ fun LiquidGlassMorphMenu(
     /** 榜单还没拉到时占位的那一行文案 */
     emptyLabel: String = ""
 ) {
-    val isBlurSupported = remember { isRuntimeShaderSupported() }
+    val isBlurSupported = rememberBlurEffectsEnabled()
     val blurActive = isBlurSupported && backdrop != null
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val lum = if (isDark) 0.2f else 0.8f

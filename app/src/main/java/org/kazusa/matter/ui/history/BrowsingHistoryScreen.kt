@@ -56,8 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.isRuntimeShaderSupported
+import org.kazusa.matter.ui.effect.rememberScreenBackdrop
 import kotlinx.coroutines.flow.distinctUntilChanged
 import org.kazusa.matter.core.util.TimeUtils
 import org.kazusa.matter.data.local.BrowsingCategory
@@ -104,7 +103,7 @@ fun BrowsingHistoryScreen(
 
     var showClearDialog by remember { mutableStateOf(false) }
 
-    val backdrop = if (remember { isRuntimeShaderSupported() }) rememberLayerBackdrop() else null
+    val backdrop = rememberScreenBackdrop()
 
     // 滚动到接近底部时自动加载下一页
     LaunchedEffect(listState) {
@@ -216,7 +215,8 @@ fun BrowsingHistoryScreen(
                         state = listState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
+                            .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
+                            .background(MaterialTheme.colorScheme.surface),
                         contentPadding = PaddingValues(
                             start = 16.dp,
                             top = topPadding + 12.dp,

@@ -1,7 +1,6 @@
 package org.kazusa.matter.ui.timeline
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import org.kazusa.matter.core.network.ApiResult
 import org.kazusa.matter.data.model.WeiboStatusDto
@@ -252,6 +251,11 @@ class TimelineViewModel(
                             }
                         }
 
+                        // 只有当分割线下方有已读微博且上方至少有 1 条新微博时，分割线才有效；如果在第 0 项则清除
+                        if (newLastReadId != null && combined.indexOfFirst { (it.idStr ?: it.id?.toString()) == newLastReadId } <= 0) {
+                            newLastReadId = null
+                        }
+
                         val shouldScrollToTop = hasIncomingNew || previousPosts.isEmpty()
                         if (shouldScrollToTop) scrollSnapshot = ScrollSnapshot()
                         val snapshot = scrollSnapshot
@@ -365,15 +369,6 @@ class TimelineViewModel(
         // 滚动位置仅记录到内部快照用于持久化，不写入 uiState（避免滑动停止触发订阅方重组）
         scrollSnapshot = ScrollSnapshot(scrollIndex, scrollOffset)
 
-        // 仅在尚未建立阅读断点时更新 uiState，此后滚动不再产生状态变更
-        _uiState.update { state ->
-            if (state.lastReadPostId == null && effectivePostId != null) {
-                state.copy(lastReadPostId = effectivePostId)
-            } else {
-                state
-            }
-        }
-
         // 立即、同步或异步写入轻量级 SharedPreferences 存储（毫秒级落盘，绝无进程杀掉丢状态之忧）
         timelineRepository.saveScrollPosition(
             gid = currentGid,
@@ -401,18 +396,6 @@ class TimelineViewModel(
             timelineRepository.clearCache()
             authRepository.logout()
             onLoggedOut()
-        }
-    }
-
-    companion object {
-        fun provideFactory(
-            timelineRepository: TimelineRepository,
-            authRepository: AuthRepository
-        ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                return TimelineViewModel(timelineRepository, authRepository) as T
-            }
         }
     }
 }

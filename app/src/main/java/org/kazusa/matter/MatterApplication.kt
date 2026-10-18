@@ -1,16 +1,17 @@
 package org.kazusa.matter
 
 import android.app.Application
-import org.kazusa.matter.core.di.AppContainer
-import org.kazusa.matter.core.di.DefaultAppContainer
+import org.koin.android.ext.koin.androidContext
+import org.koin.core.context.startKoin
+import org.kazusa.matter.core.di.appModule
 
 class MatterApplication : Application() {
 
-    lateinit var container: AppContainer
-        private set
-
     override fun onCreate() {
         super.onCreate()
-        container = DefaultAppContainer(this)
+        startKoin {
+            androidContext(this@MatterApplication)
+            modules(appModule)
+        }
     }
 }

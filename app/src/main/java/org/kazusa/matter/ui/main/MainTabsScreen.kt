@@ -36,11 +36,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.kyant.backdrop.isRuntimeShaderSupported
+import org.koin.compose.koinInject
+import org.koin.compose.viewmodel.koinViewModel
+import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
-import org.kazusa.matter.core.di.AppContainer
+import org.kazusa.matter.core.datastore.AuthPreferences
+import org.kazusa.matter.core.network.WeiboApiService
+import org.kazusa.matter.data.repository.AuthRepository
+import org.kazusa.matter.ui.theme.ThemePreferences
 import org.kazusa.matter.data.model.HotSearchChannel
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.group.GroupViewModel
@@ -87,11 +91,11 @@ internal enum class MainTab(
  */
 @Composable
 fun MainTabsScreen(
-    container: AppContainer,
     onNavigateToGroups: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToAppearance: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
+    onNavigateToSavedPosts: () -> Unit = {},
     onUserClick: (Long?) -> Unit = {},
     onPostClick: (WeiboStatusDto) -> Unit,
     onCommentClick: (WeiboStatusDto) -> Unit = onPostClick,
@@ -103,7 +107,13 @@ fun MainTabsScreen(
     /** 打开搜索展示页（空关键词进入，展示搜索记录） */
     onOpenSearch: () -> Unit = {},
     onLogout: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    apiService: WeiboApiService = koinInject(),
+    authPreferences: AuthPreferences = koinInject(),
+    authRepository: AuthRepository = koinInject(),
+    themePreferences: ThemePreferences = koinInject(),
+    timelineViewModel: TimelineViewModel = koinViewModel(),
+    groupViewModel: GroupViewModel = koinViewModel()
 ) {
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { MainTab.entries.size })
     val coroutineScope = rememberCoroutineScope()
@@ -121,8 +131,8 @@ fun MainTabsScreen(
 
 
     // 热搜榜状态：发现页列表与悬浮层里的「换榜」按钮共用同一份
-    val hotSearchState = remember(container.apiService, coroutineScope) {
-        HotSearchBoardState(container.apiService, coroutineScope)
+    val hotSearchState = remember(apiService, coroutineScope) {
+        HotSearchBoardState(apiService, coroutineScope)
     }
 
     // 切榜后把发现页列表平滑滚回顶部
@@ -177,19 +187,6 @@ fun MainTabsScreen(
         }
     }
 
-    val timelineViewModel: TimelineViewModel = viewModel(
-        factory = TimelineViewModel.provideFactory(
-            timelineRepository = container.timelineRepository,
-            authRepository = container.authRepository
-        )
-    )
-
-    val groupViewModel: GroupViewModel = viewModel(
-        factory = GroupViewModel.provideFactory(
-            groupRepository = container.groupRepository
-        )
-    )
-
     // 主框架只关心少量时间线字段；订阅整个 uiState 会导致列表刷新/滚动时整屏重组，
     // 因此用 derivedStateOf 收窄到真正使用的字段。
     val timelineState by timelineViewModel.uiState.collectAsStateWithLifecycle()
@@ -235,7 +232,7 @@ fun MainTabsScreen(
     // Backdrop 分离架构：
     // 1. bottomBarBackdrop 挂载在 HorizontalPager 上，滑动切页时全实时采样下方左右滚动的真实页面内容，杜绝切页背景停滞；
     // 2. 各页面的顶栏拥有独立的 backdrop，专注于模糊采样自身列表，互不争抢 GraphicsLayer。
-    val runtimeShaderSupported = remember { isRuntimeShaderSupported() }
+    val runtimeShaderSupported = rememberBlurEffectsEnabled()
     val bottomBarBackdrop = if (runtimeShaderSupported) rememberLayerBackdrop() else null
     val timelineBackdrop = if (runtimeShaderSupported) rememberLayerBackdrop() else null
     val searchBackdrop = if (runtimeShaderSupported) rememberLayerBackdrop() else null
@@ -273,6 +270,7 @@ fun MainTabsScreen(
                             onTopicClick = onTopicClick,
                             onSearchClick = onOpenSearch,
                             onLogout = onLogout,
+                            onNavigateToGroups = onNavigateToGroups,
                             listState = timelineListState,
                             backdrop = timelineBackdrop,
                             bottomBarPadding = bottomBarPadding,
@@ -291,13 +289,14 @@ fun MainTabsScreen(
                     }
                     2 -> {
                         ProfileScreen(
-                            authPreferences = container.authPreferences,
-                            authRepository = container.authRepository,
-                            themePreferences = container.themePreferences,
+                            authPreferences = authPreferences,
+                            authRepository = authRepository,
+                            themePreferences = themePreferences,
                             onNavigateToGroups = onNavigateToGroups,
                             onNavigateToSettings = onNavigateToSettings,
                             onNavigateToAppearance = onNavigateToAppearance,
                             onNavigateToHistory = onNavigateToHistory,
+                            onNavigateToSavedPosts = onNavigateToSavedPosts,
                             onLogout = onLogout,
                             backdrop = profileBackdrop,
                             bottomBarPadding = bottomBarPadding,

@@ -1,7 +1,6 @@
 ﻿package org.kazusa.matter.ui.login
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import org.kazusa.matter.core.network.ApiResult
 import org.kazusa.matter.data.repository.AuthRepository
@@ -170,15 +169,5 @@ class LoginViewModel(
     override fun onCleared() {
         super.onCleared()
         countdownJob?.cancel()
-    }
-
-    companion object {
-        fun provideFactory(authRepository: AuthRepository): ViewModelProvider.Factory =
-            object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    return LoginViewModel(authRepository) as T
-                }
-            }
     }
 }

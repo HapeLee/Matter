@@ -1,11 +1,12 @@
 package org.kazusa.matter.data.local
 
 import android.content.Context
-import androidx.room.Database
-import androidx.room.Room
-import androidx.room.RoomDatabase
-import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.room3.Database
+import androidx.room3.Room
+import androidx.room3.RoomDatabase
+import androidx.room3.migration.Migration
+import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.execSQL
 
 /**
  * 本地数据库（Room）。
@@ -29,8 +30,8 @@ abstract class MatterDatabase : RoomDatabase() {
 
         /** v2：新增搜索记录表 */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS `search_history` (
                         `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,

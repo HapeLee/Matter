@@ -44,7 +44,8 @@ data class WeiboStatusDto(
     @SerialName("status_title") val statusTitle: String? = null,
     @Serializable(with = WeiboTitleTextSerializer::class) val title: String? = null,
     @SerialName("isLongText") val isLongText: Boolean = false,
-    @SerialName("favorited") val isFavorited: Boolean = false
+    @SerialName("favorited") val isFavorited: Boolean = false,
+    @SerialName("liked") val isLiked: Boolean = false
 ) {
     val displayBloggerTitle: String?
         get() = statusTitle?.trim()?.ifBlank { null }
@@ -69,14 +70,14 @@ data class WeiboStatusDto(
     val allLargeImageUrls: List<String> by lazy {
         val fromPicUrls = picUrls.mapNotNull { pic ->
             (pic.originalPic ?: pic.bmiddlePic ?: pic.thumbnailPic)
-                ?.withWeiboImageSize(WeiboImageSize.ORIGINAL)
+                ?.withWeiboImageSize(WeiboImageSize.LARGE)
         }
         when {
             fromPicUrls.isNotEmpty() -> fromPicUrls
-            picIds.isNotEmpty() -> picIds.map { weiboImageUrlFromId(it, WeiboImageSize.ORIGINAL) }
+            picIds.isNotEmpty() -> picIds.map { weiboImageUrlFromId(it, WeiboImageSize.LARGE) }
             else -> {
                 val single = (originalPic ?: bmiddlePic ?: thumbnailPic)
-                    ?.withWeiboImageSize(WeiboImageSize.ORIGINAL)
+                    ?.withWeiboImageSize(WeiboImageSize.LARGE)
                 if (!single.isNullOrBlank()) listOf(single) else emptyList()
             }
         }
@@ -811,3 +812,45 @@ data class UserTimelineResult(
     val total: Int? = null,
     val hasMore: Boolean = true
 )
+
+// 微博转发列表响应
+@Serializable
+data class RepostsResponse(
+    val ok: Int = 1,
+    val data: RepostsDataDto? = null
+)
+
+@Serializable
+data class RepostsDataDto(
+    val data: List<WeiboStatusDto> = emptyList(),
+    @Serializable(with = FlexibleIntSerializer::class) @SerialName("total_number") val totalNumber: Int? = null,
+    @Serializable(with = FlexibleIntSerializer::class) val max: Int? = null
+)
+
+// 微博点赞列表响应
+@Serializable
+data class AttitudesResponse(
+    val ok: Int = 1,
+    val data: AttitudesDataDto? = null
+)
+
+@Serializable
+data class AttitudesDataDto(
+    val data: List<WeiboAttitudeDto> = emptyList(),
+    @Serializable(with = FlexibleIntSerializer::class) @SerialName("total_number") val totalNumber: Int? = null,
+    @Serializable(with = FlexibleIntSerializer::class) val max: Int? = null
+)
+
+@Immutable
+@Serializable
+data class WeiboAttitudeDto(
+    @Serializable(with = FlexibleLongSerializer::class) val id: Long? = null,
+    @SerialName("created_at") val createdAt: String = "",
+    val source: String? = null,
+    val attitude: String? = null,
+    val user: WeiboUserDto? = null
+) {
+    val listKey: String
+        get() = id?.toString() ?: user?.id?.toString() ?: hashCode().toString()
+}
+
