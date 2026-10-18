@@ -36,6 +36,7 @@ data class WeiboStatusDto(
     @Serializable(with = FlexibleStringSerializer::class) @SerialName("attitudes_count") val attitudesCount: String = "0",
     @SerialName("pic_ids") val picIds: List<String> = emptyList(),
     @SerialName("pic_urls") val picUrls: List<WeiboPicUrlDto> = emptyList(),
+    @SerialName("pic_infos") val picInfos: Map<String, WeiboPicInfoDto> = emptyMap(),
     @SerialName("bmiddle_pic") val bmiddlePic: String? = null,
     @SerialName("original_pic") val originalPic: String? = null,
     @SerialName("thumbnail_pic") val thumbnailPic: String? = null,
@@ -91,6 +92,80 @@ data class WeiboStatusDto(
     val allThumbImageUrls: List<String> by lazy {
         allLargeImageUrls.map { it.withWeiboImageSize(WeiboImageSize.THUMBNAIL) ?: it }
     }
+
+    /**
+     * 映射每张图片的大图/原图 URL 或 picId 到对应的实况短视频 URL。
+     */
+    val livePhotoVideoMap: Map<String, String> by lazy {
+        if (picInfos.isEmpty()) return@lazy emptyMap()
+        val map = mutableMapOf<String, String>()
+        for ((picId, info) in picInfos) {
+            val videoUrl = info.liveVideoUrl
+            if (info.isLivePhoto && !videoUrl.isNullOrBlank()) {
+                map[picId] = videoUrl
+                info.large?.url?.let {
+                    map[it] = videoUrl
+                    it.withWeiboImageSize(WeiboImageSize.LARGE)?.let { u -> map[u] = videoUrl }
+                    it.withWeiboImageSize(WeiboImageSize.ORIGINAL)?.let { u -> map[u] = videoUrl }
+                }
+                info.original?.url?.let {
+                    map[it] = videoUrl
+                    it.withWeiboImageSize(WeiboImageSize.LARGE)?.let { u -> map[u] = videoUrl }
+                    it.withWeiboImageSize(WeiboImageSize.ORIGINAL)?.let { u -> map[u] = videoUrl }
+                }
+                info.bmiddle?.url?.let { map[it] = videoUrl }
+                weiboImageUrlFromId(picId, WeiboImageSize.LARGE).let { map[it] = videoUrl }
+                weiboImageUrlFromId(picId, WeiboImageSize.ORIGINAL).let { map[it] = videoUrl }
+            }
+        }
+        map
+    }
+}
+
+/**
+ * 从微博图片 URL 尝试提取出 picId（如 `https://wx1.sinaimg.cn/large/007xxx.jpg` -> `007xxx`）
+ */
+fun extractWeiboPicId(url: String): String? {
+    val lastSlash = url.lastIndexOf('/')
+    if (lastSlash < 0 || lastSlash >= url.length - 1) return null
+    val filename = url.substring(lastSlash + 1)
+    val dot = filename.indexOf('.')
+    return if (dot > 0) filename.substring(0, dot) else filename
+}
+
+/**
+ * 微博图片单张档位详情
+ */
+@Immutable
+@Serializable
+data class WeiboPicDetailDto(
+    val url: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    @SerialName("cut_type") val cutType: Int? = null,
+    val type: String? = null
+)
+
+/**
+ * 微博图片详细信息（支持 Live Photo 短视频）
+ */
+@Immutable
+@Serializable
+data class WeiboPicInfoDto(
+    @SerialName("pic_id") val picId: String? = null,
+    val type: String? = null,
+    val thumbnail: WeiboPicDetailDto? = null,
+    val bmiddle: WeiboPicDetailDto? = null,
+    val large: WeiboPicDetailDto? = null,
+    val original: WeiboPicDetailDto? = null,
+    @SerialName("video") val video: String? = null,
+    @SerialName("video_url") val videoUrl: String? = null
+) {
+    val isLivePhoto: Boolean
+        get() = type?.equals("livephoto", ignoreCase = true) == true || !liveVideoUrl.isNullOrBlank()
+
+    val liveVideoUrl: String?
+        get() = video?.takeIf { it.isNotBlank() } ?: videoUrl?.takeIf { it.isNotBlank() }
 }
 
 @Immutable

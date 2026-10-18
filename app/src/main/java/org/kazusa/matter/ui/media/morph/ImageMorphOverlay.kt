@@ -26,8 +26,10 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.pager.HorizontalPager
+import org.kazusa.matter.ui.media.livephoto.LivePhotoPlayerView
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,6 +50,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,8 +68,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
-import coil.compose.AsyncImagePainter
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
 import org.kazusa.matter.core.datastore.ImageQualityMode
 import org.kazusa.matter.core.datastore.MediaPreferenceState
 import org.kazusa.matter.core.datastore.MediaPreferences
@@ -85,9 +88,8 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import coil.Coil
-import coil.imageLoader
-import coil.memory.MemoryCache
+import coil3.imageLoader
+import coil3.memory.MemoryCache
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
@@ -282,10 +284,15 @@ fun ImageMorphOverlay(
 
         val startSave: (String) -> Unit = { imageUrl ->
             scope.launch {
-                val result = ImageSaver.saveImage(context, imageUrl)
+                val liveVideoUrl = morphState.getLivePhotoVideoUrl(imageUrl)
+                val result = if (!liveVideoUrl.isNullOrBlank()) {
+                    ImageSaver.saveLivePhoto(context, imageUrl, liveVideoUrl)
+                } else {
+                    ImageSaver.saveImage(context, imageUrl)
+                }
                 toastMessage = result.fold(
-                    { name -> "图片已保存至相册：$name" },
-                    { error -> "图片保存失败：${error.message ?: "未知错误"}" }
+                    { name -> if (!liveVideoUrl.isNullOrBlank()) "实况照片已保存至相册：$name" else "图片已保存至相册：$name" },
+                    { error -> "保存失败：${error.message ?: "未知错误"}" }
                 )
             }
         }
@@ -338,6 +345,13 @@ fun ImageMorphOverlay(
 
         var pageDragAlpha by remember { mutableFloatStateOf(1f) }
         var isPageDragging by remember { mutableStateOf(false) }
+
+        val currentLiveVideoUrl = remember(currentOriginalUrl, morphState.livePhotoMap) {
+            morphState.getLivePhotoVideoUrl(currentOriginalUrl)
+        }
+        var isLiveTogglePlaying by remember(pagerState.currentPage) { mutableStateOf(false) }
+        var isLongPressPlaying by remember(pagerState.currentPage) { mutableStateOf(false) }
+        val isLivePlaying = (isLiveTogglePlaying || isLongPressPlaying) && morphState.progress.value >= 0.985f && !isPageDragging
 
         // 第一层：背景遮罩 (Veil) 与全屏触摸隔离盾（Touch Shield）
         // 彻底拦截并消费浮层激活全周期（展开过渡、大图画廊、拖拽释放、收拢飞行）的一切触摸手势，
@@ -451,6 +465,13 @@ fun ImageMorphOverlay(
                     } else {
                         gridUrl
                     },
+                    liveVideoUrl = if (pagerState.currentPage == pageIndex) currentLiveVideoUrl else null,
+                    isLivePlaying = if (pagerState.currentPage == pageIndex) isLivePlaying else false,
+                    onLongPressChanged = { pressing ->
+                        if (pagerState.currentPage == pageIndex) {
+                            isLongPressPlaying = pressing
+                        }
+                    },
                     pageIndex = pageIndex,
                     isCurrentPage = (pagerState.currentPage == pageIndex),
                     onCollapse = { dragOffset, initialVelocity, veilAlpha ->
@@ -521,6 +542,24 @@ fun ImageMorphOverlay(
                     )
                 }
 
+                if (currentLiveVideoUrl != null) {
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Surface(
+                        color = if (isLiveTogglePlaying) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.5f),
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { isLiveTogglePlaying = !isLiveTogglePlaying }
+                    ) {
+                        Text(
+                            text = "◉ 实况",
+                            color = if (isLiveTogglePlaying) MaterialTheme.colorScheme.onPrimary else Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.weight(1f))
 
                 if (urls.size > 1) {
@@ -566,7 +605,7 @@ fun ImageMorphOverlay(
                     )
                 }
                 MorphActionButton(
-                    text = "保存",
+                    text = if (currentLiveVideoUrl != null) "保存实况" else "保存",
                     filled = false,
                     onClick = { requestSave(currentTargetUrl) }
                 )
@@ -590,6 +629,9 @@ private fun MorphZoomablePage(
     placeholderUrl: String,
     pageIndex: Int,
     isCurrentPage: Boolean,
+    liveVideoUrl: String? = null,
+    isLivePlaying: Boolean = false,
+    onLongPressChanged: (Boolean) -> Unit = {},
     onCollapse: (dragOffset: Offset, initialVelocity: Float, veilAlpha: Float) -> Unit,
     onZoomStateChanged: (scale: Float, offset: Offset) -> Unit,
     onDragStateChanged: (Offset, Float) -> Unit,
@@ -599,6 +641,7 @@ private fun MorphZoomablePage(
     modifier: Modifier = Modifier
 ) {
     val scaleAnim = remember { Animatable(1f) }
+    val currentOnLongPressChanged by rememberUpdatedState(onLongPressChanged)
     val offsetXAnim = remember { Animatable(0f) }
     val offsetYAnim = remember { Animatable(0f) }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
@@ -639,10 +682,22 @@ private fun MorphZoomablePage(
         modifier = modifier
             .fillMaxSize()
             .onSizeChanged { containerSize = it }
-            .pointerInput(Unit) {
+            .pointerInput(liveVideoUrl) {
                 detectTapGestures(
+                    onPress = {
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            currentOnLongPressChanged(false)
+                        }
+                    },
                     onTap = {
                         onCollapse(Offset.Zero, 0f, 1f)
+                    },
+                    onLongPress = {
+                        if (liveVideoUrl != null) {
+                            currentOnLongPressChanged(true)
+                        }
                     },
                     onDoubleTap = { tapPosition ->
                         if (scaleAnim.value > 1.05f) {
@@ -904,8 +959,8 @@ private fun MorphZoomablePage(
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading && highResAlpha.value == 0f && placeholderUrl == dataUrl
                     if (state is AsyncImagePainter.State.Success) {
-                        val w = state.result.drawable.intrinsicWidth
-                        val h = state.result.drawable.intrinsicHeight
+                        val w = state.result.image.width
+                        val h = state.result.image.height
                         if (w > 0 && h > 0) {
                             val ratio = w.toFloat() / h.toFloat()
                             imageRatio = ratio
@@ -926,6 +981,15 @@ private fun MorphZoomablePage(
                         alpha = highResAlpha.value
                     }
             )
+
+            // 第三层：实况短视频播放层（Live Photo Video Layer）
+            if (liveVideoUrl != null && isLivePlaying) {
+                LivePhotoPlayerView(
+                    videoUrl = liveVideoUrl,
+                    isPlaying = true,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         if (isLoading) {

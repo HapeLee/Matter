@@ -75,10 +75,10 @@ import org.kazusa.matter.data.model.withWeiboImageSize
 import org.kazusa.matter.ui.media.morph.rememberStableImageRequest
 import org.kazusa.matter.ui.media.morph.morphThumbnailUrl
 import org.kazusa.matter.ui.navigation.weiboSharedElement
-import coil.compose.AsyncImage
-import coil.compose.AsyncImagePainter
-import coil.imageLoader
-import coil.memory.MemoryCache
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.imageLoader
+import coil3.memory.MemoryCache
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import kotlinx.coroutines.launch
@@ -687,8 +687,8 @@ private fun ZoomableImagePage(
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading && highResAlpha.value == 0f && placeholderUrl == dataUrl
                     if (state is AsyncImagePainter.State.Success) {
-                        val w = state.result.drawable.intrinsicWidth
-                        val h = state.result.drawable.intrinsicHeight
+                        val w = state.result.image.width
+                        val h = state.result.image.height
                         if (w > 0 && h > 0) {
                             val ratio = w.toFloat() / h.toFloat()
                             imageRatio = ratio

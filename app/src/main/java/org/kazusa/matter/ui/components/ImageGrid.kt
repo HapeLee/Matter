@@ -35,8 +35,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.graphicsLayer
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import org.kazusa.matter.data.model.WeiboImageSize
+import org.kazusa.matter.data.model.extractWeiboPicId
 import org.kazusa.matter.data.model.withWeiboImageSize
 import org.kazusa.matter.ui.media.morph.LocalImageMorphState
 import org.kazusa.matter.ui.media.morph.rememberStableImageRequest
@@ -67,6 +68,7 @@ private fun gridDisplayUrl(rawUrl: String): String {
 fun ImageGrid(
     images: List<String>,
     modifier: Modifier = Modifier,
+    livePhotoMap: Map<String, String> = emptyMap(),
     onImageClick: (Int) -> Unit = {}
 ) {
     if (images.isEmpty()) return
@@ -91,6 +93,7 @@ fun ImageGrid(
                 imageRatio = ratio,
                 allBounds = slotBoundsMap,
                 allRadii = slotRadiusMap,
+                livePhotoMap = livePhotoMap,
                 scope = scope
             )
         } else {
@@ -105,6 +108,7 @@ fun ImageGrid(
                 images = images,
                 index = 0,
                 modifier = modifier,
+                livePhotoMap = livePhotoMap,
                 onPositionReported = { b, r ->
                     slotBoundsMap[0] = b
                     slotRadiusMap[0] = r
@@ -123,6 +127,7 @@ fun ImageGrid(
                     images = images,
                     index = 0,
                     modifier = Modifier.weight(1f),
+                    livePhotoMap = livePhotoMap,
                     onPositionReported = { b, r -> slotBoundsMap[0] = b; slotRadiusMap[0] = r },
                     onClick = { bounds, radius -> handleImageClick(0, bounds, radius) }
                 )
@@ -131,6 +136,7 @@ fun ImageGrid(
                     images = images,
                     index = 1,
                     modifier = Modifier.weight(1f),
+                    livePhotoMap = livePhotoMap,
                     onPositionReported = { b, r -> slotBoundsMap[1] = b; slotRadiusMap[1] = r },
                     onClick = { bounds, radius -> handleImageClick(1, bounds, radius) }
                 )
@@ -148,6 +154,7 @@ fun ImageGrid(
                         images = images,
                         index = 0,
                         modifier = Modifier.weight(1f),
+                        livePhotoMap = livePhotoMap,
                         onPositionReported = { b, r -> slotBoundsMap[0] = b; slotRadiusMap[0] = r },
                         onClick = { bounds, radius -> handleImageClick(0, bounds, radius) }
                     )
@@ -156,6 +163,7 @@ fun ImageGrid(
                         images = images,
                         index = 1,
                         modifier = Modifier.weight(1f),
+                        livePhotoMap = livePhotoMap,
                         onPositionReported = { b, r -> slotBoundsMap[1] = b; slotRadiusMap[1] = r },
                         onClick = { bounds, radius -> handleImageClick(1, bounds, radius) }
                     )
@@ -166,6 +174,7 @@ fun ImageGrid(
                         images = images,
                         index = 2,
                         modifier = Modifier.weight(1f),
+                        livePhotoMap = livePhotoMap,
                         onPositionReported = { b, r -> slotBoundsMap[2] = b; slotRadiusMap[2] = r },
                         onClick = { bounds, radius -> handleImageClick(2, bounds, radius) }
                     )
@@ -174,6 +183,7 @@ fun ImageGrid(
                         images = images,
                         index = 3,
                         modifier = Modifier.weight(1f),
+                        livePhotoMap = livePhotoMap,
                         onPositionReported = { b, r -> slotBoundsMap[3] = b; slotRadiusMap[3] = r },
                         onClick = { bounds, radius -> handleImageClick(3, bounds, radius) }
                     )
@@ -205,6 +215,7 @@ fun ImageGrid(
                                 images = images,
                                 index = index,
                                 modifier = Modifier.weight(1f),
+                                livePhotoMap = livePhotoMap,
                                 extraOverlayText = if (isLastOfNine) "+$extraCount" else null,
                                 onPositionReported = { b, r -> slotBoundsMap[index] = b; slotRadiusMap[index] = r },
                                 onClick = { bounds, radius -> handleImageClick(index, bounds, radius) }
@@ -231,6 +242,7 @@ private fun SingleImageView(
     images: List<String>,
     index: Int,
     modifier: Modifier = Modifier,
+    livePhotoMap: Map<String, String> = emptyMap(),
     onPositionReported: (Rect, Float) -> Unit = { _, _ -> },
     onClick: (Rect, Float) -> Unit = { _, _ -> }
 ) {
@@ -242,6 +254,10 @@ private fun SingleImageView(
     var itemBounds by remember { mutableStateOf(Rect.Zero) }
     val density = LocalDensity.current
     val cornerRadiusPx = with(density) { 6.dp.toPx() }
+
+    val isLivePhoto = remember(imageUrl, livePhotoMap) {
+        livePhotoMap.containsKey(imageUrl) || extractWeiboPicId(imageUrl)?.let { livePhotoMap.containsKey(it) } == true
+    }
 
     val isGif = remember(imageUrl) {
         imageUrl.contains(".gif", ignoreCase = true)
@@ -328,8 +344,8 @@ private fun SingleImageView(
             contentScale = sizeCalc.scale,
             alignment = sizeCalc.alignment,
             onSuccess = { state ->
-                val w = state.result.drawable.intrinsicWidth
-                val h = state.result.drawable.intrinsicHeight
+                val w = state.result.image.width
+                val h = state.result.image.height
                 if (w > 0 && h > 0) {
                     val computedRatio = w.toFloat() / h.toFloat()
                     imageRatio = computedRatio
@@ -340,8 +356,9 @@ private fun SingleImageView(
             modifier = Modifier.fillMaxSize()
         )
 
-        // 动图 / 长图角标提示
+        // 动图 / 长图 / 实况角标提示
         val badgeText = when {
+            isLivePhoto -> "实况"
             isGif -> "动图"
             isLongImage -> "长图"
             else -> null
@@ -379,6 +396,7 @@ private fun GridImageItem(
     images: List<String>,
     index: Int,
     modifier: Modifier = Modifier,
+    livePhotoMap: Map<String, String> = emptyMap(),
     extraOverlayText: String? = null,
     onPositionReported: (Rect, Float) -> Unit = { _, _ -> },
     onClick: (Rect, Float) -> Unit = { _, _ -> }
@@ -387,6 +405,10 @@ private fun GridImageItem(
     var itemBounds by remember { mutableStateOf(Rect.Zero) }
     val density = LocalDensity.current
     val cornerRadiusPx = with(density) { 4.dp.toPx() }
+
+    val isLivePhoto = remember(imageUrl, livePhotoMap) {
+        livePhotoMap.containsKey(imageUrl) || extractWeiboPicId(imageUrl)?.let { livePhotoMap.containsKey(it) } == true
+    }
 
     val isGif = remember(imageUrl) {
         imageUrl.contains(".gif", ignoreCase = true)
@@ -419,8 +441,8 @@ private fun GridImageItem(
             contentDescription = "微博图片",
             contentScale = ContentScale.Crop,
             onSuccess = { state ->
-                val w = state.result.drawable.intrinsicWidth
-                val h = state.result.drawable.intrinsicHeight
+                val w = state.result.image.width
+                val h = state.result.image.height
                 if (w > 0 && h > 0) {
                     val computedRatio = w.toFloat() / h.toFloat()
                     ImageRatioCache.put(imageUrl, computedRatio)
@@ -444,7 +466,7 @@ private fun GridImageItem(
                     style = MaterialTheme.typography.titleLargeEmphasized
                 )
             }
-        } else if (isGif) {
+        } else if (isLivePhoto || isGif) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -454,7 +476,7 @@ private fun GridImageItem(
                     .padding(horizontal = 4.dp, vertical = 2.dp)
             ) {
                 Text(
-                    text = "动图",
+                    text = if (isLivePhoto) "实况" else "动图",
                     color = Color.White,
                     style = MaterialTheme.typography.labelSmall
                 )

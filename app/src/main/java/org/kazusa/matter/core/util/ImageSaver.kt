@@ -10,7 +10,11 @@ import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.kazusa.matter.core.media.livephoto.MotionPhotoComposer
+import org.kazusa.matter.core.media.livephoto.LivePhotoImage
+import org.kazusa.matter.core.media.livephoto.MotionPhotoParser
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
@@ -45,6 +49,102 @@ object ImageSaver {
                 saveViaMediaStore(context, resolver, url, fileName, mimeType)
             } else {
                 saveViaLegacyFile(context, url, fileName, mimeType)
+            }
+        }
+    }
+
+    /**
+     * 将实况照片（静态大图 [imageUrl] + 短视频 [videoUrl]）合成为原生 Motion Photo 单文件并保存到系统相册。
+     */
+    suspend fun saveLivePhoto(context: Context, imageUrl: String, videoUrl: String): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(imageUrl.isNotBlank()) { "图片地址为空" }
+            require(videoUrl.isNotBlank()) { "视频地址为空" }
+            val fileName = buildFileName(imageUrl).substringBeforeLast('.') + "_MP.jpg"
+            val mimeType = "image/jpeg"
+            val resolver = context.contentResolver
+
+            val cacheDir = context.cacheDir
+            val tempImage = File.createTempFile("live_image_", ".jpg", cacheDir)
+
+            try {
+                val tempVideo = File.createTempFile("live_video_", ".mp4", cacheDir)
+                try {
+                    FileOutputStream(tempImage).use { downloadTo(imageUrl, it) }
+                    LivePhotoImage.normalizeJpeg(tempImage)
+                    FileOutputStream(tempVideo).use { downloadTo(videoUrl, it) }
+                    check(MotionPhotoParser.isVideoFile(tempVideo)) { "实况视频不是完整的 MP4 文件" }
+
+                    val videoLength = tempVideo.length()
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val pendingUri: Uri = resolver.insert(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            ContentValues().apply {
+                                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                                put(
+                                    MediaStore.MediaColumns.RELATIVE_PATH,
+                                    "${Environment.DIRECTORY_PICTURES}/$ALBUM_DIR"
+                                )
+                                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                            }
+                        ) ?: error("无法在相册中创建文件")
+
+                        try {
+                            resolver.openOutputStream(pendingUri)?.use { output ->
+                                FileInputStream(tempImage).use { imgIn ->
+                                    FileInputStream(tempVideo).use { vidIn ->
+                                        MotionPhotoComposer.compose(imgIn, vidIn, videoLength, output)
+                                    }
+                                }
+                            } ?: error("无法打开输出流")
+
+                            resolver.update(
+                                pendingUri,
+                                ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
+                                null,
+                                null
+                            )
+                        } catch (t: Throwable) {
+                            runCatching { resolver.delete(pendingUri, null, null) }
+                            throw t
+                        }
+                    } else {
+                        check(Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED) { "外部存储不可用" }
+                        val albumDir = File(
+                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                            ALBUM_DIR
+                        )
+                        if (!albumDir.exists() && !albumDir.mkdirs()) {
+                            error("无法创建相册目录")
+                        }
+                        val target = File(albumDir, fileName)
+                        try {
+                            FileOutputStream(target).use { output ->
+                                FileInputStream(tempImage).use { imgIn ->
+                                    FileInputStream(tempVideo).use { vidIn ->
+                                        MotionPhotoComposer.compose(imgIn, vidIn, videoLength, output)
+                                    }
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            runCatching { target.delete() }
+                            throw t
+                        }
+                        MediaScannerConnection.scanFile(
+                            context,
+                            arrayOf(target.absolutePath),
+                            arrayOf(mimeType),
+                            null
+                        )
+                    }
+                    fileName
+                } finally {
+                    tempVideo.delete()
+                }
+            } finally {
+                tempImage.delete()
             }
         }
     }

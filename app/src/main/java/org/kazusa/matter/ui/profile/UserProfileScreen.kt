@@ -114,7 +114,7 @@ import org.kazusa.matter.ui.components.UserVipBadge
 import org.kazusa.matter.ui.components.WeiboPostCard
 import org.kazusa.matter.ui.components.WeiboVerifyType
 import org.kazusa.matter.ui.components.getVerifyType
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import org.kazusa.matter.ui.components.TopBarNavigationButton

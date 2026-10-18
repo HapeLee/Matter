@@ -8,7 +8,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalContext
-import coil.request.ImageRequest
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import org.kazusa.matter.data.model.WeiboImageSize
 import org.kazusa.matter.data.model.withWeiboImageSize
 
