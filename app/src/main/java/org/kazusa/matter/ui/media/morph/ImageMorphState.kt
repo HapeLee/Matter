@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import org.kazusa.matter.data.model.extractWeiboPicId
 
 val LocalImageMorphState = staticCompositionLocalOf<ImageMorphState?> { null }
 
@@ -66,6 +67,13 @@ class ImageMorphState(
 
     var urls by mutableStateOf<List<String>>(emptyList())
         private set
+
+    var livePhotoMap by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+
+    fun getLivePhotoVideoUrl(url: String): String? {
+        return livePhotoMap[url] ?: extractWeiboPicId(url)?.let { livePhotoMap[it] }
+    }
 
     var initialIndex by mutableIntStateOf(0)
         private set
@@ -155,9 +163,11 @@ class ImageMorphState(
         imageRatio: Float? = null,
         allBounds: Map<Int, Rect>? = null,
         allRadii: Map<Int, Float>? = null,
+        livePhotoMap: Map<String, String>? = null,
         scope: CoroutineScope
     ) {
         this.urls = urls
+        this.livePhotoMap = livePhotoMap ?: emptyMap()
         this.initialIndex = index
         this.currentIndex = index
         this.startBounds = bounds

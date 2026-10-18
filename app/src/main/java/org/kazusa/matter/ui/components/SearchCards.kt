@@ -24,7 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import org.kazusa.matter.data.model.WeiboSearchCardInfo
 import org.kazusa.matter.data.model.WeiboSearchChip
 import org.kazusa.matter.data.model.WeiboSearchChipGroup

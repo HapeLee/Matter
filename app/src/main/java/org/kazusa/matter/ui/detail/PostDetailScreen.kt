@@ -96,7 +96,7 @@ import org.kazusa.matter.ui.components.UserVerifyBadge
 import org.kazusa.matter.ui.components.UserVipBadge
 import org.kazusa.matter.ui.components.WeiboVerifyType
 import org.kazusa.matter.ui.components.getVerifyType
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import androidx.compose.material3.LocalContentColor
 import org.kazusa.matter.ui.components.ImmersiveTopBar
@@ -772,6 +772,7 @@ private fun PostDetailBody(
                 }
                 ImageGrid(
                     images = imageUrls,
+                    livePhotoMap = post.livePhotoVideoMap,
                     onImageClick = onGridImageClick
                 )
             }
@@ -870,6 +871,7 @@ private fun PostDetailBody(
                     }
                     ImageGrid(
                         images = retweetImages,
+                        livePhotoMap = retweet.livePhotoVideoMap,
                         onImageClick = onGridImageClick
                     )
                 }

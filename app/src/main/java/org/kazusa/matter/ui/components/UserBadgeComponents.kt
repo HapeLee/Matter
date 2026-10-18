@@ -23,7 +23,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.kazusa.matter.data.model.WeiboUserDto
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 
 /**
  * 微博认证等级与类型

@@ -58,7 +58,7 @@ import org.kazusa.matter.data.repository.AuthRepository
 import org.kazusa.matter.ui.components.ImmersiveTopBar
 import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.theme.ThemePreferences
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)

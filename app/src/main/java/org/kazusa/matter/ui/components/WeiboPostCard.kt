@@ -56,7 +56,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import org.kazusa.matter.ui.detail.PostDetailCache
 import org.kazusa.matter.ui.detail.getCardSharedKey
 import org.kazusa.matter.ui.navigation.weiboCardSharedBounds
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 
 @Composable
 fun WeiboPostCard(
@@ -260,6 +260,7 @@ private fun PostCardContent(
                 }
                 ImageGrid(
                     images = imageUrls,
+                    livePhotoMap = post.livePhotoVideoMap,
                     onImageClick = onGridImageClick
                 )
             }
@@ -434,6 +435,7 @@ private fun RetweetCard(
             }
             ImageGrid(
                 images = retweetImages,
+                livePhotoMap = retweet.livePhotoVideoMap,
                 onImageClick = onGridImageClick
             )
         }

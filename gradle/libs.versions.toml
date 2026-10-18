@@ -11,7 +11,7 @@ datastore = "1.2.1"
 ktor = "3.6.0"
 kotlinxSerialization = "1.11.0"
 kotlinxCoroutines = "1.11.0"
-coil = "2.7.0"
+coil = "3.6.3"
 media3 = "1.11.1"
 room3 = "3.0.3"
 ksp = "2.3.12"
@@ -55,8 +55,10 @@ ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serializatio
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
 
-# Image Loading
-coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+# Image Loading (Coil 3)
+coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
+coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
+coil-gif = { group = "io.coil-kt.coil3", name = "coil-gif", version.ref = "coil" }
 
 # MaterialKolor (M3 Dynamic Color & Palette Generator)
 material-kolor = { group = "com.materialkolor", name = "material-kolor", version = "5.0.1" }
