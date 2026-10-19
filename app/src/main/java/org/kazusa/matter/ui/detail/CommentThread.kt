@@ -124,7 +124,8 @@ internal fun CommentThread(
     onImageClick: (List<String>, Int) -> Unit = { _, _ -> },
     depth: Int = 0,
     /** 当前微博开启了「博主精选评论」：此时楼中楼接口往往直接回「暂无数据」。 */
-    approvalCommentsOnly: Boolean = false
+    approvalCommentsOnly: Boolean = false,
+    modifier: Modifier = Modifier
 ) {
     var state by rememberSaveable(
         comment.id ?: comment.listKey,
@@ -198,7 +199,7 @@ internal fun CommentThread(
 
     val isPostAuthor = (comment.user?.id != null && comment.user.id == postAuthorId) ||
         (!comment.user?.screenName.isNullOrBlank() && comment.user.screenName == postAuthorName)
-    Column {
+    Column(modifier = modifier) {
         CommentRow(
             comment = comment,
             isPostAuthor = isPostAuthor,

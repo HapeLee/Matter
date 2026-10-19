@@ -33,7 +33,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
-import org.kazusa.matter.ui.effect.alphaGradientScrim
+import org.kazusa.matter.ui.effect.TopBarGradientSurfaceAlpha
+import org.kazusa.matter.ui.effect.alphaGradientSurface
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassCapsule
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIconButton
@@ -58,9 +59,9 @@ data class TopBarScrollState(
  * 全 app 统一的顶栏，两种形态由是否传入滚动状态自动决定：
  *
  * **1. 沉浸式（传 [listState] 或 [scrollState]）**
- * - 透明 [TopAppBar] 之下叠一层「底色 → 透明」的 alpha 渐变遮罩 [alphaGradientScrim]；
- * - 遮罩随滚动位置淡入，滚过 [scrollDistance] 后完全不透明，保证标题始终可读；
- * - 遮罩透明度在绘制阶段读取，滚动过程中不驱动遮罩层重组。
+ * - 透明 [TopAppBar] 之下叠一层「surface → 透明」的渐变表面 [alphaGradientSurface]；
+ * - 渐变随滚动位置淡入，滚过 [scrollDistance] 后顶部完全不透明，保证标题始终可读；
+ * - 渐变透明度在绘制阶段读取，滚动过程中不驱动渐变层重组。
  *
  * **2. 实心（两者都不传）**
  * - 直接铺一层 [solidColor] 实心底色，等价于传统实心顶栏（登录页、静态表单页等）。
@@ -74,9 +75,10 @@ data class TopBarScrollState(
  * @param scrollState 联动的滚动状态（Column + verticalScroll 等）
  * @param navigationIcon 左导航插槽，回调参数为滚动联动状态
  * @param actions 右操作插槽，回调参数为滚动联动状态
- * @param scrollDistance 遮罩从透明到完全不透明所需的滚动距离
- * @param fadeDurationMillis 遮罩淡入淡出时长
- * @param scrimColor 沉浸式渐变遮罩的底色，其 alpha 即峰值不透明度（默认轻柔淡黑）
+ * @param scrollDistance 渐变从透明到完全不透明所需的滚动距离
+ * @param fadeDurationMillis 渐变的淡入淡出时长
+ * @param gradientColor 沉浸式渐变表面的底色，其 alpha 即峰值不透明度（默认 32% 的主题 surface，
+ *   与 [solidColor] 同源：滚动到顶时顶栏是页面自己颜色的一层淡底，而不是压一层黑）
  * @param solidColor 无滚动联动（实心形态）时的底色
  * @param barModifier 施加在 [TopAppBar] 自身上的 Modifier（如整体点击回到顶部）
  * @param animationLabel 动画调试标签
@@ -93,7 +95,7 @@ fun ImmersiveTopBar(
     actions: @Composable RowScope.(TopBarScrollState) -> Unit = {},
     scrollDistance: Dp = 96.dp,
     fadeDurationMillis: Int = 180,
-    scrimColor: Color = Color.Black.copy(alpha = 0.4f),
+    gradientColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = TopBarGradientSurfaceAlpha),
     solidColor: Color = MaterialTheme.colorScheme.surface,
     barModifier: Modifier = Modifier,
     animationLabel: String = "ImmersiveTopBarScrim"
@@ -134,9 +136,9 @@ fun ImmersiveTopBar(
             Box(
                 modifier = Modifier
                     .matchParentSize()
-                    // 在绘制阶段读取透明度：遮罩层本身不随动画逐帧重组
+                    // 在绘制阶段读取透明度：渐变层本身不随动画逐帧重组
                     .graphicsLayer { alpha = animatedAlpha.value }
-                    .alphaGradientScrim(color = scrimColor)
+                    .alphaGradientSurface(color = gradientColor)
             )
         } else {
             // 无滚动联动：铺实心底色，等价于传统实心顶栏
@@ -168,7 +170,8 @@ fun ImmersiveTopBar(
  *   - 触顶时（alpha = 0）：胶囊玻璃完全淡出，标题贴齐屏幕左侧边距（start = 0dp），边缘按钮仅保留 4dp 边距；
  *   - 滚动后（alpha = 1）：胶囊玻璃随滚动遮罩优雅显现，标题平滑缩进（纯文本 16dp / 带图标 12dp），按钮缩进至 16dp；
  * - 排版规范：标准 titleLarge（28sp 行高）+ 上下各 8dp padding，精准达到 44dp 胶囊高度；
- * - 景深规范：玻璃上的文字与图标统一附加浅阴影（[liquidTextShadow] 与 [LiquidGlassIcon]）。
+ * - 景深规范：玻璃上的文字与图标走同一套前景阴影（[liquidTextShadow] 与 [LiquidGlassIcon]），
+ *   且只在深色主题施加；亮色主题不加阴影。
  */
 object TopBarTokens {
     /**

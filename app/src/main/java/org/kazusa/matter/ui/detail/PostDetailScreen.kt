@@ -8,6 +8,11 @@ import androidx.compose.material3.SnackbarHostState
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -83,6 +88,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -101,6 +107,7 @@ import org.kazusa.matter.core.util.formatInteractionCount
 import org.kazusa.matter.core.util.parseInteractionCount
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import org.kazusa.matter.data.cache.UserAvatarCache
 import org.kazusa.matter.data.model.WeiboCommentDto
 import org.kazusa.matter.data.model.WeiboStatusDto
@@ -138,6 +145,10 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 
 import androidx.compose.runtime.mutableIntStateOf
 import org.kazusa.matter.data.model.WeiboAttitudeDto
+import org.kazusa.matter.ui.effect.ContentFadeState
+import org.kazusa.matter.ui.effect.contentFade
+import org.kazusa.matter.ui.effect.rememberContentFadeState
+import kotlinx.coroutines.Job
 
 private enum class DetailSubTab(val label: String) {
     REPOSTS("转发"),
@@ -173,6 +184,8 @@ fun PostDetailScreen(
     var isRefreshing by remember { mutableStateOf(false) }
     // 下拉刷新成功后自增，让评论区丢弃旧的展开/分页缓存，重新按最新数据展示
     var refreshGeneration by remember { mutableIntStateOf(0) }
+    // 评论数据每次被整体替换时自增：只用来触发一次列表淡入，不参与数据本身
+    var commentsGeneration by remember { mutableIntStateOf(0) }
     var isCommentsLoading by remember { mutableStateOf(false) }
     var isRepostsLoading by remember { mutableStateOf(false) }
     var isAttitudesLoading by remember { mutableStateOf(false) }
@@ -199,6 +212,13 @@ fun PostDetailScreen(
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+    // 子页签内容（评论 / 转发 / 赞）共用的淡入透明度，结构整体切换时统一补一次
+    val contentFade = rememberContentFadeState()
+    // 评论请求：快速连点排序时只让最后一次请求落地，旧请求直接取消
+    var commentsJob by remember { mutableStateOf<Job?>(null) }
+    var commentsRequestToken by remember { mutableIntStateOf(0) }
+    // 最近一次评论请求用的微博 id：正文到达后据此判断要不要再拉一次
+    var commentsRequestedForId by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
     val runtimeShaderSupported = rememberBlurEffectsEnabled()
@@ -218,21 +238,34 @@ fun PostDetailScreen(
 
     fun loadComments(hotSort: Boolean, targetPostId: String? = null) {
         val idToQuery = targetPostId ?: post?.idStr ?: post?.id?.toString() ?: postId
+        commentsRequestedForId = idToQuery
+        // 切换排序时旧列表保持可见，但并发请求必须让最后一次说了算：
+        // 否则先发的慢请求晚回来会把新排序的结果覆盖掉（列表看起来"点了没反应"）
+        commentsRequestToken += 1
+        val token = commentsRequestToken
+        commentsJob?.cancel()
         isCommentsLoading = true
-        coroutineScope.launch {
+        commentsJob = coroutineScope.launch {
             try {
                 when (val commentsRes = apiService.getComments(idToQuery, sortByHot = hotSort)) {
                     is ApiResult.Success -> {
-                        comments = commentsRes.data.data
+                        if (token != commentsRequestToken) return@launch
+                        val incoming = commentsRes.data.data
+                        // 只有内容真的换了才触发淡入：同一条微博被重复拉取时数据完全一致，
+                        // 还按「替换」处理会让整块评论空白一帧再淡入，观感就是闪烁
+                        val changed = incoming.map { it.listKey } != comments.map { it.listKey }
+                        comments = incoming
                         // 只有热门流会下发评论管理信息；按时间排序的接口不带该字段
                         if (hotSort) commentsApprovalOnly = commentsRes.data.approvalCommentsOnly
+                        if (changed) commentsGeneration += 1
                     }
                     // 接口失败与「本来就没有内容」在正文页统一展示为空占位，不再区分红色错误文案
                     is ApiResult.Error -> Unit
                     ApiResult.Loading -> {}
                 }
             } finally {
-                isCommentsLoading = false
+                // 已被更新的请求取代时不要收起 loading，否则新请求还在路上就会去画空态
+                if (token == commentsRequestToken) isCommentsLoading = false
             }
         }
     }
@@ -353,18 +386,23 @@ fun PostDetailScreen(
                     ?: refreshedPost?.id?.toString()
                     ?: postId
                 when (selectedTab) {
-                    DetailSubTab.COMMENTS -> when (
-                        val res = apiService.getComments(targetId, sortByHot = sortByHot)
-                    ) {
-                        is ApiResult.Success -> {
-                            comments = res.data.data
-                            if (sortByHot) commentsApprovalOnly = res.data.approvalCommentsOnly
-                            refreshGeneration++
+                    DetailSubTab.COMMENTS -> {
+                        // 刷新会整体替换评论：先丢掉还在路上的排序请求，避免它晚回来覆盖新数据。
+                        // 被取消的请求不会再回调收尾，这里手动把 loading 收回，否则排序按钮会一直转圈
+                        commentsRequestToken += 1
+                        commentsJob?.cancel()
+                        isCommentsLoading = false
+                        when (val res = apiService.getComments(targetId, sortByHot = sortByHot)) {
+                            is ApiResult.Success -> {
+                                comments = res.data.data
+                                if (sortByHot) commentsApprovalOnly = res.data.approvalCommentsOnly
+                                refreshGeneration++
+                            }
+                            is ApiResult.Error -> if (comments.isNotEmpty()) {
+                                showSnackbar(res.message.ifBlank { "评论刷新失败，请稍后重试" })
+                            }
+                            ApiResult.Loading -> {}
                         }
-                        is ApiResult.Error -> if (comments.isNotEmpty()) {
-                            showSnackbar(res.message.ifBlank { "评论刷新失败，请稍后重试" })
-                        }
-                        ApiResult.Loading -> {}
                     }
                     DetailSubTab.REPOSTS -> when (
                         val res = apiService.getReposts(targetId, page = 1)
@@ -420,19 +458,34 @@ fun PostDetailScreen(
             }
             else -> {}
         }
-        // 初始加载热门评论
+        // 初始加载热门评论：命中缓存时页签 effect 可能已经用同一个 id 拉过一次，
+        // 这里按 id 去重，避免同一次进入把评论拉两遍（第二遍会让列表再淡入一次）
         val targetId = loadedPost?.idStr ?: loadedPost?.id?.toString() ?: postId
-        loadComments(sortByHot, targetId)
+        if (commentsRequestedForId != targetId) loadComments(sortByHot, targetId)
         isLoading = false
     }
 
     LaunchedEffect(selectedTab) {
         val targetId = post?.idStr ?: post?.id?.toString() ?: postId
         when (selectedTab) {
-            DetailSubTab.COMMENTS -> if (comments.isEmpty() && !isCommentsLoading) loadComments(sortByHot, targetId)
+            // 首次进入时正文可能还没到，评论交给正文 effect 用解析后的 id 拉，
+            // 这里不抢先发请求（否则同一份数据会被拉两次）
+            DetailSubTab.COMMENTS ->
+                if (post != null && comments.isEmpty() && !isCommentsLoading) loadComments(sortByHot, targetId)
             DetailSubTab.REPOSTS -> if (reposts.isEmpty() && !isRepostsLoading) loadReposts(1, targetId)
             DetailSubTab.ATTITUDES -> if (attitudes.isEmpty() && !isAttitudesLoading) loadAttitudes(1, targetId)
         }
+    }
+
+    // 子页签内容整块替换时淡入一次：切换页签、评论首屏到达、切换排序。
+    // 翻页 / 展开楼中楼 / 下拉刷新不在这里面，滚动过程中新进组合的行也不会重新淡入。
+    // 归零必须发生在 SideEffect（组合已提交、本帧还没绘制）：放到协程里归零会先按
+    // 旧的 alpha=1 画一帧，用户看到的就是评论闪一下。
+    SideEffect {
+        contentFade.syncKey(selectedTab to commentsGeneration)
+    }
+    LaunchedEffect(selectedTab, commentsGeneration) {
+        contentFade.animateIn()
     }
 
     // 若从外部点击“评论”进入，当正文准备好后自动平滑滚动到评论区头部
@@ -587,6 +640,7 @@ fun PostDetailScreen(
                                 },
                                 onLikeClick = { toggleLike() },
                                 sortByHot = sortByHot,
+                                commentsLoading = isCommentsLoading,
                                 onToggleSort = {
                                     val newSort = !sortByHot
                                     sortByHot = newSort
@@ -617,7 +671,8 @@ fun PostDetailScreen(
                                             isLoading = isRepostsLoading,
                                             buttonText = "刷新",
                                             buttonEnabled = !isRepostsLoading,
-                                            onButtonClick = { loadReposts(1) }
+                                            onButtonClick = { loadReposts(1) },
+                                            modifier = Modifier.contentFade(contentFade)
                                         )
                                     }
                                 } else {
@@ -627,7 +682,8 @@ fun PostDetailScreen(
                                             onUserClick = onUserClick,
                                             onMentionClick = onMentionClick,
                                             onTopicClick = onTopicClick,
-                                            onPostClick = onPostClick
+                                            onPostClick = onPostClick,
+                                            modifier = Modifier.contentFade(contentFade)
                                         )
                                         HorizontalDivider(
                                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f),
@@ -640,24 +696,25 @@ fun PostDetailScreen(
 
                             DetailSubTab.COMMENTS -> {
                                 if (comments.isEmpty()) {
-                                    item {
-                                        EmptyMessage(
-                                            message = when {
-                                                isCommentsLoading -> "正在加载…"
+                                    // 首屏没有内容时先铺骨架屏，避免「一个转圈 → 一屏文字」的硬切；
+                                    // 已有内容时（排序/刷新中）继续显示旧列表，不退回占位
+                                    item(key = "comments_placeholder", contentType = "comment_placeholder") {
+                                        if (isCommentsLoading) {
+                                            CommentSkeletonList(modifier = Modifier.contentFade(contentFade))
+                                        } else {
+                                            EmptyMessage(
                                                 // 开启精选评论后接口只下发精选内容，空列表不代表加载失败
-                                                commentsApprovalOnly -> "博主还没有精选评论"
-                                                else -> "没有可显示的内容"
-                                            },
-                                            isLoading = isCommentsLoading,
-                                            buttonText = "刷新",
-                                            buttonEnabled = !isCommentsLoading,
-                                            onButtonClick = { loadComments(sortByHot) }
-                                        )
+                                                message = if (commentsApprovalOnly) "博主还没有精选评论" else "没有可显示的内容",
+                                                buttonText = "刷新",
+                                                onButtonClick = { loadComments(sortByHot) },
+                                                modifier = Modifier.contentFade(contentFade)
+                                            )
+                                        }
                                     }
                                 } else {
                                     if (commentsApprovalOnly) {
                                         item(key = "comments_featured_header", contentType = "comment_header") {
-                                            FeaturedCommentsHeader()
+                                            FeaturedCommentsHeader(modifier = Modifier.contentFade(contentFade))
                                         }
                                     }
                                     val postAuthorId = post?.user?.id
@@ -679,7 +736,8 @@ fun PostDetailScreen(
                                                 onMentionClick = onMentionClick,
                                                 onTopicClick = onTopicClick,
                                                 onImageClick = onImageClick,
-                                                approvalCommentsOnly = commentsApprovalOnly
+                                                approvalCommentsOnly = commentsApprovalOnly,
+                                                modifier = Modifier.contentFade(contentFade)
                                             )
                                         }
                                         HorizontalDivider(
@@ -691,7 +749,7 @@ fun PostDetailScreen(
                                     if (commentsApprovalOnly) {
                                         // 精选开启时评论条数远少于 total_number，补一句说明避免误以为加载不全
                                         item(key = "comments_featured_footer", contentType = "comment_header") {
-                                            FeaturedCommentsFooter()
+                                            FeaturedCommentsFooter(modifier = Modifier.contentFade(contentFade))
                                         }
                                     }
                                 }
@@ -705,14 +763,16 @@ fun PostDetailScreen(
                                             isLoading = isAttitudesLoading,
                                             buttonText = "刷新",
                                             buttonEnabled = !isAttitudesLoading,
-                                            onButtonClick = { loadAttitudes(1) }
+                                            onButtonClick = { loadAttitudes(1) },
+                                            modifier = Modifier.contentFade(contentFade)
                                         )
                                     }
                                 } else {
                                     items(attitudes, key = { it.listKey }, contentType = { "attitude" }) { attitude ->
                                         AttitudeItemRow(
                                             attitude = attitude,
-                                            onUserClick = onUserClick
+                                            onUserClick = onUserClick,
+                                            modifier = Modifier.contentFade(contentFade)
                                         )
                                         HorizontalDivider(
                                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f),
@@ -752,6 +812,8 @@ private fun PostDetailBody(
     onTabSelect: (DetailSubTab) -> Unit,
     onLikeClick: () -> Unit,
     sortByHot: Boolean,
+    /** 评论正在拉取：排序切换时旧列表仍然可见，用排序按钮上的小转圈给出「正在换一批」的反馈。 */
+    commentsLoading: Boolean = false,
     onToggleSort: () -> Unit,
     onUserClick: (Long?) -> Unit,
     onImageClick: (urls: List<String>, index: Int) -> Unit,
@@ -1048,7 +1110,6 @@ private fun PostDetailBody(
             if (selectedTab == DetailSubTab.COMMENTS) {
                 Row(
                     modifier = Modifier
-                        .height(38.dp)
                         .clip(MaterialTheme.shapes.small)
                         .clickable(onClick = onToggleSort)
                         .padding(horizontal = 8.dp),
@@ -1056,16 +1117,25 @@ private fun PostDetailBody(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     AnimatedContent(
-                        targetState = sortByHot,
+                        targetState = commentsLoading,
                         transitionSpec = { fadeIn() togetherWith fadeOut() },
                         label = "SortIcon"
-                    ) { isHot ->
-                        Icon(
-                            imageVector = if (isHot) Icons.Outlined.Whatshot else Icons.AutoMirrored.Outlined.Sort,
-                            contentDescription = if (isHot) "按热度" else "按时间",
-                            tint = if (isHot) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                            modifier = Modifier.size(15.dp)
-                        )
+                    ) { loading ->
+                        if (loading) {
+                            // 排序切换时旧评论仍留在屏幕上，用图标位的小转圈表示「正在换一批」
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(13.dp),
+                                strokeWidth = 1.5.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (sortByHot) Icons.Outlined.Whatshot else Icons.AutoMirrored.Outlined.Sort,
+                                contentDescription = if (sortByHot) "按热度" else "按时间",
+                                tint = if (sortByHot) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                     }
                     Text(
                         text = if (sortByHot) "按热度" else "按时间",
@@ -1218,16 +1288,99 @@ private fun FeaturedCommentsFooter(modifier: Modifier = Modifier) {
     )
 }
 
+/**
+ * 评论区首屏骨架屏。
+ *
+ * 首屏评论要等一次网络往返，只放一个居中的转圈会让画面「先空→再满屏文字」地硬切；
+ * 这里用三条与 [CommentRow] 同构的灰条占位，配合呼吸式透明度，
+ * 让「加载中 → 有数据」的过渡更连续。
+ */
+@Composable
+private fun CommentSkeletonList(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "commentSkeleton")
+    val pulse by transition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "commentSkeletonPulse"
+    )
+    val firstLines = listOf(0.92f, 0.78f, 0.86f)
+    val secondLines = listOf(0.62f, 0.48f, 0.7f)
+    Column(modifier = modifier.fillMaxWidth()) {
+        repeat(3) { index ->
+            CommentSkeletonRow(
+                pulse = pulse,
+                firstLineFraction = firstLines[index],
+                secondLineFraction = secondLines[index]
+            )
+        }
+    }
+}
+
+@Composable
+private fun CommentSkeletonRow(
+    pulse: Float,
+    firstLineFraction: Float,
+    secondLineFraction: Float
+) {
+    val barColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.16f)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            // alpha 走绘制阶段，脉冲动画不会引起这三行的重组
+            .graphicsLayer { alpha = pulse }
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(barColor)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            SkeletonBar(color = barColor, width = 88.dp, height = 12.dp)
+            Spacer(modifier = Modifier.height(8.dp))
+            SkeletonBar(color = barColor, width = 52.dp, height = 9.dp)
+            Spacer(modifier = Modifier.height(14.dp))
+            SkeletonBar(color = barColor, fraction = firstLineFraction)
+            Spacer(modifier = Modifier.height(8.dp))
+            SkeletonBar(color = barColor, fraction = secondLineFraction)
+        }
+    }
+}
+
+@Composable
+private fun SkeletonBar(
+    color: Color,
+    modifier: Modifier = Modifier,
+    width: Dp? = null,
+    fraction: Float = 1f,
+    height: Dp = 11.dp
+) {
+    Box(
+        modifier = modifier
+            .then(if (width != null) Modifier.width(width) else Modifier.fillMaxWidth(fraction))
+            .height(height)
+            .clip(RoundedCornerShape(height / 2))
+            .background(color)
+    )
+}
+
 @Composable
 private fun RepostItemRow(
     repost: WeiboStatusDto,
     onUserClick: (Long?) -> Unit,
     onMentionClick: (String) -> Unit = {},
     onTopicClick: (String) -> Unit = {},
-    onPostClick: (WeiboStatusDto) -> Unit = {}
+    onPostClick: (WeiboStatusDto) -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onPostClick(repost) }
             .padding(horizontal = 16.dp, vertical = 12.dp)
@@ -1304,10 +1457,11 @@ private fun RepostItemRow(
 @Composable
 private fun AttitudeItemRow(
     attitude: WeiboAttitudeDto,
-    onUserClick: (Long?) -> Unit
+    onUserClick: (Long?) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onUserClick(attitude.user?.id) }
             .padding(horizontal = 16.dp, vertical = 10.dp),
@@ -1526,7 +1680,7 @@ internal fun CommentRow(
         }
 
         Column(modifier = Modifier.padding(start = if (isReply) 40.dp else 46.dp)) {
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             if (!replyTarget?.screenName.isNullOrBlank()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1570,7 +1724,6 @@ internal fun CommentRow(
                     onImageClick = { index -> onImageClick(commentImages, index) }
                 )
             }
-            Spacer(modifier = Modifier.height(4.dp))
         }
     }
 }
