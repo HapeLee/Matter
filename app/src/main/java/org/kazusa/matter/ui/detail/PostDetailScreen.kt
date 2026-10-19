@@ -1,19 +1,31 @@
 package org.kazusa.matter.ui.detail
 
+import org.kazusa.matter.data.model.VideoStreamInfo
 import android.content.Intent
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.ui.graphics.RectangleShape
+import org.kazusa.matter.ui.navigation.LocalSharedElementTarget
 import org.kazusa.matter.ui.navigation.weiboCardSharedBounds
+import org.kazusa.matter.ui.navigation.weiboPostAvatarSharedElement
+import org.kazusa.matter.ui.navigation.weiboPostContentSharedBounds
+import org.kazusa.matter.ui.navigation.weiboPostNameSharedElement
+import org.kazusa.matter.ui.navigation.weiboPostSubtitleSharedElement
+import org.kazusa.matter.ui.navigation.weiboVideoSharedBounds
+import org.kazusa.matter.ui.navigation.formatAvatarSharedKey
+import org.kazusa.matter.ui.navigation.formatVideoSharedKey
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
@@ -46,6 +58,7 @@ import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.ThumbUp
+import androidx.compose.material.icons.outlined.Verified
 import androidx.compose.material.icons.outlined.Whatshot
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,9 +69,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,9 +85,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -84,14 +97,23 @@ import org.kazusa.matter.core.network.ApiResult
 import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.core.util.TimeUtils
 import org.kazusa.matter.core.util.WeiboTextFormatter
+import org.kazusa.matter.core.util.formatInteractionCount
+import org.kazusa.matter.core.util.parseInteractionCount
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import org.kazusa.matter.data.cache.UserAvatarCache
 import org.kazusa.matter.data.model.WeiboCommentDto
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.repository.BrowsingHistoryRepository
 import org.kazusa.matter.ui.components.AuthorBadgeTag
 import org.kazusa.matter.ui.components.BloggerSuffixTag
+import org.kazusa.matter.ui.components.EmptyMessage
 import org.kazusa.matter.ui.components.ImageGrid
+import org.kazusa.matter.ui.components.MatterSnackbar
+import org.kazusa.matter.ui.components.PostLikeState
+import org.kazusa.matter.ui.components.PostLikeStore
 import org.kazusa.matter.ui.components.UserAvatarWithBadge
+import org.kazusa.matter.ui.components.rememberSharedAvatarRequest
 import org.kazusa.matter.ui.components.UserVerifyBadge
 import org.kazusa.matter.ui.components.UserVipBadge
 import org.kazusa.matter.ui.components.WeiboVerifyType
@@ -133,7 +155,7 @@ fun PostDetailScreen(
     onBackClick: () -> Unit,
     onUserClick: (Long?) -> Unit = {},
     onImageClick: (urls: List<String>, index: Int) -> Unit,
-    onVideoClick: (url: String, title: String) -> Unit,
+    onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit,
     onMentionClick: (String) -> Unit = {},
     onTopicClick: (String) -> Unit = {},
     onPostClick: (WeiboStatusDto) -> Unit = {},
@@ -142,17 +164,18 @@ fun PostDetailScreen(
     val initialCachedPost = remember(postId) { PostDetailCache.get(postId) }
     var post by remember(postId) { mutableStateOf(initialCachedPost) }
     var comments by remember { mutableStateOf<List<WeiboCommentDto>>(emptyList()) }
+    // 博主开启了「精选评论」时接口只下发精选过的评论，需要在评论区给出说明
+    var commentsApprovalOnly by remember { mutableStateOf(false) }
     var reposts by remember { mutableStateOf<List<WeiboStatusDto>>(emptyList()) }
     var attitudes by remember { mutableStateOf<List<WeiboAttitudeDto>>(emptyList()) }
 
     var isLoading by remember(postId) { mutableStateOf(initialCachedPost == null) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    // 下拉刷新成功后自增，让评论区丢弃旧的展开/分页缓存，重新按最新数据展示
+    var refreshGeneration by remember { mutableIntStateOf(0) }
     var isCommentsLoading by remember { mutableStateOf(false) }
     var isRepostsLoading by remember { mutableStateOf(false) }
     var isAttitudesLoading by remember { mutableStateOf(false) }
-
-    var commentsError by remember { mutableStateOf<String?>(null) }
-    var repostsError by remember { mutableStateOf<String?>(null) }
-    var attitudesError by remember { mutableStateOf<String?>(null) }
 
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var sortByHot by remember { mutableStateOf(true) } // true: 按热度, false: 按时间
@@ -161,10 +184,15 @@ fun PostDetailScreen(
     var repostsPage by remember { mutableIntStateOf(1) }
     var attitudesPage by remember { mutableIntStateOf(1) }
 
-    // 点赞状态维护
-    var isLiked by remember(post) { mutableStateOf(post?.isLiked == true) }
+    // 点赞状态维护（信息流里点过赞时以共享状态为准，避免两个页面显示不一致）
+    var isLiked by remember(post) {
+        mutableStateOf(post?.let { PostLikeStore.resolve(it).liked } ?: false)
+    }
     var likeCount by remember(post) {
-        mutableIntStateOf(post?.attitudesCount?.toIntOrNull() ?: 0)
+        mutableIntStateOf(
+            post?.let { PostLikeStore.resolve(it).count }
+                ?: (parseInteractionCount(post?.attitudesCount) ?: 0)
+        )
     }
     var isLiking by remember { mutableStateOf(false) }
 
@@ -172,7 +200,6 @@ fun PostDetailScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
 
-    val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     val runtimeShaderSupported = rememberBlurEffectsEnabled()
     val backdrop = if (runtimeShaderSupported) rememberLayerBackdrop() else null
@@ -192,12 +219,16 @@ fun PostDetailScreen(
     fun loadComments(hotSort: Boolean, targetPostId: String? = null) {
         val idToQuery = targetPostId ?: post?.idStr ?: post?.id?.toString() ?: postId
         isCommentsLoading = true
-        commentsError = null
         coroutineScope.launch {
             try {
                 when (val commentsRes = apiService.getComments(idToQuery, sortByHot = hotSort)) {
-                    is ApiResult.Success -> comments = commentsRes.data.data
-                    is ApiResult.Error -> commentsError = "评论加载失败，请点击重试"
+                    is ApiResult.Success -> {
+                        comments = commentsRes.data.data
+                        // 只有热门流会下发评论管理信息；按时间排序的接口不带该字段
+                        if (hotSort) commentsApprovalOnly = commentsRes.data.approvalCommentsOnly
+                    }
+                    // 接口失败与「本来就没有内容」在正文页统一展示为空占位，不再区分红色错误文案
+                    is ApiResult.Error -> Unit
                     ApiResult.Loading -> {}
                 }
             } finally {
@@ -209,7 +240,6 @@ fun PostDetailScreen(
     fun loadReposts(page: Int = 1, targetPostId: String? = null) {
         val idToQuery = targetPostId ?: post?.idStr ?: post?.id?.toString() ?: postId
         isRepostsLoading = true
-        repostsError = null
         coroutineScope.launch {
             try {
                 when (val res = apiService.getReposts(idToQuery, page = page)) {
@@ -217,7 +247,7 @@ fun PostDetailScreen(
                         reposts = if (page == 1) res.data.data else (reposts + res.data.data).distinctBy { it.listKey }
                         repostsPage = page
                     }
-                    is ApiResult.Error -> repostsError = "转发加载失败，请点击重试"
+                    is ApiResult.Error -> Unit
                     ApiResult.Loading -> {}
                 }
             } finally {
@@ -229,7 +259,6 @@ fun PostDetailScreen(
     fun loadAttitudes(page: Int = 1, targetPostId: String? = null) {
         val idToQuery = targetPostId ?: post?.idStr ?: post?.id?.toString() ?: postId
         isAttitudesLoading = true
-        attitudesError = null
         coroutineScope.launch {
             try {
                 when (val res = apiService.getAttitudes(idToQuery, page = page)) {
@@ -237,7 +266,7 @@ fun PostDetailScreen(
                         attitudes = if (page == 1) res.data.data else (attitudes + res.data.data).distinctBy { it.listKey }
                         attitudesPage = page
                     }
-                    is ApiResult.Error -> attitudesError = "点赞列表加载失败，请点击重试"
+                    is ApiResult.Error -> Unit
                     ApiResult.Loading -> {}
                 }
             } finally {
@@ -255,6 +284,8 @@ fun PostDetailScreen(
         val prevCount = likeCount
         isLiked = newLiked
         likeCount = if (newLiked) prevCount + 1 else (prevCount - 1).coerceAtLeast(0)
+        // 同步到共享状态，返回信息流后卡片上的点赞态保持一致
+        PostLikeStore.put(PostLikeStore.keyOf(targetPost), PostLikeState(newLiked, likeCount))
         isLiking = true
         coroutineScope.launch {
             try {
@@ -270,6 +301,10 @@ fun PostDetailScreen(
                     is ApiResult.Error -> {
                         isLiked = prevLiked
                         likeCount = prevCount
+                        PostLikeStore.put(
+                            PostLikeStore.keyOf(targetPost),
+                            PostLikeState(prevLiked, prevCount)
+                        )
                         showSnackbar(res.message.ifBlank { "操作失败，请重试" })
                     }
                     ApiResult.Loading -> {}
@@ -281,6 +316,87 @@ fun PostDetailScreen(
     }
 
 
+    /**
+     * 下拉刷新：重新拉取正文与当前子页签的第一页数据。
+     *
+     * 刷新过程中保留旧内容（列表不闪空），只有成功后整体替换；
+     * 失败时若已有内容则用 Snackbar 提示，不破坏当前阅读位置。
+     */
+    fun refreshDetail() {
+        if (isRefreshing || isLoading) return
+        isRefreshing = true
+        coroutineScope.launch {
+            try {
+                var refreshedPost = post
+                when (val res = apiService.getPostDetail(postId)) {
+                    is ApiResult.Success -> {
+                        refreshedPost = res.data
+                        post = res.data
+                        errorMessage = null
+                        PostDetailCache.put(res.data)
+                        val resolvedLike = PostLikeStore.resolve(res.data)
+                        isLiked = resolvedLike.liked
+                        likeCount = resolvedLike.count
+                            ?: (parseInteractionCount(res.data.attitudesCount) ?: 0)
+                    }
+                    is ApiResult.Error -> {
+                        if (post == null) {
+                            errorMessage = res.message
+                        } else {
+                            showSnackbar(res.message.ifBlank { "刷新失败，请稍后重试" })
+                        }
+                    }
+                    ApiResult.Loading -> {}
+                }
+
+                val targetId = refreshedPost?.idStr
+                    ?: refreshedPost?.id?.toString()
+                    ?: postId
+                when (selectedTab) {
+                    DetailSubTab.COMMENTS -> when (
+                        val res = apiService.getComments(targetId, sortByHot = sortByHot)
+                    ) {
+                        is ApiResult.Success -> {
+                            comments = res.data.data
+                            if (sortByHot) commentsApprovalOnly = res.data.approvalCommentsOnly
+                            refreshGeneration++
+                        }
+                        is ApiResult.Error -> if (comments.isNotEmpty()) {
+                            showSnackbar(res.message.ifBlank { "评论刷新失败，请稍后重试" })
+                        }
+                        ApiResult.Loading -> {}
+                    }
+                    DetailSubTab.REPOSTS -> when (
+                        val res = apiService.getReposts(targetId, page = 1)
+                    ) {
+                        is ApiResult.Success -> {
+                            reposts = res.data.data
+                            repostsPage = 1
+                        }
+                        is ApiResult.Error -> if (reposts.isNotEmpty()) {
+                            showSnackbar(res.message.ifBlank { "转发刷新失败，请稍后重试" })
+                        }
+                        ApiResult.Loading -> {}
+                    }
+                    DetailSubTab.ATTITUDES -> when (
+                        val res = apiService.getAttitudes(targetId, page = 1)
+                    ) {
+                        is ApiResult.Success -> {
+                            attitudes = res.data.data
+                            attitudesPage = 1
+                        }
+                        is ApiResult.Error -> if (attitudes.isNotEmpty()) {
+                            showSnackbar(res.message.ifBlank { "点赞列表刷新失败，请稍后重试" })
+                        }
+                        ApiResult.Loading -> {}
+                    }
+                }
+            } finally {
+                isRefreshing = false
+            }
+        }
+    }
+
     LaunchedEffect(postId) {
         if (post == null) {
             isLoading = true
@@ -291,8 +407,9 @@ fun PostDetailScreen(
             is ApiResult.Success -> {
                 loadedPost = postRes.data
                 post = loadedPost
-                isLiked = loadedPost.isLiked
-                likeCount = loadedPost.attitudesCount.toIntOrNull() ?: 0
+                val resolvedLike = PostLikeStore.resolve(loadedPost)
+                isLiked = resolvedLike.liked
+                likeCount = resolvedLike.count ?: (loadedPost.attitudesCount.toIntOrNull() ?: 0)
                 // 本地浏览历史：同一条微博只保留最近一次（重复进入会刷新时间并前移）
                 historyRepository.recordPost(postRes.data)
             }
@@ -336,10 +453,7 @@ fun PostDetailScreen(
                         .navigationBarsPadding()
                         .padding(bottom = 16.dp)
                 ) { data ->
-                    Snackbar(
-                        shape = RoundedCornerShape(20.dp),
-                        containerColor = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f),
-                        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    MatterSnackbar(
                         modifier = Modifier.padding(horizontal = 24.dp)
                     ) {
                         Text(
@@ -356,7 +470,7 @@ fun PostDetailScreen(
                 animationLabel = "DetailTopBarScrim",
                 title = { scroll ->
                     TopBarTitleText(
-                        text = "微博正文",
+                        text = "正文",
                         scroll = scroll,
                         backdrop = backdrop,
                         onBackClick = onBackClick
@@ -396,24 +510,37 @@ fun PostDetailScreen(
         },
         modifier = modifier.fillMaxSize()
     ) { innerPadding ->
-        Box(
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = { refreshDetail() },
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.surface)
-                .padding(bottom = innerPadding.calculateBottomPadding())
         ) {
-            when {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = innerPadding.calculateBottomPadding())
+            ) {
+                when {
                 isLoading -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                     }
                 }
                 errorMessage != null -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            // 加载失败时内容不可滚动，补一个可滚动容器让下拉刷新手势依然生效
+                            .verticalScroll(rememberScrollState()),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            text = errorMessage ?: "加载失败",
+                            text = (errorMessage ?: "加载失败") + "\n下拉重试",
                             color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodyMedium
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
@@ -423,16 +550,34 @@ fun PostDetailScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
-                            .background(MaterialTheme.colorScheme.surface),
+                            .background(MaterialTheme.colorScheme.surface)
+                            .animateContentSize(),
                         contentPadding = PaddingValues(top = innerPadding.calculateTopPadding(), bottom = 16.dp)
                     ) {
                         // 专为沉浸式阅读设计的正文排版（大头像、作者大号、正文更大间距）
                         item {
-                            val detailSharedKey = remember(post?.idStr, post?.mid, post?.id, postId) {
-                                post?.getCardSharedKey()?.takeIf { it.isNotBlank() } ?: formatPostDetailSharedKey(postId)
+                            // 形变来源可能是「原微博自己的卡片」，也可能是「转发卡片内的原微博区块」，
+                            // 后者使用独立的 retweet_card_<id> key，这里按本次导航选中的 key 收尾，
+                            // 避免点击转发区域时动画从列表里那张原微博卡片起飞。
+                            val selectedContainerKey = LocalSharedElementTarget.current?.containerKey
+                            val detailSharedKey = remember(post?.idStr, post?.mid, post?.id, postId, selectedContainerKey) {
+                                val postKeyId = post?.idStr?.takeIf { it.isNotBlank() }
+                                    ?: post?.mid?.takeIf { it.isNotBlank() }
+                                    ?: post?.id?.toString()?.takeIf { it.isNotBlank() }
+                                    ?: postId
+                                val retweetSectionKey = formatRetweetSectionSharedKey(postKeyId)
+                                if (retweetSectionKey.isNotBlank() && selectedContainerKey == retweetSectionKey) {
+                                    retweetSectionKey
+                                } else {
+                                    post?.getCardSharedKey()?.takeIf { it.isNotBlank() }
+                                        ?: formatPostDetailSharedKey(postId)
+                                }
                             }
                             PostDetailBody(
                                 post = post!!,
+                                // 本次命中的容器 key：卡片内的头像/昵称/正文都以它为前缀派生自己的共享元素 key，
+                                // 保证「卡片 → 正文」与「转发区块 → 正文」两条路径都能对称收尾
+                                containerSharedKey = detailSharedKey,
                                 isLiked = isLiked,
                                 likeCount = likeCount,
                                 selectedTab = selectedTab,
@@ -463,46 +608,17 @@ fun PostDetailScreen(
 
                         when (selectedTab) {
                             DetailSubTab.REPOSTS -> {
-                                if (isRepostsLoading && reposts.isEmpty()) {
+                                if (reposts.isEmpty()) {
+                                    // 转发数为 0 时服务端可能直接返回 ok=0（空内容/风控），
+                                    // 这里统一按「没有可显示的内容」展示，并提供手动刷新
                                     item {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(24.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(24.dp),
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-                                    }
-                                } else if (repostsError != null && reposts.isEmpty()) {
-                                    item {
-                                        Text(
-                                            text = repostsError!!,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable { loadReposts(1) }
-                                                .padding(24.dp)
+                                        EmptyMessage(
+                                            message = if (isRepostsLoading) "正在加载…" else "没有可显示的内容",
+                                            isLoading = isRepostsLoading,
+                                            buttonText = "刷新",
+                                            buttonEnabled = !isRepostsLoading,
+                                            onButtonClick = { loadReposts(1) }
                                         )
-                                    }
-                                } else if (reposts.isEmpty()) {
-                                    item {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(40.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = "暂无转发",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
                                     }
                                 } else {
                                     items(reposts, key = { it.listKey }, contentType = { "repost" }) { repost ->
@@ -523,117 +639,74 @@ fun PostDetailScreen(
                             }
 
                             DetailSubTab.COMMENTS -> {
-                                if (isCommentsLoading && comments.isEmpty()) {
+                                if (comments.isEmpty()) {
                                     item {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(24.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(24.dp),
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-                                    }
-                                } else if (commentsError != null && comments.isEmpty()) {
-                                    item {
-                                        Text(
-                                            text = commentsError!!,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable { loadComments(sortByHot) }
-                                                .padding(24.dp)
+                                        EmptyMessage(
+                                            message = when {
+                                                isCommentsLoading -> "正在加载…"
+                                                // 开启精选评论后接口只下发精选内容，空列表不代表加载失败
+                                                commentsApprovalOnly -> "博主还没有精选评论"
+                                                else -> "没有可显示的内容"
+                                            },
+                                            isLoading = isCommentsLoading,
+                                            buttonText = "刷新",
+                                            buttonEnabled = !isCommentsLoading,
+                                            onButtonClick = { loadComments(sortByHot) }
                                         )
-                                    }
-                                } else if (comments.isEmpty()) {
-                                    item {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(40.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = "暂无评论",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
                                     }
                                 } else {
+                                    if (commentsApprovalOnly) {
+                                        item(key = "comments_featured_header", contentType = "comment_header") {
+                                            FeaturedCommentsHeader()
+                                        }
+                                    }
                                     val postAuthorId = post?.user?.id
                                     val postAuthorName = post?.user?.screenName
-                                    items(comments, key = { it.listKey }, contentType = { "comment" }) { comment ->
-                                        CommentThread(
-                                            comment = comment,
-                                            postId = post?.idStr ?: post?.id?.toString() ?: postId,
-                                            apiService = apiService,
-                                            postAuthorId = postAuthorId,
-                                            postAuthorName = postAuthorName,
-                                            onUserClick = onUserClick,
-                                            onMentionClick = onMentionClick,
-                                            onTopicClick = onTopicClick,
-                                            onCopyText = remember(clipboardManager, showSnackbar) {
-                                                { txt: String ->
-                                                    clipboardManager.setText(AnnotatedString(txt))
-                                                    showSnackbar("评论已复制")
-                                                }
-                                            }
-                                        )
+                                    items(
+                                        comments,
+                                        key = { it.listKey },
+                                        contentType = { "comment" }
+                                    ) { comment ->
+                                        // 刷新后重建评论子树，丢弃旧的“展开回复/分页”缓存
+                                        androidx.compose.runtime.key(refreshGeneration) {
+                                            CommentThread(
+                                                comment = comment,
+                                                postId = post?.idStr ?: post?.id?.toString() ?: postId,
+                                                apiService = apiService,
+                                                postAuthorId = postAuthorId,
+                                                postAuthorName = postAuthorName,
+                                                onUserClick = onUserClick,
+                                                onMentionClick = onMentionClick,
+                                                onTopicClick = onTopicClick,
+                                                onImageClick = onImageClick,
+                                                approvalCommentsOnly = commentsApprovalOnly
+                                            )
+                                        }
                                         HorizontalDivider(
                                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f),
                                             modifier = Modifier.padding(horizontal = 16.dp),
                                             thickness = 0.6.dp
                                         )
                                     }
+                                    if (commentsApprovalOnly) {
+                                        // 精选开启时评论条数远少于 total_number，补一句说明避免误以为加载不全
+                                        item(key = "comments_featured_footer", contentType = "comment_header") {
+                                            FeaturedCommentsFooter()
+                                        }
+                                    }
                                 }
                             }
 
                             DetailSubTab.ATTITUDES -> {
-                                if (isAttitudesLoading && attitudes.isEmpty()) {
+                                if (attitudes.isEmpty()) {
                                     item {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(24.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(24.dp),
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-                                    }
-                                } else if (attitudesError != null && attitudes.isEmpty()) {
-                                    item {
-                                        Text(
-                                            text = attitudesError!!,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable { loadAttitudes(1) }
-                                                .padding(24.dp)
+                                        EmptyMessage(
+                                            message = if (isAttitudesLoading) "正在加载…" else "没有可显示的内容",
+                                            isLoading = isAttitudesLoading,
+                                            buttonText = "刷新",
+                                            buttonEnabled = !isAttitudesLoading,
+                                            onButtonClick = { loadAttitudes(1) }
                                         )
-                                    }
-                                } else if (attitudes.isEmpty()) {
-                                    item {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(40.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = "暂无赞",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
                                     }
                                 } else {
                                     items(attitudes, key = { it.listKey }, contentType = { "attitude" }) { attitude ->
@@ -657,6 +730,7 @@ fun PostDetailScreen(
     }
 }
 }
+}
 
 /**
  * 专为正文详情页定制的优雅排版：
@@ -667,6 +741,11 @@ fun PostDetailScreen(
 @Composable
 private fun PostDetailBody(
     post: WeiboStatusDto,
+    /**
+     * 本次导航命中的容器共享键（post_card_<id> 或 retweet_card_<id>）。
+     * 站内元素（头像 / 昵称 / 正文）的共享元素 key 均由它派生，与来源卡片一一对应。
+     */
+    containerSharedKey: String,
     isLiked: Boolean,
     likeCount: Int,
     selectedTab: DetailSubTab,
@@ -676,11 +755,16 @@ private fun PostDetailBody(
     onToggleSort: () -> Unit,
     onUserClick: (Long?) -> Unit,
     onImageClick: (urls: List<String>, index: Int) -> Unit,
-    onVideoClick: (url: String, title: String) -> Unit,
+    onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit,
     onMentionClick: (String) -> Unit = {},
     onTopicClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val sharedElementTarget = LocalSharedElementTarget.current
+    // 正文页图片形变的来源标识：与信息流卡片区分，避免同一条微博在两处互相抢动画
+    val imageOwnerKey = remember(post.idStr, post.mid, post.id) {
+        "detail_${post.getCardSharedKey()}"
+    }
     Column(modifier = modifier.fillMaxWidth()) {
         // 主微博作者与正文内容
         Column(
@@ -696,23 +780,43 @@ private fun PostDetailBody(
                 val avatar = post.user?.avatarLarge
                     ?: post.user?.profileImageUrl
                     ?: "https://tvax1.sinaimg.cn/default/images/default_avatar_male_180.gif"
+                // 头像共享元素 key：卡片 → 正文 时头像作为卡内元素单独变形（44.dp ← 38.dp）；
+                // 正文 → 博主主页 时切换到 uid 维度 key 放大到 74.dp；两端缓存键始终对齐，避免加载闪烁。
+                val avatarSharedKey = remember(post.user?.id) { formatAvatarSharedKey(post.user?.id) }
+                val avatarSourceOwnerKey = remember(post.idStr, post.mid, post.id) {
+                    "detail_${post.getCardSharedKey()}"
+                }
+                SideEffect { UserAvatarCache.put(post.user?.id, avatar, post.user?.screenName) }
+                val avatarRequest = rememberSharedAvatarRequest(avatar, avatarSharedKey)
 
                 AsyncImage(
-                    model = avatar,
+                    model = avatarRequest,
                     contentDescription = post.user?.screenName,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(44.dp)
+                        .weiboPostAvatarSharedElement(
+                            containerKey = containerSharedKey,
+                            avatarSharedKey = avatarSharedKey,
+                            avatarOwnerKey = avatarSourceOwnerKey
+                        )
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .clickable { onUserClick(post.user?.id) }
+                        .clickable {
+                            sharedElementTarget?.selectAvatar(
+                                ownerKey = avatarSourceOwnerKey,
+                                avatarKey = avatarSharedKey
+                            )
+                            onUserClick(post.user?.id)
+                        }
                 )
 
                 Spacer(modifier = Modifier.width(12.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
-                    // 昵称行：仅昵称 + M3大V图标
+                    // 昵称行：仅昵称 + M3大V图标（共享元素：承接卡片的 titleSmallEmphasized 放大）
                     Row(
+                        modifier = Modifier.weiboPostNameSharedElement(containerKey = containerSharedKey),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -737,7 +841,8 @@ private fun PostDetailBody(
                     Text(
                         text = subtitle,
                         style = MaterialTheme.typography.labelMediumEmphasized,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weiboPostSubtitleSharedElement(containerKey = containerSharedKey)
                     )
                 }
             }
@@ -754,12 +859,15 @@ private fun PostDetailBody(
                     onTopicClick = onTopicClick
                 )
             }
+            // 正文通过共享元素与卡片对齐，过渡期间保持文字清晰。
             SelectionContainer {
                 Text(
                     text = contentFormatted.annotatedString,
                     inlineContent = contentFormatted.inlineContent,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .weiboPostContentSharedBounds(containerKey = containerSharedKey)
                 )
             }
 
@@ -772,24 +880,34 @@ private fun PostDetailBody(
                 }
                 ImageGrid(
                     images = imageUrls,
+                    ownerKey = imageOwnerKey,
+                    sharedContainerKey = containerSharedKey,
                     livePhotoMap = post.livePhotoVideoMap,
                     onImageClick = onGridImageClick
                 )
             }
 
             // 视频卡片
-            val videoUrl = post.pageInfo?.mediaInfo?.bestVideoUrl
+            val mediaInfo = post.pageInfo?.mediaInfo
+            val videoUrl = mediaInfo?.bestVideoUrl
+            val streams = mediaInfo?.availableStreams.orEmpty()
             if (videoUrl != null) {
                 Spacer(modifier = Modifier.height(12.dp))
                 val videoCover = post.pageInfo.pagePic ?: ""
                 val videoTitle = post.pageInfo.pageTitle ?: WeiboTextFormatter.formatHtmlText(post.textRaw ?: post.text).take(20)
+                val videoMid = post.idStr ?: post.mid ?: post.id?.toString() ?: ""
+                val videoSharedKey = remember(videoMid, videoUrl) { formatVideoSharedKey(videoMid, videoUrl) }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(200.dp)
+                        .weiboVideoSharedBounds(key = videoSharedKey, shape = RoundedCornerShape(8.dp))
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color.Black)
-                        .clickable { onVideoClick(videoUrl, videoTitle) },
+                        .clickable {
+                            sharedElementTarget?.selectVideo(videoSharedKey)
+                            onVideoClick(videoUrl, videoTitle, streams, videoCover, videoMid)
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     if (videoCover.isNotBlank()) {
@@ -871,6 +989,9 @@ private fun PostDetailBody(
                     }
                     ImageGrid(
                         images = retweetImages,
+                        ownerKey = "detail_retweet_${retweet.getCardSharedKey()}",
+                        sharedContainerKey = containerSharedKey,
+                        sharedImagePart = "retweet_image",
                         livePhotoMap = retweet.livePhotoVideoMap,
                         onImageClick = onGridImageClick
                     )
@@ -1054,6 +1175,49 @@ private fun DetailLikeActionButton(
     }
 }
 
+/**
+ * 评论区顶部的「博主精选评论」分组头。
+ *
+ * 博主开启精选评论后，接口只下发被精选的评论（实测一条 1041 条评论的微博只返回 1 条），
+ * 不加说明的话用户会以为评论区加载失败或被截断。
+ */
+@Composable
+private fun FeaturedCommentsHeader(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Verified,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(16.dp)
+        )
+        Text(
+            text = "博主精选评论",
+            style = MaterialTheme.typography.titleSmallEmphasized,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+/** 精选评论列表的收尾说明。 */
+@Composable
+private fun FeaturedCommentsFooter(modifier: Modifier = Modifier) {
+    Text(
+        text = "以上为博主精选的评论",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+        textAlign = TextAlign.Center,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp)
+    )
+}
+
 @Composable
 private fun RepostItemRow(
     repost: WeiboStatusDto,
@@ -1214,13 +1378,30 @@ internal fun CommentRow(
     onUserClick: (Long?) -> Unit,
     onMentionClick: (String) -> Unit = {},
     onTopicClick: (String) -> Unit = {},
-    onCopyText: (String) -> Unit,
+    onImageClick: (List<String>, Int) -> Unit = { _, _ -> },
+    onLikeClick: () -> Unit = {},
+    likeEnabled: Boolean = true,
+    /** 整行点击（目前只用于提供按压水波纹反馈，可后续接入“回复评论”等动作）。 */
+    onClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val replyTarget = comment.replyComment?.user
-    val replyText = comment.replyOriginalText?.takeIf { it.isNotBlank() } ?: comment.text
-    val cleanText = remember(comment.text) { WeiboTextFormatter.formatHtmlText(comment.text) }
+    val rawReplyText = comment.replyOriginalText?.takeIf { it.isNotBlank() } ?: comment.text
+    // 纯图片评论的正文是「图片评论 + 查看图片链接」，配图已经单独渲染，这里去掉冗余文案
+    val replyText = if (comment.imageUrls.isEmpty()) {
+        rawReplyText
+    } else {
+        rawReplyText.replace("图片评论", "").trim()
+    }
     val primaryColor = MaterialTheme.colorScheme.primary
+    val likeState = CommentLikeStore.resolve(comment)
+    val likeCountText = likeState.count?.let { formatInteractionCount(it, "") }
+        ?: comment.likeCount.takeIf { it.isNotBlank() && it != "0" }.orEmpty()
+    val likeTint = if (likeState.liked) {
+        primaryColor
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+    }
     val commentFormatted = remember(replyText, primaryColor, onMentionClick, onTopicClick) {
         WeiboTextFormatter.formatWeiboContent(
             rawText = replyText,
@@ -1234,20 +1415,26 @@ internal fun CommentRow(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clickable { onCopyText(cleanText) }
+            // 空 onClick 也保留 clickable：整行按下时有水波纹反馈（内部头像/昵称/点赞等会各自消费点击）
+            .clickable(onClick = onClick)
             .padding(horizontal = if (isReply) 10.dp else 16.dp, vertical = if (isReply) 8.dp else 12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             val avatar = comment.user?.avatarLarge
                 ?: comment.user?.profileImageUrl
                 ?: "https://tvax1.sinaimg.cn/default/images/default_avatar_male_180.gif"
+            // 微博头像 URL 带 KID/Expires/ssig 签名，每次接口返回都不同。
+            // 直接拿 URL 当模型时，展开/翻页后同一张头像会被当成新图重新加载而闪一下；
+            // 改用 uid 维度的稳定缓存键：命中内存缓存，并在加载期间用缓存图占位。
+            val avatarCacheKey = remember(comment.user?.id) { formatAvatarSharedKey(comment.user?.id) }
+            val avatarRequest = rememberSharedAvatarRequest(avatar, avatarCacheKey)
 
             AsyncImage(
-                model = avatar,
+                model = avatarRequest,
                 contentDescription = comment.user?.screenName,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(if (isReply) 30.dp else 38.dp)
+                    .size(if (isReply) 32.dp else 38.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable { onUserClick(comment.user?.id) }
@@ -1268,7 +1455,12 @@ internal fun CommentRow(
                     ) {
                         Text(
                             text = comment.user?.screenName ?: "微博网友",
-                            style = MaterialTheme.typography.titleSmallEmphasized,
+                            // 嵌套回复降一档排版，避免楼中楼的昵称和主评论一样抢眼
+                            style = if (isReply) {
+                                MaterialTheme.typography.labelMediumEmphasized
+                            } else {
+                                MaterialTheme.typography.titleSmallEmphasized
+                            },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             color = MaterialTheme.colorScheme.onSurface,
@@ -1284,26 +1476,44 @@ internal fun CommentRow(
                             UserVerifyBadge(verifyType = verifyType, size = 13.dp)
                         }
                     }
-                    if (comment.likeCount != "0" && comment.likeCount.isNotBlank()) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ThumbUp,
-                                contentDescription = "赞",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                modifier = Modifier.size(13.dp)
+                    Row(
+                        modifier = Modifier
+                            // 对称内边距让水波纹胶囊左右等宽，否则波纹会在计数文字处被"切掉"一块
+                            .clip(CircleShape)
+                            .clickable(enabled = likeEnabled && !likeState.pending, onClick = onLikeClick)
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (likeState.pending) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                strokeWidth = 1.dp,
+                                color = likeTint
                             )
+                        } else {
+                            Icon(
+                                imageVector = if (likeState.liked) {
+                                    Icons.Filled.ThumbUp
+                                } else {
+                                    Icons.Outlined.ThumbUp
+                                },
+                                contentDescription = if (likeState.liked) "取消点赞" else "点赞",
+                                tint = likeTint,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                        if (likeCountText.isNotEmpty()) {
                             Text(
-                                text = comment.likeCount,
+                                text = likeCountText,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                color = likeTint
                             )
                         }
                     }
                 }
 
+                // 时间/来源与昵称同属一个 Column：整块（昵称 + 时间）与头像居中对齐
                 if (metadata.isNotBlank()) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
@@ -1312,23 +1522,22 @@ internal fun CommentRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 }
-
             }
         }
 
-        Column(modifier = Modifier.padding(start = if (isReply) 38.dp else 46.dp)) {
-            Spacer(modifier = Modifier.height(if (isReply) 6.dp else 8.dp))
+        Column(modifier = Modifier.padding(start = if (isReply) 40.dp else 46.dp)) {
+            Spacer(modifier = Modifier.height(12.dp))
 
             if (!replyTarget?.screenName.isNullOrBlank()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "回复 ",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
                         text = "@${replyTarget.screenName}",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1341,14 +1550,27 @@ internal fun CommentRow(
                 Spacer(modifier = Modifier.height(2.dp))
             }
 
-            SelectionContainer {
-                Text(
-                    text = commentFormatted.annotatedString,
-                    inlineContent = commentFormatted.inlineContent,
-                    style = if (isReply) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+            if (commentFormatted.annotatedString.isNotEmpty()) {
+                SelectionContainer {
+                    Text(
+                        text = commentFormatted.annotatedString,
+                        inlineContent = commentFormatted.inlineContent,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            val commentImages = comment.imageUrls
+            if (commentImages.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                ImageGrid(
+                    images = commentImages,
+                    ownerKey = remember(comment.listKey) { "comment_${comment.listKey}" },
+                    onImageClick = { index -> onImageClick(commentImages, index) }
                 )
             }
+            Spacer(modifier = Modifier.height(4.dp))
         }
     }
 }

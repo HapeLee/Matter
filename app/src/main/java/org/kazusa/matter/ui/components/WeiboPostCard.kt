@@ -1,5 +1,6 @@
 package org.kazusa.matter.ui.components
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,19 +21,28 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import org.kazusa.matter.core.network.ApiResult
+import org.kazusa.matter.data.cache.UserAvatarCache
+import org.kazusa.matter.data.model.VideoStreamInfo
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,31 +65,82 @@ import org.kazusa.matter.ui.media.morph.LocalImageMorphState
 import androidx.compose.ui.graphics.RectangleShape
 import org.kazusa.matter.ui.detail.PostDetailCache
 import org.kazusa.matter.ui.detail.getCardSharedKey
+import org.kazusa.matter.ui.detail.getRetweetSectionSharedKey
+import org.kazusa.matter.ui.navigation.LocalSharedElementTarget
+import org.kazusa.matter.ui.navigation.formatAvatarSharedKey
 import org.kazusa.matter.ui.navigation.weiboCardSharedBounds
+import org.kazusa.matter.ui.navigation.weiboPostAvatarSharedElement
+import org.kazusa.matter.ui.navigation.weiboPostContentSharedBounds
+import org.kazusa.matter.ui.navigation.weiboPostNameSharedElement
+import org.kazusa.matter.ui.navigation.weiboPostSubtitleSharedElement
+import org.kazusa.matter.ui.navigation.weiboVideoSharedBounds
+import org.kazusa.matter.ui.navigation.formatVideoSharedKey
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.launch
 
 @Composable
 fun WeiboPostCard(
     post: WeiboStatusDto,
     modifier: Modifier = Modifier,
     isCard: Boolean = true,
+    /**
+     * 是否允许卡片头像参与共享元素动画。
+     * 博主主页列表里的卡片需要关闭：主页顶部的大头像才是动画目标，
+     * 否则同一 uid 的头像会在同一页面里出现多个共享元素。
+     */
+    enableAvatarSharedTransition: Boolean = true,
     onUserClick: (Long?) -> Unit = {},
     onPostClick: (WeiboStatusDto) -> Unit = {},
     onCommentClick: (WeiboStatusDto) -> Unit = { onPostClick(it) },
     onImageClick: (urls: List<String>, index: Int) -> Unit = { _, _ -> },
-    onVideoClick: (url: String, title: String) -> Unit = { _, _ -> },
+    onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit = { _, _, _, _, _ -> },
     onMentionClick: (String) -> Unit = {},
     onTopicClick: (String) -> Unit = {}
 ) {
     val morphState = LocalImageMorphState.current
+    val sharedElementTarget = LocalSharedElementTarget.current
     val cardSharedKey = remember(post.idStr, post.mid, post.id) { post.getCardSharedKey() }
+    val avatarSharedKey = remember(post.user?.id, enableAvatarSharedTransition) {
+        if (enableAvatarSharedTransition) formatAvatarSharedKey(post.user?.id) else ""
+    }
+
+    // 打开正文：只做卡片容器的形变，头像作为卡片内容随之一起过渡
+    val handlePostClick: (WeiboStatusDto) -> Unit = { clicked ->
+        sharedElementTarget?.selectPost(clicked.getCardSharedKey())
+        PostDetailCache.put(clicked)
+        onPostClick(clicked)
+    }
+    val handleCommentClick: (WeiboStatusDto) -> Unit = { clicked ->
+        sharedElementTarget?.selectPost(clicked.getCardSharedKey())
+        PostDetailCache.put(clicked)
+        onCommentClick(clicked)
+    }
+    // 点击卡片内的「原微博」区域：从转发区块本身起飞，
+    // 不能复用原微博自己的 post_card_<id>，否则动画会从信息流里那张原微博卡片开始
+    val handleRetweetClick: (WeiboStatusDto) -> Unit = { clicked ->
+        sharedElementTarget?.selectPost(
+            cardKey = clicked.getRetweetSectionSharedKey(),
+            ownerKey = cardSharedKey
+        )
+        PostDetailCache.put(clicked)
+        onPostClick(clicked)
+    }
+    // 点击头像进入主页：只让头像参与共享元素动画，卡片容器保持静态
+    val handleUserClick: (Long?) -> Unit = { clickedUid ->
+        if (avatarSharedKey.isNotBlank()) {
+            sharedElementTarget?.selectAvatar(
+                ownerKey = cardSharedKey,
+                avatarKey = avatarSharedKey
+            )
+        }
+        onUserClick(clickedUid)
+    }
 
     if (isCard) {
         Card(
             onClick = {
                 if (morphState?.isPresent != true) {
-                    PostDetailCache.put(post)
-                    onPostClick(post)
+                    handlePostClick(post)
                 }
             },
             modifier = modifier
@@ -101,15 +162,12 @@ fun WeiboPostCard(
             PostCardContent(
                 post = post,
                 isCard = true,
-                onUserClick = onUserClick,
-                onPostClick = {
-                    PostDetailCache.put(it)
-                    onPostClick(it)
-                },
-                onCommentClick = {
-                    PostDetailCache.put(it)
-                    onCommentClick(it)
-                },
+                avatarSharedKey = avatarSharedKey,
+                sharedOwnerKey = cardSharedKey,
+                onUserClick = handleUserClick,
+                onPostClick = handlePostClick,
+                onCommentClick = handleCommentClick,
+                onRetweetClick = handleRetweetClick,
                 onImageClick = onImageClick,
                 onVideoClick = onVideoClick,
                 onMentionClick = onMentionClick,
@@ -129,15 +187,12 @@ fun WeiboPostCard(
             PostCardContent(
                 post = post,
                 isCard = false,
-                onUserClick = onUserClick,
-                onPostClick = {
-                    PostDetailCache.put(it)
-                    onPostClick(it)
-                },
-                onCommentClick = {
-                    PostDetailCache.put(it)
-                    onCommentClick(it)
-                },
+                avatarSharedKey = avatarSharedKey,
+                sharedOwnerKey = cardSharedKey,
+                onUserClick = handleUserClick,
+                onPostClick = handlePostClick,
+                onCommentClick = handleCommentClick,
+                onRetweetClick = handleRetweetClick,
                 onImageClick = onImageClick,
                 onVideoClick = onVideoClick,
                 onMentionClick = onMentionClick,
@@ -152,15 +207,19 @@ fun WeiboPostCard(
 private fun PostCardContent(
     post: WeiboStatusDto,
     isCard: Boolean,
+    avatarSharedKey: String,
+    sharedOwnerKey: String,
     onUserClick: (Long?) -> Unit,
     onPostClick: (WeiboStatusDto) -> Unit,
     onCommentClick: (WeiboStatusDto) -> Unit,
+    onRetweetClick: (WeiboStatusDto) -> Unit,
     onImageClick: (urls: List<String>, index: Int) -> Unit,
-    onVideoClick: (url: String, title: String) -> Unit,
+    onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit,
     onMentionClick: (String) -> Unit,
     onTopicClick: (String) -> Unit
 ) {
     val morphState = LocalImageMorphState.current
+    val sharedElementTarget = LocalSharedElementTarget.current
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -183,13 +242,31 @@ private fun PostCardContent(
                 val avatar = post.user?.avatarLarge
                     ?: post.user?.profileImageUrl
                     ?: "https://tvax1.sinaimg.cn/default/images/default_avatar_male_180.gif"
+                // 记录头像地址与昵称：进入博主主页首帧即可复用同一地址与名字，
+                // 避免共享元素飞行期间闪默认头像、或动画结束后昵称再跳一次
+                SideEffect {
+                    UserAvatarCache.put(post.user?.id, avatar, post.user?.screenName)
+                    val verifyType = post.user.getVerifyType()
+                    if (verifyType != WeiboVerifyType.NONE) {
+                        UserAvatarCache.putVerify(post.user?.id, verifyType.ordinal)
+                    }
+                }
+                // 缓存键与共享元素 key 对齐：卡片→正文时头像单独变形也不会因重新解码而闪
+                val avatarRequest = rememberSharedAvatarRequest(avatar, avatarSharedKey)
 
+                // 头像：卡片 → 正文 时作为卡片内部元素单独参与共享元素转场（38.dp → 44.dp 等比缩放）；
+                // 头像 → 博主主页 时切换回 uid 维度的共享元素，两条路径互斥
                 AsyncImage(
-                    model = avatar,
+                    model = avatarRequest,
                     contentDescription = post.user?.screenName,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(38.dp)
+                        .weiboPostAvatarSharedElement(
+                            containerKey = sharedOwnerKey,
+                            avatarSharedKey = avatarSharedKey,
+                            avatarOwnerKey = sharedOwnerKey
+                        )
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                         .clickable { onUserClick(post.user?.id) }
@@ -199,7 +276,9 @@ private fun PostCardContent(
 
                 Column(modifier = Modifier.weight(1f)) {
                     // 昵称行：仅昵称 + M3大V图标
+                    // 卡片 → 正文 时整行共享元素过渡：titleSmallEmphasized → titleMediumEmphasized 平滑放大
                     Row(
+                        modifier = Modifier.weiboPostNameSharedElement(containerKey = sharedOwnerKey),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -224,7 +303,8 @@ private fun PostCardContent(
                     Text(
                         text = subtitle,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weiboPostSubtitleSharedElement(containerKey = sharedOwnerKey)
                     )
                 }
             }
@@ -242,12 +322,14 @@ private fun PostCardContent(
                     onTopicClick = onTopicClick
                 )
             }
+            // 两端字号一致，各自固定最终折行，转场保持字号并移动、淡化排版。
             SelectionContainer {
                 Text(
                     text = contentFormatted.annotatedString,
                     inlineContent = contentFormatted.inlineContent,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weiboPostContentSharedBounds(containerKey = sharedOwnerKey)
                 )
             }
 
@@ -260,24 +342,34 @@ private fun PostCardContent(
                 }
                 ImageGrid(
                     images = imageUrls,
+                    ownerKey = sharedOwnerKey,
+                    sharedContainerKey = sharedOwnerKey,
                     livePhotoMap = post.livePhotoVideoMap,
                     onImageClick = onGridImageClick
                 )
             }
 
             // 视频媒体卡片
-            val videoUrl = post.pageInfo?.mediaInfo?.bestVideoUrl
+            val mediaInfo = post.pageInfo?.mediaInfo
+            val videoUrl = mediaInfo?.bestVideoUrl
+            val streams = mediaInfo?.availableStreams.orEmpty()
             if (videoUrl != null) {
                 Spacer(modifier = Modifier.height(10.dp))
                 val videoCover = post.pageInfo.pagePic ?: ""
                 val videoTitle = post.pageInfo.pageTitle ?: WeiboTextFormatter.formatHtmlText(post.textRaw ?: post.text).take(20)
+                val videoMid = post.idStr ?: post.mid ?: post.id?.toString()
+                val videoSharedKey = remember(videoMid, videoUrl) { formatVideoSharedKey(videoMid, videoUrl) }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(190.dp)
+                        .weiboVideoSharedBounds(key = videoSharedKey, shape = RoundedCornerShape(8.dp))
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color.Black)
-                        .clickable { onVideoClick(videoUrl, videoTitle) },
+                        .clickable {
+                            sharedElementTarget?.selectVideo(videoSharedKey)
+                            onVideoClick(videoUrl, videoTitle, streams, videoCover, videoMid ?: "")
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     if (videoCover.isNotBlank()) {
@@ -310,7 +402,8 @@ private fun PostCardContent(
         post.retweetedStatus?.let { retweet ->
             RetweetCard(
                 retweet = retweet,
-                onPostClick = onPostClick,
+                hostSharedKey = sharedOwnerKey,
+                onPostClick = onRetweetClick,
                 onImageClick = onImageClick,
                 onVideoClick = onVideoClick,
                 onMentionClick = onMentionClick,
@@ -356,12 +449,7 @@ private fun PostCardContent(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                 thickness = 0.8.dp
             )
-            ActionButton(
-                icon = Icons.Outlined.ThumbUp,
-                count = post.attitudesCount,
-                defaultLabel = "赞",
-                onClick = {}
-            )
+            PostLikeActionButton(post = post)
             Spacer(modifier = Modifier.weight(1f))
             FavoriteActionButton(post = post)
         }
@@ -371,17 +459,30 @@ private fun PostCardContent(
 @Composable
 private fun RetweetCard(
     retweet: WeiboStatusDto,
+    /** 外层转发卡片的唯一 key：既用于转发区块共享元素的来源去重，也用于图片形变的来源标识 */
+    hostSharedKey: String,
     onPostClick: (WeiboStatusDto) -> Unit = {},
     onImageClick: (urls: List<String>, index: Int) -> Unit = { _, _ -> },
-    onVideoClick: (url: String, title: String) -> Unit = { _, _ -> },
+    onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit = { _, _, _, _, _ -> },
     onMentionClick: (String) -> Unit = {},
     onTopicClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val morphState = LocalImageMorphState.current
+    val sharedElementTarget = LocalSharedElementTarget.current
+    val retweetSectionKey = remember(retweet.idStr, retweet.mid, retweet.id) {
+        retweet.getRetweetSectionSharedKey()
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
+            // 转发区块自己就是形变来源，与「原微博卡片」的 key 分开，
+            // 并用宿主卡片 key 锁定唯一来源（同一条原微博可能被多条微博转发）
+            .weiboCardSharedBounds(
+                key = retweetSectionKey,
+                shape = RectangleShape,
+                ownerKey = hostSharedKey
+            )
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .clickable {
                 if (morphState?.isPresent != true) {
@@ -418,40 +519,73 @@ private fun RetweetCard(
             }
         }
 
+        // 转发区块正文：与「正文页主正文」共享元素对齐，
+        // ownerKey 锁定宿主卡片，避免多条微博转发同一条时多张卡片一起动画
         SelectionContainer {
             Text(
                 text = fullAnnotated,
                 inlineContent = bodyFormatted.inlineContent,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weiboPostContentSharedBounds(
+                    containerKey = retweetSectionKey,
+                    ownerKey = hostSharedKey
+                )
             )
         }
 
         val retweetImages = retweet.allLargeImageUrls
         if (retweetImages.isNotEmpty()) {
+            // 打开宿主微博时匹配正文内的转发图片；打开原微博时匹配正文主图。
+            val sharingHost = sharedElementTarget?.isContainerSelected(hostSharedKey) == true
             Spacer(modifier = Modifier.height(8.dp))
             val onGridImageClick = remember(retweetImages, onImageClick) {
                 { index: Int -> onImageClick(retweetImages, index) }
             }
             ImageGrid(
                 images = retweetImages,
+                // 与原微博卡片的图片宫格区分，避免两张卡片互相让位/抢收拢目标
+                ownerKey = "retweet_$hostSharedKey",
+                sharedContainerKey = if (sharingHost) {
+                    hostSharedKey
+                } else {
+                    retweetSectionKey
+                },
+                sharedContainerOwnerKey = if (sharingHost) {
+                    null
+                } else {
+                    hostSharedKey
+                },
+                sharedImagePart = if (sharingHost) {
+                    "retweet_image"
+                } else {
+                    "image"
+                },
                 livePhotoMap = retweet.livePhotoVideoMap,
                 onImageClick = onGridImageClick
             )
         }
 
-        val videoUrl = retweet.pageInfo?.mediaInfo?.bestVideoUrl
+        val mediaInfo = retweet.pageInfo?.mediaInfo
+        val videoUrl = mediaInfo?.bestVideoUrl
+        val streams = mediaInfo?.availableStreams.orEmpty()
         if (videoUrl != null) {
             Spacer(modifier = Modifier.height(8.dp))
             val videoCover = retweet.pageInfo.pagePic ?: ""
             val videoTitle = retweet.pageInfo.pageTitle ?: WeiboTextFormatter.formatHtmlText(retweet.textRaw ?: retweet.text).take(20)
+            val videoMid = retweet.idStr ?: retweet.mid ?: retweet.id?.toString()
+            val videoSharedKey = remember(videoMid, videoUrl) { formatVideoSharedKey(videoMid, videoUrl) }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(170.dp)
+                    .weiboVideoSharedBounds(key = videoSharedKey, shape = RoundedCornerShape(8.dp))
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color.Black)
-                    .clickable { onVideoClick(videoUrl, videoTitle) },
+                    .clickable {
+                        sharedElementTarget?.selectVideo(videoSharedKey)
+                        onVideoClick(videoUrl, videoTitle, streams, videoCover, videoMid ?: "")
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 if (videoCover.isNotBlank()) {
@@ -487,30 +621,110 @@ private fun ActionButton(
     count: String,
     defaultLabel: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    tint: Color? = null,
+    busy: Boolean = false,
+    enabled: Boolean = true
 ) {
+    val contentColor = tint ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
     Row(
         modifier = modifier
             .height(38.dp)
             .clip(MaterialTheme.shapes.small)
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = defaultLabel,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-            modifier = Modifier.size(16.dp)
-        )
+        if (busy) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(14.dp),
+                strokeWidth = 1.5.dp,
+                color = contentColor
+            )
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = defaultLabel,
+                tint = contentColor,
+                modifier = Modifier.size(16.dp)
+            )
+        }
         Spacer(modifier = Modifier.width(6.dp))
         Text(
             text = formatCount(count, defaultLabel),
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+            color = contentColor
         )
     }
+}
+
+/**
+ * 信息流卡片的点赞按钮。
+ *
+ * 点击后立即乐观更新，再异步写回服务端；失败时回滚并把错误提示给用户。
+ * 页面未提供接口服务（例如预览场景）时按钮保持不可点击，避免空转。
+ */
+@Composable
+private fun PostLikeActionButton(
+    post: WeiboStatusDto,
+    modifier: Modifier = Modifier
+) {
+    val apiService = LocalWeiboApiService.current
+    val scope = LocalFavoriteActionScope.current ?: rememberCoroutineScope()
+    val snackbarHostState = LocalSnackbarHostState.current
+    val context = LocalContext.current
+    val morphState = LocalImageMorphState.current
+    val key = remember(post.idStr, post.mid, post.id) { PostLikeStore.keyOf(post) }
+    val likeState = PostLikeStore.resolve(post)
+
+    val onLikeClick: () -> Unit = {
+        if (morphState?.isPresent != true && apiService != null && key.isNotBlank() && !likeState.pending) {
+            val previous = likeState.copy(pending = false)
+            val newLiked = !previous.liked
+            val newCount = previous.count?.let { count ->
+                if (newLiked) count + 1 else (count - 1).coerceAtLeast(0)
+            }
+            PostLikeStore.put(key, PostLikeState(newLiked, newCount, pending = true))
+            scope.launch {
+                when (val result = apiService.setAttitude(key, newLiked)) {
+                    is ApiResult.Success -> {
+                        PostLikeStore.put(key, PostLikeState(newLiked, newCount))
+                        PostDetailCache.get(key)?.let { cached ->
+                            PostDetailCache.put(
+                                cached.copy(
+                                    isLiked = newLiked,
+                                    attitudesCount = newCount?.toString() ?: cached.attitudesCount
+                                )
+                            )
+                        }
+                    }
+                    is ApiResult.Error -> {
+                        PostLikeStore.put(key, previous)
+                        val message = result.message.ifBlank { "操作失败，请重试" }
+                        if (snackbarHostState != null) {
+                            snackbarHostState.currentSnackbarData?.dismiss()
+                            snackbarHostState.showSnackbar(message = message, duration = SnackbarDuration.Short)
+                        } else {
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    ApiResult.Loading -> PostLikeStore.put(key, previous)
+                }
+            }
+        }
+    }
+
+    ActionButton(
+        icon = if (likeState.liked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
+        count = likeState.count?.toString() ?: post.attitudesCount,
+        defaultLabel = "赞",
+        tint = if (likeState.liked) MaterialTheme.colorScheme.primary else null,
+        busy = likeState.pending,
+        enabled = apiService != null && key.isNotBlank(),
+        onClick = onLikeClick,
+        modifier = modifier
+    )
 }
 
 private fun formatCount(countStr: String, defaultLabel: String): String {

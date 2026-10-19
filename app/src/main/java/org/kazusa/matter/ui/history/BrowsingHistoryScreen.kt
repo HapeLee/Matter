@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Article
@@ -29,8 +28,6 @@ import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -62,9 +59,13 @@ import org.kazusa.matter.core.util.TimeUtils
 import org.kazusa.matter.data.local.BrowsingCategory
 import org.kazusa.matter.data.local.BrowsingHistoryEntity
 import org.kazusa.matter.ui.components.ImmersiveTopBar
+import org.kazusa.matter.ui.components.MatterCard
+import org.kazusa.matter.ui.components.MatterTag
 import org.kazusa.matter.ui.components.SearchInputField
 import org.kazusa.matter.ui.components.TopBarNavigationButton
+import org.kazusa.matter.ui.theme.MatterShapeTokens
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassFloatingMenu
+import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
 
 /** 悬浮筛选的可选项；[mask] 直接作为位掩码下发给 DAO */
 private enum class HistoryFilter(val label: String, val mask: Int) {
@@ -288,7 +289,7 @@ fun BrowsingHistoryScreen(
                     .navigationBarsPadding()
                     .padding(end = 16.dp, bottom = 16.dp),
                 icon = {
-                    Icon(
+                    LiquidGlassIcon(
                         imageVector = Icons.Outlined.FilterList,
                         contentDescription = "筛选浏览记录"
                     )
@@ -306,9 +307,9 @@ private fun HistoryItemRow(
 ) {
     val isUser = item.category and BrowsingCategory.USER != 0
 
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+    MatterCard(
+        shape = MatterShapeTokens.listItem,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -381,14 +382,10 @@ private fun HistoryItemRow(
 
 @Composable
 private fun CategoryPill(text: String) {
-    Text(
+    MatterTag(
         text = text,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-            .padding(horizontal = 6.dp, vertical = 2.dp)
+        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+        contentColor = MaterialTheme.colorScheme.primary
     )
 }
 

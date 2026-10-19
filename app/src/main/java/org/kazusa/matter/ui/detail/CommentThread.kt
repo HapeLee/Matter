@@ -1,16 +1,20 @@
 ﻿package org.kazusa.matter.ui.detail
 
+import android.widget.Toast
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -22,11 +26,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import org.kazusa.matter.core.network.ApiResult
 import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.data.model.CommentsDataDto
 import org.kazusa.matter.data.model.WeiboCommentDto
+import org.kazusa.matter.ui.components.LocalSnackbarHostState
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -44,6 +51,23 @@ internal fun mergeCommentReplies(
     return replies.values.toList()
 }
 
+/**
+ * 折叠状态下点「展开」实际会多出来的回复条数。
+ *
+ * hotflow 只下发前几条回复预览（常常少于 `total_number`），所以不能直接用 `total_number` 当文案数字，
+ * 否则会出现「已经显示 2 条、按钮却写『展开 3 条回复』、点完只多 1 条」的错位。
+ * 真正还没露出来的是两部分之和：已折叠掉的 + 服务端尚未下发的。
+ */
+private fun hiddenReplyCount(
+    comment: WeiboCommentDto,
+    state: CommentRepliesState,
+    visibleCount: Int
+): Int {
+    val hiddenLoaded = (state.replies.size - visibleCount).coerceAtLeast(0)
+    val notLoaded = ((comment.totalNumber ?: 0) - state.replies.size).coerceAtLeast(0)
+    return hiddenLoaded + notLoaded
+}
+
 @Serializable
 internal data class CommentRepliesState(
     val replies: List<WeiboCommentDto>,
@@ -53,18 +77,25 @@ internal data class CommentRepliesState(
     val loadedPage: Boolean = false,
     val nextMaxId: Long = 0,
     val nextMaxIdType: Int = 0,
-    val hasMore: Boolean = false
+    val hasMore: Boolean = false,
+    /**
+     * 已确认这条评论拉不到任何回复（例如开启精选评论后楼中楼接口直接回「暂无数据」）。
+     * 置位后不再展示「展开 N 条回复」，避免点了之后空空如也。
+     */
+    val repliesUnavailable: Boolean = false
 ) {
     fun withPage(page: CommentsDataDto, rootId: Long?): CommentRepliesState {
         val cursor = page.maxId ?: 0
+        val merged = mergeCommentReplies(replies, page.data, rootId)
         return copy(
-            replies = mergeCommentReplies(replies, page.data, rootId),
+            replies = merged,
             loading = false,
             error = null,
             loadedPage = true,
             nextMaxId = cursor,
             nextMaxIdType = page.maxIdType ?: 0,
-            hasMore = page.data.isNotEmpty() && cursor > 0 && cursor != nextMaxId
+            hasMore = page.data.isNotEmpty() && cursor > 0 && cursor != nextMaxId,
+            repliesUnavailable = merged.isEmpty() && page.data.isEmpty()
         )
     }
 }
@@ -74,6 +105,12 @@ private val commentRepliesSaver = Saver<CommentRepliesState, String>(
     restore = { Json.decodeFromString<CommentRepliesState>(it) }
 )
 
+/**
+ * 单条评论（含其嵌套回复）。
+ *
+ * [depth] 表示嵌套层级：0 是一级评论，>0 是回复。层级只影响缩进与字号，
+ * 不影响数据结构，所以「回复的回复」仍会按各自的服务端 id 独立分页与点赞。
+ */
 @Composable
 internal fun CommentThread(
     comment: WeiboCommentDto,
@@ -84,14 +121,61 @@ internal fun CommentThread(
     onUserClick: (Long?) -> Unit,
     onMentionClick: (String) -> Unit,
     onTopicClick: (String) -> Unit,
-    onCopyText: (String) -> Unit,
-    isReply: Boolean = false
+    onImageClick: (List<String>, Int) -> Unit = { _, _ -> },
+    depth: Int = 0,
+    /** 当前微博开启了「博主精选评论」：此时楼中楼接口往往直接回「暂无数据」。 */
+    approvalCommentsOnly: Boolean = false
 ) {
-    var state by rememberSaveable(comment.id, stateSaver = commentRepliesSaver) {
+    var state by rememberSaveable(
+        comment.id ?: comment.listKey,
+        stateSaver = commentRepliesSaver
+    ) {
         mutableStateOf(CommentRepliesState(mergeCommentReplies(emptyList(), comment.comments, comment.id)))
     }
     val scope = rememberCoroutineScope()
-    val canFetch = comment.id != null && if (state.loadedPage) {
+    val snackbarHostState = LocalSnackbarHostState.current
+    val context = LocalContext.current
+    val isReply = depth > 0
+
+    fun showMessage(message: String) {
+        if (message.isBlank()) return
+        if (snackbarHostState != null) {
+            scope.launch {
+                snackbarHostState.currentSnackbarData?.dismiss()
+                snackbarHostState.showSnackbar(message = message, duration = SnackbarDuration.Short)
+            }
+        } else {
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun toggleLike() {
+        val commentId = comment.id ?: return
+        val current = CommentLikeStore.resolve(comment)
+        if (current.pending) return
+        val newLiked = !current.liked
+        val newCount = current.count?.let { count ->
+            if (newLiked) count + 1 else (count - 1).coerceAtLeast(0)
+        }
+        CommentLikeStore.put(commentId, current.copy(liked = newLiked, count = newCount, pending = true))
+        scope.launch {
+            when (val result = apiService.setAttitude(commentId.toString(), newLiked)) {
+                is ApiResult.Success ->
+                    CommentLikeStore.put(commentId, CommentLikeState(newLiked, newCount))
+                is ApiResult.Error -> {
+                    CommentLikeStore.put(commentId, current.copy(pending = false))
+                    showMessage(result.message.ifBlank { "操作失败，请重试" })
+                }
+                ApiResult.Loading -> CommentLikeStore.put(commentId, current.copy(pending = false))
+            }
+        }
+    }
+
+    // 精选评论下楼中楼可能整体不可见（接口直接回「暂无数据」），
+    // 当评论自身也没带回复预览时，就不再给一个点开也空的「展开 N 条回复」入口
+    val repliesHidden = approvalCommentsOnly && state.replies.isEmpty()
+
+    val canFetch = comment.id != null && !state.repliesUnavailable && !repliesHidden && if (state.loadedPage) {
         state.hasMore
     } else {
         (comment.totalNumber ?: 0) > state.replies.size || (comment.maxId ?: 0) > 0
@@ -122,19 +206,26 @@ internal fun CommentThread(
             onUserClick = onUserClick,
             onMentionClick = onMentionClick,
             onTopicClick = onTopicClick,
-            onCopyText = onCopyText
+            onImageClick = onImageClick,
+            onLikeClick = { toggleLike() },
+            likeEnabled = comment.id != null
         )
         if (state.replies.isNotEmpty() || canFetch || state.loading || state.error != null) {
             Column(
                 modifier = Modifier
-                    .padding(start = if (isReply) 8.dp else 62.dp, end = if (isReply) 8.dp else 16.dp, bottom = 12.dp)
+                    .fillMaxWidth()
+                    .padding(
+                        start = if (isReply) 8.dp else 62.dp,
+                        end = if (isReply) 8.dp else 16.dp,
+                        bottom = 12.dp
+                    )
                     .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainer)
                     .animateContentSize()
             ) {
                 val visibleReplies = if (state.expanded) state.replies else state.replies.take(3)
                 visibleReplies.forEach { reply ->
-                    androidx.compose.runtime.key(reply.id ?: reply) {
+                    androidx.compose.runtime.key(reply.listKey) {
                         CommentThread(
                             comment = reply,
                             postId = postId,
@@ -144,14 +235,17 @@ internal fun CommentThread(
                             onUserClick = onUserClick,
                             onMentionClick = onMentionClick,
                             onTopicClick = onTopicClick,
-                            onCopyText = onCopyText,
-                            isReply = true
+                            onImageClick = onImageClick,
+                            depth = depth + 1,
+                            approvalCommentsOnly = approvalCommentsOnly
                         )
                     }
                 }
                 when {
                     state.loading -> Row(
-                        modifier = Modifier.padding(12.dp),
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -159,43 +253,68 @@ internal fun CommentThread(
                         Text("正在加载回复…", style = MaterialTheme.typography.labelMedium)
                     }
                     state.error != null -> {
-                        Text(
+                        CommentReplyAction(
                             text = "${state.error} · 点击重试",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.clickable { loadMore() }.padding(12.dp)
+                            contentColor = MaterialTheme.colorScheme.error,
+                            onClick = { loadMore() },
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
                         )
                     }
                     !state.expanded && (state.replies.size > 3 || canFetch) -> {
-                        val total = maxOf(comment.totalNumber ?: 0, state.replies.size)
-                        Text(
-                            text = if (total > 0) "展开 $total 条回复" else "展开回复",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.clickable {
+                        // hotflow 只下发前几条回复预览（常常少于 total_number），
+                        // 所以按钮上要报的是「点了之后还会多出来几条」：已折叠掉的 + 还没下发的
+                        val remaining = hiddenReplyCount(comment, state, visibleReplies.size)
+                        CommentReplyAction(
+                            text = if (remaining > 0) "展开其余 $remaining 条回复" else "展开回复",
+                            onClick = {
                                 state = state.copy(expanded = true)
                                 if (canFetch && !state.loadedPage) loadMore()
-                            }.padding(12.dp)
+                            },
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
                         )
                     }
                     state.expanded && canFetch -> {
-                        Text(
-                            text = "加载更多回复",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.clickable { loadMore() }.padding(12.dp)
+                        val notLoaded = ((comment.totalNumber ?: 0) - state.replies.size).coerceAtLeast(0)
+                        CommentReplyAction(
+                            text = if (notLoaded > 0) "加载其余 $notLoaded 条回复" else "加载更多回复",
+                            onClick = { loadMore() },
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
                         )
                     }
                 }
                 if (state.expanded) {
-                    Text(
+                    CommentReplyAction(
                         text = "收起回复",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.clickable { state = state.copy(expanded = false) }.padding(12.dp)
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        onClick = { state = state.copy(expanded = false) },
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
                     )
                 }
             }
         }
     }
+}
+
+/**
+ * 回复区底部的操作按钮（展开 / 加载更多 / 收起 / 重试）。
+ *
+ * 统一靠右对齐，做成带圆角的胶囊：外层 padding 是与回复列表之间的边距，
+ * 内层 padding 决定胶囊本身的胖瘦，圆角裁剪放在 clickable 之前以保证水波纹也被裁成胶囊。
+ */
+@Composable
+private fun CommentReplyAction(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    contentColor: Color = MaterialTheme.colorScheme.primary
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmallEmphasized,
+        color = contentColor,
+        modifier = modifier
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 12.dp)
+    )
 }

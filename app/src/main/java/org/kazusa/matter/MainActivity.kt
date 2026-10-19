@@ -34,4 +34,11 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    var onUserLeaveHintListener: (() -> Unit)? = null
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        onUserLeaveHintListener?.invoke()
+    }
 }

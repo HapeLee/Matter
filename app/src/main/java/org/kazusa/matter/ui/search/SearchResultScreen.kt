@@ -1,5 +1,6 @@
 package org.kazusa.matter.ui.search
 
+import org.kazusa.matter.data.model.VideoStreamInfo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -64,6 +65,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
+import org.kazusa.matter.ui.effect.fadeInOnContentChange
 import org.kazusa.matter.ui.effect.rememberScreenBackdrop
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -147,7 +149,7 @@ fun SearchResultScreen(
     onUserClick: (Long?) -> Unit = {},
     onPostClick: (WeiboStatusDto) -> Unit,
     onImageClick: (urls: List<String>, index: Int) -> Unit = { _, _ -> },
-    onVideoClick: (url: String, title: String) -> Unit = { _, _ -> },
+    onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit = { _, _, _, _, _ -> },
     onTopicClick: (String) -> Unit = {},
     /** 点词条组里的词条（相关搜索 / 热门话题）→ 用该词条再搜一次 */
     onChipClick: (String) -> Unit = {},
@@ -396,7 +398,10 @@ fun SearchResultScreen(
                 isRefreshing = currentState.isRefreshing,
                 state = pullRefreshState,
                 onRefresh = { loadTab(safeIndex, pageToLoad = 1, isRefresh = true) },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    // 切分栏 / 首次拉到数据时淡入，避免加载态与数据态硬切
+                    .fadeInOnContentChange(key = safeIndex to currentState.items.isNotEmpty())
             ) {
                 when {
                     currentState.isLoading && currentState.items.isEmpty() -> {
@@ -520,7 +525,7 @@ fun SearchResultScreen(
                         .navigationBarsPadding()
                         .padding(end = 16.dp, bottom = 16.dp),
                     icon = {
-                        Icon(
+                        LiquidGlassIcon(
                             imageVector = Icons.AutoMirrored.Filled.Sort,
                             contentDescription = "切换搜索分栏"
                         )

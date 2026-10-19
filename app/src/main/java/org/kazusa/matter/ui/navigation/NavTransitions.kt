@@ -131,14 +131,31 @@ object NavTransitions {
         }
 
     /**
-     * 微博正文详情页容器变换（Card Morph）协同转场元数据：
+     * 共享元素页面（微博正文 / 博主主页）的纯渐变转场元数据：
      * 消除整页大范围横滑视差，改用柔和的交叉淡入淡出，
-     * 使得处于 sharedBounds 顶层的卡片飞行动画成为视觉中心，
-     * 避免横向位移与卡片形变相互拉扯，达成如打开大图般丝滑的沉浸感。
+     * 使得 sharedBounds 卡片形变与头像放大成为视觉中心，
+     * 避免横向位移与共享元素动画相互拉扯，达成如打开大图般丝滑的沉浸感。
      */
     val detailMetadata: Map<String, Any> =
         NavDisplay.transitionSpec {
             fadeIn(animationSpec = tween(durationMillis = 300, easing = LinearOutSlowInEasing)) togetherWith
+                fadeOut(animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing))
+        } + NavDisplay.popTransitionSpec {
+            fadeIn(animationSpec = tween(durationMillis = 260, easing = LinearOutSlowInEasing)) togetherWith
+                fadeOut(animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing))
+        } + NavDisplay.predictivePopTransitionSpec { _ ->
+            fadeIn(animationSpec = tween(durationMillis = 200)) togetherWith
+                fadeOut(animationSpec = tween(durationMillis = 200))
+        }
+
+    /**
+     * 微博视频全屏播放容器形变（Video Container Morph）协同转场元数据：
+     * 与详情页卡片形变一致，全页消除大范围横滑与 0.7x 缩放拉扯，改用底层与前景的柔和交叉渐变，
+     * 将共享容器 sharedBounds 从卡片边界向全屏展开的形变动画凸显为第一视觉焦点。
+     */
+    val videoMetadata: Map<String, Any> =
+        NavDisplay.transitionSpec {
+            fadeIn(animationSpec = tween(durationMillis = 280, easing = LinearOutSlowInEasing)) togetherWith
                 fadeOut(animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing))
         } + NavDisplay.popTransitionSpec {
             fadeIn(animationSpec = tween(durationMillis = 260, easing = LinearOutSlowInEasing)) togetherWith

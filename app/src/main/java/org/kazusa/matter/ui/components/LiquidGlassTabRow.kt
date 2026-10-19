@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,6 +38,7 @@ import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.vibrancy
+import org.kazusa.matter.ui.effect.liquid.LiquidGlassText
 import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 
 /**
@@ -273,7 +273,7 @@ private fun TabChip(
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Text(
+        LiquidGlassText(
             text = label,
             style = if (selected) MaterialTheme.typography.labelLargeEmphasized else MaterialTheme.typography.labelLarge,
             color = contentColor,

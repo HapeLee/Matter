@@ -15,7 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassCapsule
+import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
 import org.kazusa.matter.ui.effect.liquid.liquidTextShadow
 
 /**
@@ -95,7 +95,7 @@ fun SearchInputField(
                     singleLine = true,
                     textStyle = MaterialTheme.typography.headlineMediumEmphasized.copy(
                         color = onSurface,
-                        shadow = liquidTextShadow(onSurface)
+                        shadow = liquidTextShadow()
                     ),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -109,7 +109,7 @@ fun SearchInputField(
                                 Text(
                                     text = placeholder,
                                     style = MaterialTheme.typography.headlineMediumEmphasized.copy(
-                                        shadow = liquidTextShadow(onSurfaceVariant)
+                                        shadow = liquidTextShadow()
                                     ),
                                     color = onSurfaceVariant,
                                     maxLines = 1,
@@ -124,7 +124,7 @@ fun SearchInputField(
 
             if (query.isNotEmpty()) {
                 Spacer(modifier = Modifier.width(8.dp))
-                Icon(
+                LiquidGlassIcon(
                     imageVector = Icons.Outlined.Delete,
                     contentDescription = "清空",
                     tint = onSurfaceVariant,

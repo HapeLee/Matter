@@ -30,8 +30,6 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.FormatPaint
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -64,6 +62,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.materialkolor.PaletteStyle
+import org.kazusa.matter.ui.components.MatterCard
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -172,11 +171,8 @@ fun ThemePaletteBottomSheet(
             Spacer(modifier = Modifier.height(16.dp))
 
             // 2. AMOLED 纯黑开关 (当处于深色模式或系统为深色时生效)
-            Card(
-                shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
+            MatterCard(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 16.dp)
@@ -212,11 +208,8 @@ fun ThemePaletteBottomSheet(
 
             // 3. Android 12+ 原生 Monet 动态取色开关
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                Card(
-                    shape = MaterialTheme.shapes.medium,
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer
-                    ),
+                MatterCard(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 16.dp)
@@ -433,14 +426,11 @@ fun ThemePaletteBottomSheet(
             Spacer(modifier = Modifier.height(16.dp))
 
             // 自定义种子色彩拾取器入口卡片
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { showCustomColorDialog = true }
+            MatterCard(
+                shape = MatterShapeTokens.listItem,
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                onClick = { showCustomColorDialog = true },
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier

@@ -19,9 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -342,7 +340,7 @@ fun LegadoLiquidFloatingBottomBar(
                 ) {
                     BadgedBox(badge = { badge(index)?.invoke() }) {
                         Box(Modifier.size(24.dp)) {
-                            Icon(
+                            LiquidGlassIcon(
                                 imageVector = item.icon,
                                 contentDescription = item.title,
                                 modifier = Modifier.fillMaxSize().graphicsLayer {
@@ -350,7 +348,7 @@ fun LegadoLiquidFloatingBottomBar(
                                 },
                                 tint = onSurfaceVariant
                             )
-                            Icon(
+                            LiquidGlassIcon(
                                 imageVector = item.selectedIcon,
                                 contentDescription = null,
                                 modifier = Modifier.fillMaxSize().graphicsLayer {
@@ -362,7 +360,7 @@ fun LegadoLiquidFloatingBottomBar(
                     }
                     // 用双层文本交叉淡入淡出替代组合期插值颜色，避免滑动时逐帧重组
                     Box {
-                        Text(
+                        LiquidGlassText(
                             text = item.title,
                             style = tabLabelStyle,
                             color = onSurfaceVariant,
@@ -372,7 +370,7 @@ fun LegadoLiquidFloatingBottomBar(
                                 alpha = 1f - selectionFractionFor(currentAnimatedPosition, index)
                             }
                         )
-                        Text(
+                        LiquidGlassText(
                             text = item.title,
                             style = tabLabelStyle,
                             color = accentColor,

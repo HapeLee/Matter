@@ -27,7 +27,17 @@ data class WeiboUserDto(
     @Serializable(with = FlexibleStringSerializer::class) @SerialName("friends_count") val friendsCount: String = "",
     @Serializable(with = FlexibleStringSerializer::class) @SerialName("follow_count") val followCount: String = "",
     @Serializable(with = FlexibleStringSerializer::class) @SerialName("statuses_count") val statusesCount: String = "",
-    @SerialName("cover_image_phone") val coverImagePhone: String? = null
+    /** 我是否关注了该用户；不同接口可能不下发，故用可空 + 弹性解析 */
+    @Serializable(with = FlexibleBooleanSerializer::class) val following: Boolean? = null,
+    /** 该用户是否关注了我 */
+    @Serializable(with = FlexibleBooleanSerializer::class) @SerialName("follow_me") val followMe: Boolean? = null,
+    @SerialName("cover_image_phone") val coverImagePhone: String? = null,
+    // 以下字段移动端 userInfo 可能不下发，PC 端 profile/info 会补齐
+    val location: String? = null,
+    val gender: String? = null,
+    val domain: String? = null,
+    val url: String? = null,
+    @SerialName("created_at") val createdAt: String? = null
 ) {
     val bestFollowersCount: String
         get() = followersCount.ifBlank { "0" }

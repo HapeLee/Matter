@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import org.kazusa.matter.core.network.WeiboApiService
+import org.kazusa.matter.data.model.VideoStreamInfo
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.repository.SearchHistoryRepository
 import org.kazusa.matter.ui.search.SearchResultScreen
@@ -30,7 +31,7 @@ fun TopicStatusScreen(
     onUserClick: (Long?) -> Unit = {},
     onPostClick: (WeiboStatusDto) -> Unit,
     onImageClick: (urls: List<String>, index: Int) -> Unit = { _, _ -> },
-    onVideoClick: (url: String, title: String) -> Unit = { _, _ -> },
+    onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit = { _, _, _, _, _ -> },
     onTopicClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {

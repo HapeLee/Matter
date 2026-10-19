@@ -1,5 +1,6 @@
 package org.kazusa.matter.ui.timeline
 
+import org.kazusa.matter.data.model.VideoStreamInfo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.animation.AnimatedVisibility
@@ -23,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import org.kazusa.matter.ui.components.LocalSnackbarHostState
+import org.kazusa.matter.ui.components.MatterSnackbar
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,11 +46,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -97,6 +97,7 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import org.kazusa.matter.ui.components.ImmersiveTopBar
 import org.kazusa.matter.ui.components.TopBarActionButton
 import org.kazusa.matter.ui.components.TopBarTitleText
+import org.kazusa.matter.ui.effect.fadeInOnContentChange
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassCapsule
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
 import org.kazusa.matter.ui.effect.liquid.liquidTextShadow
@@ -112,7 +113,7 @@ fun TimelineScreen(
     onPostClick: (WeiboStatusDto) -> Unit = {},
     onCommentClick: (WeiboStatusDto) -> Unit = onPostClick,
     onImageClick: (urls: List<String>, index: Int) -> Unit = { _, _ -> },
-    onVideoClick: (url: String, title: String) -> Unit = { _, _ -> },
+    onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit = { _, _, _, _, _ -> },
     onMentionClick: (String) -> Unit = {},
     onTopicClick: (String) -> Unit = {},
     onSearchClick: () -> Unit = {},
@@ -300,10 +301,7 @@ fun TimelineScreen(
                     .padding(bottom = bottomBarPadding + 8.dp)
             ) { data ->
                 val isNewContent = !data.visuals.message.contains("暂")
-                Snackbar(
-                    shape = RoundedCornerShape(20.dp),
-                    containerColor = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f),
-                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                MatterSnackbar(
                     modifier = Modifier.padding(horizontal = 24.dp)
                 ) {
                     Row(
@@ -334,10 +332,10 @@ fun TimelineScreen(
                         backdrop = backdrop,
                         onClick = { showGroupSheet = true },
                         trailingIcon = {
+                            // 不额外降透明度：标题内混排的图标与文字必须同色
                             LiquidGlassIcon(
                                 imageVector = Icons.Default.KeyboardArrowDown,
-                                contentDescription = "切换分组",
-                                tint = LocalContentColor.current.copy(alpha = 0.85f)
+                                contentDescription = "切换分组"
                             )
                         }
                     )
@@ -375,7 +373,13 @@ fun TimelineScreen(
             onRefresh = { viewModel.loadTimeline(isRefresh = true) },
             modifier = Modifier.fillMaxSize()
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // 只在「加载态 → 有数据」时整页淡入一次；
+                    // 刷新 / 翻页 / 报错不重置 alpha，否则列表会反复闪
+                    .fadeInOnContentChange(key = uiState.posts.isNotEmpty())
+            ) {
                 when {
                     uiState.posts.isEmpty() && (uiState.isLoading || uiState.isRefreshing) -> {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

@@ -1,9 +1,7 @@
 package org.kazusa.matter.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -13,11 +11,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,9 +23,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import org.kazusa.matter.data.cache.UserAvatarCache
 import org.kazusa.matter.data.model.WeiboSearchCardInfo
 import org.kazusa.matter.data.model.WeiboSearchChip
 import org.kazusa.matter.data.model.WeiboSearchChipGroup
+import org.kazusa.matter.ui.navigation.LocalSharedElementTarget
+import org.kazusa.matter.ui.navigation.formatAvatarSharedKey
+import org.kazusa.matter.ui.navigation.weiboAvatarSharedElement
 
 /**
  * 搜索「用户卡」。
@@ -44,26 +46,82 @@ fun SearchUserCard(
     card: WeiboSearchCardInfo,
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {},
-    onUserClick: (Long?) -> Unit = {}
+    onUserClick: (Long?) -> Unit = {},
+    /**
+     * 强制覆盖「我是否已关注」的判断。
+     *
+     * 「关注的人 / 最新发博」这类列表天然全是已关注用户，但移动端卡片按钮文案
+     * 仍可能下发「关注」。传 true 可避免依赖服务端按钮文案。
+     */
+    followingOverride: Boolean? = null,
+    /** 点击右侧关注按钮；为空时回落到整卡点击 */
+    onFollowClick: (() -> Unit)? = null,
+    /** 关注 / 取关请求进行中，暂时禁用按钮 */
+    followUpdating: Boolean = false
 ) {
     val user = card.user
     val displayName = user?.screenName?.takeIf { it.isNotBlank() }
         ?: card.title?.takeIf { it.isNotBlank() }
         ?: ""
 
-    Card(
-        onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 0.dp,
-            pressedElevation = 2.dp
+    // 关注状态以用户对象的 following / follow_me 为准；服务端按钮文案仅作兜底。
+    // 微博客户端的「已关注 / 互相关注」也是按 relationship 推导，而非直接用按钮名。
+    val isFollowing = followingOverride ?: user?.following
+
+    // 头像共享元素：与博主主页的大头像共用 uid 维度的 key
+    val sharedElementTarget = LocalSharedElementTarget.current
+    val avatarSharedKey = remember(user?.id, user?.idStr) {
+        if (user?.id != null) {
+            formatAvatarSharedKey(user.id)
+        } else {
+            formatAvatarSharedKey(user?.idStr)
+        }
+    }
+    val avatarOwnerKey = remember(avatarSharedKey, card.itemid) {
+        if (avatarSharedKey.isBlank()) "" else "user_card_$avatarSharedKey"
+    }
+    // 与信息流卡片一致：把头像地址/昵称暂存到全局缓存。
+    // 博主主页首帧（接口未返回）会用它兜底，否则共享元素飞行期间目标头像会短暂显示默认图。
+    SideEffect {
+        UserAvatarCache.put(
+            uid = user?.id,
+            url = user?.bestAvatar ?: user?.profileImageUrl,
+            screenName = user?.screenName
         )
+        // 主页首帧据此先画出认证角标，角标才能和头像一起起飞
+        val currentVerifyType = user.getVerifyType()
+        if (currentVerifyType != WeiboVerifyType.NONE) {
+            UserAvatarCache.putVerify(
+                uid = user?.id?.toString() ?: user?.idStr,
+                verifyTypeOrdinal = currentVerifyType.ordinal
+            )
+        }
+    }
+    val avatarRequest = rememberSharedAvatarRequest(
+        url = user?.bestAvatar ?: user?.profileImageUrl,
+        sharedKey = avatarSharedKey
+    )
+    val selectAvatarForTransition = {
+        if (avatarSharedKey.isNotBlank()) {
+            sharedElementTarget?.selectAvatar(
+                ownerKey = avatarOwnerKey,
+                avatarKey = avatarSharedKey
+            )
+        }
+    }
+    val handleCardClick = {
+        selectAvatarForTransition()
+        onClick()
+    }
+    val handleAvatarClick = {
+        selectAvatarForTransition()
+        onUserClick(user?.id)
+    }
+
+    MatterCard(
+        onClick = handleCardClick,
+        modifier = modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Row(
             modifier = Modifier
@@ -75,9 +133,23 @@ fun SearchUserCard(
                 avatarUrl = user?.bestAvatar,
                 verifyType = user.getVerifyType(),
                 avatarSize = 46.dp,
-                badgeSize = 16.dp,
+                badgeSize = 18.dp,
+                badgeBackgroundColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                // 列表头像尺寸较小，垫底边框比主页收窄，避免角标显得笨重
+                badgeBackgroundPadding = 1.dp,
+                badgeSharedAvatarKey = avatarSharedKey,
+                badgeSharedOwnerKey = avatarOwnerKey,
                 contentDescription = displayName,
-                onClick = { onUserClick(user?.id) }
+                avatarModel = avatarRequest,
+                avatarModifier = if (avatarSharedKey.isNotBlank()) {
+                    Modifier.weiboAvatarSharedElement(
+                        key = avatarSharedKey,
+                        ownerKey = avatarOwnerKey
+                    )
+                } else {
+                    Modifier
+                },
+                onClick = handleAvatarClick
             )
 
             Spacer(modifier = Modifier.width(10.dp))
@@ -122,10 +194,19 @@ fun SearchUserCard(
             }
 
             // 卡片按钮（关注等）：客户端暂无对应写接口，点击等同于点卡片本身。
-            val button = card.buttons.firstOrNull { !it.name.isNullOrBlank() }
-            if (button != null) {
+            val serverButton = card.buttons.firstOrNull { !it.name.isNullOrBlank() }
+            val buttonText = when {
+                isFollowing == true && user?.followMe == true -> "互相关注"
+                isFollowing == true -> "已关注"
+                else -> serverButton?.name?.takeIf { it.isNotBlank() }
+            }
+            if (buttonText != null) {
                 Spacer(modifier = Modifier.width(8.dp))
-                CardButtonChip(name = button.name.orEmpty(), onClick = onClick)
+                CardButtonChip(
+                    name = buttonText,
+                    enabled = !followUpdating,
+                    onClick = onFollowClick ?: handleCardClick
+                )
             }
         }
     }
@@ -142,19 +223,10 @@ fun SearchTopicCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {}
 ) {
-    Card(
+    MatterCard(
         onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 0.dp,
-            pressedElevation = 2.dp
-        )
+        modifier = modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Row(
             modifier = Modifier
@@ -247,18 +319,10 @@ fun SearchChipGroupCard(
     modifier: Modifier = Modifier,
     onChipClick: (WeiboSearchChip) -> Unit = {}
 ) {
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 0.dp,
-            pressedElevation = 0.dp
-        )
+    MatterCard(
+        modifier = modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        pressedElevation = 0.dp
     ) {
         Column(
             modifier = Modifier
@@ -294,18 +358,10 @@ private fun SearchChipPill(
     chip: WeiboSearchChip,
     onClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(percent = 50))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    MatterChip(onClick = onClick) {
         Text(
             text = chip.text,
             style = MaterialTheme.typography.labelMediumEmphasized,
-            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -327,20 +383,17 @@ private fun SearchChipPill(
 @Composable
 private fun CardButtonChip(
     name: String,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(percent = 50))
-            .background(MaterialTheme.colorScheme.primaryContainer)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        contentAlignment = Alignment.Center
+    MatterChip(
+        containerColor = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        onClick = if (enabled) onClick else null
     ) {
         Text(
             text = name,
             style = MaterialTheme.typography.labelMediumEmphasized,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )

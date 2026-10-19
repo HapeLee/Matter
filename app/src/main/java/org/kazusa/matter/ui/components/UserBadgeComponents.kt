@@ -3,17 +3,14 @@ package org.kazusa.matter.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,6 +20,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.kazusa.matter.data.model.WeiboUserDto
+import org.kazusa.matter.ui.navigation.weiboAvatarBadgeSharedElement
 import coil3.compose.AsyncImage
 
 /**
@@ -69,52 +67,47 @@ fun WeiboUserDto?.getVerifyType(): WeiboVerifyType {
 
 /**
  * 大V认证徽标组件 (Material 3 原生矢量图标：Verified / Stars)
- * 采用 M3 标准 Verified 徽标图标，完美对齐昵称文本基线
+ * 采用 M3 标准 Verified 徽标图标，完美对齐昵称文本基线。
+ *
+ * [backgroundColor] 非空时会在图标背后铺一层实心圆形垫底。
+ * Verified 徽标本身是「花瓣形/六角螺丝」的不规则轮廓，直接用 `border(CircleShape)`
+ * 只画一圈描边，圆与花瓣之间的空隙会透出头像或封面；改用实心垫底后，
+ * 徽标边缘到圆形轮廓之间是完整的底色，不再漏背景。
  */
 @Composable
 fun UserVerifyBadge(
     verifyType: WeiboVerifyType,
     modifier: Modifier = Modifier,
-    size: Dp = 15.dp
+    size: Dp = 15.dp,
+    /** 徽标垫底色；为空时保持透明（用于昵称旁的纯图标场景） */
+    backgroundColor: Color? = null,
+    /** 垫底色在图标四周留出的边框宽度 */
+    backgroundPadding: Dp = 2.dp
 ) {
-    when (verifyType) {
-        WeiboVerifyType.GOLD_V -> {
-            Icon(
-                imageVector = Icons.Default.Verified,
-                contentDescription = "金V认证",
-                tint = Color(0xFFFFB300), // 琥珀金
-                modifier = modifier.size(size)
-            )
-        }
+    val icon = when (verifyType) {
+        WeiboVerifyType.GOLD_V -> Triple(Icons.Default.Verified, Color(0xFFFFB300), "金V认证") // 琥珀金
+        WeiboVerifyType.YELLOW_V -> Triple(Icons.Default.Verified, Color(0xFFFFA000), "黄V认证") // 经典明黄
+        WeiboVerifyType.BLUE_V -> Triple(Icons.Default.Verified, Color(0xFF1E88E5), "蓝V官方认证") // 官方蓝
+        WeiboVerifyType.RED_STAR -> Triple(Icons.Default.Stars, Color(0xFFE53935), "微博达人") // 达人红
+        WeiboVerifyType.NONE -> return
+    }
 
-        WeiboVerifyType.YELLOW_V -> {
-            Icon(
-                imageVector = Icons.Default.Verified,
-                contentDescription = "黄V认证",
-                tint = Color(0xFFFFA000), // 经典明黄
-                modifier = modifier.size(size)
-            )
-        }
-
-        WeiboVerifyType.BLUE_V -> {
-            Icon(
-                imageVector = Icons.Default.Verified,
-                contentDescription = "蓝V官方认证",
-                tint = Color(0xFF1E88E5), // 官方蓝
-                modifier = modifier.size(size)
-            )
-        }
-
-        WeiboVerifyType.RED_STAR -> {
-            Icon(
-                imageVector = Icons.Default.Stars,
-                contentDescription = "微博达人",
-                tint = Color(0xFFE53935), // 达人红
-                modifier = modifier.size(size)
-            )
-        }
-
-        WeiboVerifyType.NONE -> Unit
+    Box(
+        modifier = if (backgroundColor != null) {
+            modifier
+                .size(size + backgroundPadding * 2)
+                .background(backgroundColor, CircleShape)
+        } else {
+            modifier.size(size)
+        },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon.first,
+            contentDescription = icon.third,
+            tint = icon.second,
+            modifier = Modifier.size(size)
+        )
     }
 }
 
@@ -129,6 +122,18 @@ fun UserAvatarWithBadge(
     avatarSize: Dp = 38.dp,
     badgeSize: Dp = 14.dp,
     contentDescription: String? = null,
+    /** 自定义图片模型（如带共享缓存键的 Coil ImageRequest）；为空时退回 [avatarUrl] */
+    avatarModel: Any? = null,
+    /** 施加在头像图片本身上的修饰符（共享元素动画等） */
+    avatarModifier: Modifier = Modifier,
+    /** 认证角标的垫底色：盖住头像，避免从不规则徽标边缘透出 */
+    badgeBackgroundColor: Color? = null,
+    /** 认证角标垫底色的边框宽度 */
+    badgeBackgroundPadding: Dp = 2.dp,
+    /** 头像维度共享 key：传入后认证角标也会参与头像 → 主页的共享元素动画 */
+    badgeSharedAvatarKey: String? = null,
+    /** 角标共享元素的来源宿主 key（列表卡片），主页目标传空 */
+    badgeSharedOwnerKey: String? = null,
     onClick: () -> Unit = {}
 ) {
     val fallback = "https://tvax1.sinaimg.cn/default/images/default_avatar_male_180.gif"
@@ -137,11 +142,12 @@ fun UserAvatarWithBadge(
         contentAlignment = Alignment.BottomEnd
     ) {
         AsyncImage(
-            model = avatarUrl ?: fallback,
+            model = avatarModel ?: avatarUrl ?: fallback,
             contentDescription = contentDescription,
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .size(avatarSize)
+                .then(avatarModifier)
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .clickable(onClick = onClick)
@@ -150,7 +156,17 @@ fun UserAvatarWithBadge(
         if (verifyType != WeiboVerifyType.NONE) {
             UserVerifyBadge(
                 verifyType = verifyType,
-                size = badgeSize
+                size = badgeSize,
+                backgroundColor = badgeBackgroundColor ?: MaterialTheme.colorScheme.surface,
+                backgroundPadding = badgeBackgroundPadding,
+                modifier = if (badgeSharedAvatarKey.isNullOrBlank()) {
+                    Modifier
+                } else {
+                    Modifier.weiboAvatarBadgeSharedElement(
+                        avatarKey = badgeSharedAvatarKey,
+                        ownerKey = badgeSharedOwnerKey
+                    )
+                }
             )
         }
     }
@@ -170,35 +186,24 @@ fun UserVipBadge(
     val isSvip = user.svip == 1
     val isVip = (user.mbtype != null && user.mbtype > 2) || (user.mbrank != null && user.mbrank > 0)
 
-    if (isSvip) {
-        Box(
-            modifier = modifier
-                .clip(RoundedCornerShape(3.dp))
-                .background(Color(0xFFD32F2F))
-                .padding(horizontal = 4.dp, vertical = 2.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "SVIP",
-                color = Color(0xFFFFE082),
-                style = MaterialTheme.typography.labelSmallEmphasized,
-            )
-        }
-    } else if (isVip) {
-        val rankText = if (user.mbrank != null && user.mbrank > 0) "VIP${user.mbrank}" else "VIP"
-        Box(
-            modifier = modifier
-                .clip(RoundedCornerShape(3.dp))
-                .background(Color(0xFFFF9800))
-                .padding(horizontal = 4.dp, vertical = 2.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = rankText,
-                color = Color.White,
-                style = MaterialTheme.typography.labelSmallEmphasized,
-            )
-        }
+    when {
+        isSvip -> MatterTag(
+            text = "SVIP",
+            modifier = modifier,
+            containerColor = Color(0xFFD32F2F),
+            contentColor = Color(0xFFFFE082),
+            style = MaterialTheme.typography.labelSmallEmphasized,
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+        )
+
+        isVip -> MatterTag(
+            text = if (user.mbrank != null && user.mbrank > 0) "VIP${user.mbrank}" else "VIP",
+            modifier = modifier,
+            containerColor = Color(0xFFFF9800),
+            contentColor = Color.White,
+            style = MaterialTheme.typography.labelSmallEmphasized,
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+        )
     }
 }
 
@@ -212,19 +217,14 @@ fun BloggerSuffixTag(
     modifier: Modifier = Modifier
 ) {
     if (text.isBlank()) return
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(3.5.dp))
-            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f))
-            .padding(horizontal = 5.dp, vertical = 2.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            style = MaterialTheme.typography.labelSmallEmphasized,
-        )
-    }
+    MatterTag(
+        text = text,
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        style = MaterialTheme.typography.labelSmallEmphasized,
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+    )
 }
 
 /**
@@ -234,17 +234,12 @@ fun BloggerSuffixTag(
 fun AuthorBadgeTag(
     modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(3.dp))
-            .background(MaterialTheme.colorScheme.primaryContainer)
-            .padding(horizontal = 4.dp, vertical = 2.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = "博主",
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
-            style = MaterialTheme.typography.labelSmallEmphasized,
-        )
-    }
+    MatterTag(
+        text = "博主",
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        style = MaterialTheme.typography.labelSmallEmphasized,
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+    )
 }

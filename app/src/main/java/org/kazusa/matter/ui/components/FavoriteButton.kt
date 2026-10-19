@@ -32,6 +32,7 @@ import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.repository.FavoritesRepository
 import org.kazusa.matter.data.repository.favoriteId
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIconButton
 import org.kazusa.matter.ui.media.morph.LocalImageMorphState
 
@@ -76,9 +77,10 @@ fun FavoriteButton(
     if (scroll != null) {
         LiquidGlassIconButton(
             onClick = onClick, enabled = id != null && !busy,
-            backdrop = backdrop, glassAlpha = scroll.alpha, tintAlpha = scroll.alpha,
+            // 与 TopBarActionButton 保持同一套玻璃配方：只随滚动联动玻璃强度，不额外叠 tint
+            backdrop = backdrop, glassAlpha = scroll.alpha,
             modifier = modifier.topBarActionPadding(scroll)
-        ) { FavoriteIcon(busy, favorited) }
+        ) { FavoriteIcon(busy, favorited, onGlass = true) }
     } else {
         IconButton(modifier = modifier, enabled = id != null && !busy, onClick = onClick) {
             FavoriteIcon(busy, favorited)
@@ -86,14 +88,36 @@ fun FavoriteButton(
     }
 }
 
+/**
+ * @param onGlass 是否画在液态玻璃表面上：是则走 [LiquidGlassIcon]，与顶栏其它图标同样带微阴影。
+ */
 @Composable
-private fun FavoriteIcon(busy: Boolean, favorited: Boolean) {
-    if (busy) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-    else Icon(
-        imageVector = if (favorited) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-        contentDescription = if (favorited) "取消收藏" else "收藏微博",
-        tint = if (favorited) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-    )
+private fun FavoriteIcon(busy: Boolean, favorited: Boolean, onGlass: Boolean = false) {
+    if (busy) {
+        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        return
+    }
+    val imageVector = if (favorited) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder
+    val contentDescription = if (favorited) "取消收藏" else "收藏微博"
+    // 玻璃态下与顶栏其它操作图标同色（onSurface）；卡片内的普通图标仍用次要色。
+    val tint = when {
+        favorited -> MaterialTheme.colorScheme.primary
+        onGlass -> TopBarTokens.ContentColor
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    if (onGlass) {
+        LiquidGlassIcon(
+            imageVector = imageVector,
+            contentDescription = contentDescription,
+            tint = tint
+        )
+    } else {
+        Icon(
+            imageVector = imageVector,
+            contentDescription = contentDescription,
+            tint = tint
+        )
+    }
 }
 
 @Composable

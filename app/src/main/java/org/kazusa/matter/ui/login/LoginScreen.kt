@@ -25,8 +25,6 @@ import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Web
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -53,7 +51,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.kazusa.matter.ui.components.ImmersiveTopBar
+import org.kazusa.matter.ui.components.MatterCard
 import org.kazusa.matter.ui.components.TopBarTitleText
+import org.kazusa.matter.ui.theme.MatterShapeTokens
 import org.kazusa.matter.ui.theme.TextSecondary
 
 import androidx.compose.material.icons.filled.AccountCircle
@@ -490,11 +490,9 @@ fun LoginScreen(
                                 .padding(20.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            Card(
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                                ),
-                                shape = RoundedCornerShape(16.dp)
+                            MatterCard(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                shape = MatterShapeTokens.listItem
                             ) {
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Text(

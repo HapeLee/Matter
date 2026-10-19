@@ -26,12 +26,10 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -267,18 +265,20 @@ fun IosLiquidGlassNavigationBar(
                 onClick = { if (!isIndicatorLayer) activateTab(index) },
                 icon = {
                     BadgedBox(badge = { badge(index)?.invoke() }) {
-                        Icon(
+                        LiquidGlassIcon(
                             imageVector = if (isSelected || (!isIndicatorLayer && isCurrent)) item.selectedIcon else item.icon,
                             contentDescription = item.title,
-                            modifier = Modifier.size(IOS_NAV_ICON_SIZE)
+                            modifier = Modifier.size(IOS_NAV_ICON_SIZE),
+                            tint = contentColor
                         )
                     }
                 },
                 label = {
-                    Text(
+                    LiquidGlassText(
                         text = item.title,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        color = contentColor,
                         style = if (isIndicatorLayer) MaterialTheme.typography.labelMediumEmphasized else MaterialTheme.typography.labelMedium
                     )
                 },
