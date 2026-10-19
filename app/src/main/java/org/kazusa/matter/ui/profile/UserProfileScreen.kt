@@ -1,19 +1,32 @@
 package org.kazusa.matter.ui.profile
 
+import androidx.activity.compose.BackHandler
+import org.kazusa.matter.data.model.VideoStreamInfo
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,6 +38,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -34,12 +48,24 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.outlined.Badge
+import androidx.compose.material.icons.outlined.Business
+import androidx.compose.material.icons.outlined.Cake
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.LocationCity
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Place
+import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -47,12 +73,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -65,7 +95,12 @@ import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.style.TextOverflow
+import org.kazusa.matter.ui.components.FollowButton
 import org.kazusa.matter.ui.components.ImmersiveTopBar
+import org.kazusa.matter.ui.components.MatterCard
+import org.kazusa.matter.ui.components.MatterChip
+import org.kazusa.matter.ui.components.MatterMediaBadge
+import org.kazusa.matter.ui.components.MatterTag
 import org.kazusa.matter.ui.components.TopBarActionButton
 import org.kazusa.matter.ui.components.TopBarTitleCapsule
 import org.kazusa.matter.ui.components.TopBarTokens
@@ -74,6 +109,7 @@ import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIconButton
 import org.kazusa.matter.ui.effect.liquid.liquidTextShadow
 import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
+import org.kazusa.matter.ui.theme.MatterShapeTokens
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -92,9 +128,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -105,6 +143,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.kazusa.matter.core.network.ApiResult
 import org.kazusa.matter.core.network.WeiboApiService
+import org.kazusa.matter.data.cache.UserAvatarCache
+import org.kazusa.matter.data.model.UserAlbum
+import org.kazusa.matter.data.model.UserProfileDetail
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.model.WeiboUserDto
 import org.kazusa.matter.data.repository.BrowsingHistoryRepository
@@ -114,6 +155,13 @@ import org.kazusa.matter.ui.components.UserVipBadge
 import org.kazusa.matter.ui.components.WeiboPostCard
 import org.kazusa.matter.ui.components.WeiboVerifyType
 import org.kazusa.matter.ui.components.getVerifyType
+import org.kazusa.matter.ui.effect.liquid.LiquidGlassFloatingMenu
+import org.kazusa.matter.ui.components.DEFAULT_AVATAR_URL
+import org.kazusa.matter.ui.components.rememberSharedAvatarRequest
+import org.kazusa.matter.ui.navigation.formatAvatarSharedKey
+import org.kazusa.matter.ui.navigation.weiboAvatarBadgeSharedElement
+import org.kazusa.matter.ui.navigation.weiboAvatarSharedElement
+import org.kazusa.matter.core.util.WeiboTextFormatter
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
@@ -124,13 +172,15 @@ import org.kazusa.matter.ui.components.TopBarNavigationButton
 fun UserProfileScreen(
     uid: String,
     initialScreenName: String = "",
+    /** 当前登录用户 uid，用于判断是否为本人主页（本人不展示关注按钮） */
+    currentUid: String = "",
     apiService: WeiboApiService,
     historyRepository: BrowsingHistoryRepository,
     onBackClick: () -> Unit,
     onUserClick: (Long?) -> Unit = {},
     onPostClick: (WeiboStatusDto) -> Unit,
     onImageClick: (urls: List<String>, index: Int) -> Unit,
-    onVideoClick: (url: String, title: String) -> Unit,
+    onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit,
     onMentionClick: (String) -> Unit = {},
     onTopicClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
@@ -144,6 +194,48 @@ fun UserProfileScreen(
     var isRefreshing by remember { mutableStateOf(false) }
     var isLoadingMore by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    // PC 端「资料」模块（生日/教育/职业/阳光信用等），失败时保持 null 即可
+    var profileDetail by remember { mutableStateOf<UserProfileDetail?>(null) }
+    var isDetailLoading by remember { mutableStateOf(false) }
+    var detailLoadFailed by remember { mutableStateOf(false) }
+    var showDetailSheet by remember { mutableStateOf(false) }
+
+    // 关注按钮
+    var isFollowUpdating by remember(uid) { mutableStateOf(false) }
+    var showUnfollowDialog by remember(uid) { mutableStateOf(false) }
+    var followActionError by remember(uid) { mutableStateOf<String?>(null) }
+    val isSelfProfile = currentUid.isNotBlank() && currentUid == uid
+
+    // 主页 tab：微博 / 相册 / 视频 / 文章
+    var selectedTab by remember { mutableStateOf(ProfileTab.POSTS) }
+
+    // 相册
+    var albums by remember { mutableStateOf<List<UserAlbum>>(emptyList()) }
+    var albumsLoaded by remember { mutableStateOf(false) }
+    var isAlbumsLoading by remember { mutableStateOf(false) }
+    var albumsError by remember { mutableStateOf<String?>(null) }
+    var openedAlbum by remember { mutableStateOf<UserAlbum?>(null) }
+    var albumPhotos by remember { mutableStateOf<List<String>>(emptyList()) }
+    var albumPhotoCursor by remember { mutableStateOf("0") }
+    var albumPhotosHasMore by remember { mutableStateOf(false) }
+    var isAlbumPhotosLoading by remember { mutableStateOf(false) }
+    var albumPhotosError by remember { mutableStateOf<String?>(null) }
+
+    // 视频
+    var videos by remember { mutableStateOf<List<WeiboStatusDto>>(emptyList()) }
+    var videoCursor by remember { mutableStateOf("0") }
+    var videosLoaded by remember { mutableStateOf(false) }
+    var isVideosLoading by remember { mutableStateOf(false) }
+    var videosHasMore by remember { mutableStateOf(false) }
+    var videosError by remember { mutableStateOf<String?>(null) }
+
+    // 文章
+    var articles by remember { mutableStateOf<List<WeiboStatusDto>>(emptyList()) }
+    var articlePage by remember { mutableIntStateOf(1) }
+    var articlesLoaded by remember { mutableStateOf(false) }
+    var isArticlesLoading by remember { mutableStateOf(false) }
+    var articlesHasMore by remember { mutableStateOf(false) }
+    var articlesError by remember { mutableStateOf<String?>(null) }
 
     val coroutineScope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
@@ -156,6 +248,204 @@ fun UserProfileScreen(
         rememberLayerBackdrop()
     } else null
 
+    // 详细资料失败时用基础 userInfo 里的所在地/性别兜底
+    val displayedDetail = remember(profileDetail, userProfile) {
+        (profileDetail ?: UserProfileDetail()).withFallback(userProfile)
+    }
+
+    // 微博和文章 tab 共用同一套卡片渲染
+    val renderPostCard: @Composable (WeiboStatusDto) -> Unit = { post ->
+        WeiboPostCard(
+            post = post,
+            // 主页顶部的大头像才是本次转场的共享元素目标，列表卡片头像不参与，
+            // 否则同一 uid 会出现多个共享元素、多张卡片一起飞。
+            enableAvatarSharedTransition = false,
+            onUserClick = remember(uid, onUserClick) {
+                { clickedUid: Long? ->
+                    if (clickedUid != null && clickedUid.toString() != uid) {
+                        onUserClick(clickedUid)
+                    }
+                }
+            },
+            onPostClick = onPostClick,
+            onImageClick = onImageClick,
+            onVideoClick = onVideoClick,
+            onMentionClick = onMentionClick,
+            onTopicClick = onTopicClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                .padding(horizontal = 16.dp)
+        )
+    }
+
+    fun loadProfileDetail() {
+        coroutineScope.launch {
+            isDetailLoading = true
+            detailLoadFailed = false
+            when (val detailRes = apiService.getUserProfileDetail(uid)) {
+                is ApiResult.Success -> profileDetail = detailRes.data
+                is ApiResult.Error -> detailLoadFailed = true
+                else -> Unit
+            }
+            isDetailLoading = false
+        }
+    }
+
+    fun loadAlbums(force: Boolean = false) {
+        if (isAlbumsLoading) {
+            isRefreshing = false
+            return
+        }
+        if (albumsLoaded && !force) {
+            isRefreshing = false
+            return
+        }
+        isAlbumsLoading = true
+        albumsError = null
+        coroutineScope.launch {
+            when (val res = apiService.getUserAlbums(uid)) {
+                is ApiResult.Success -> {
+                    albums = res.data
+                    albumsLoaded = true
+                }
+                is ApiResult.Error -> albumsError = res.message
+                else -> Unit
+            }
+            isAlbumsLoading = false
+            isRefreshing = false
+        }
+    }
+
+    fun loadAlbumPhotos(reset: Boolean = false) {
+        val album = openedAlbum ?: run {
+            isRefreshing = false
+            return
+        }
+        if (isAlbumPhotosLoading) {
+            isRefreshing = false
+            return
+        }
+        if (!reset && !albumPhotosHasMore) {
+            isRefreshing = false
+            return
+        }
+        if (reset) {
+            albumPhotos = emptyList()
+            albumPhotoCursor = "0"
+            albumPhotosHasMore = true
+            albumPhotosError = null
+        }
+        isAlbumPhotosLoading = true
+        val cursor = albumPhotoCursor
+        coroutineScope.launch {
+            when (val res = apiService.getAlbumPhotos(album.containerId, cursor)) {
+                is ApiResult.Success -> {
+                    albumPhotos = (albumPhotos + res.data.photos).distinct()
+                    albumPhotoCursor = res.data.nextCursor
+                    albumPhotosHasMore = res.data.hasMore
+                }
+                is ApiResult.Error -> albumPhotosError = res.message
+                else -> Unit
+            }
+            isAlbumPhotosLoading = false
+            isRefreshing = false
+        }
+    }
+
+    fun openAlbum(album: UserAlbum) {
+        openedAlbum = album
+        loadAlbumPhotos(reset = true)
+    }
+
+    fun closeAlbum() {
+        openedAlbum = null
+        albumPhotos = emptyList()
+        albumPhotoCursor = "0"
+        albumPhotosHasMore = false
+        albumPhotosError = null
+    }
+
+    fun loadVideos(reset: Boolean = false) {
+        if (isVideosLoading) {
+            isRefreshing = false
+            return
+        }
+        if (!reset && videosLoaded && !videosHasMore) {
+            isRefreshing = false
+            return
+        }
+        if (reset) {
+            videos = emptyList()
+            videoCursor = "0"
+            videosHasMore = true
+            videosLoaded = false
+            videosError = null
+        }
+        isVideosLoading = true
+        val cursor = videoCursor
+        coroutineScope.launch {
+            when (val res = apiService.getUserVideos(uid, cursor)) {
+                is ApiResult.Success -> {
+                    videos = (videos + res.data.videos).distinctBy { it.listKey }
+                    videoCursor = res.data.nextCursor
+                    videosHasMore = res.data.hasMore
+                    videosLoaded = true
+                }
+                is ApiResult.Error -> videosError = res.message
+                else -> Unit
+            }
+            isVideosLoading = false
+            isRefreshing = false
+        }
+    }
+
+    fun loadArticles(reset: Boolean = false) {
+        if (isArticlesLoading) {
+            isRefreshing = false
+            return
+        }
+        if (!reset && articlesLoaded && !articlesHasMore) {
+            isRefreshing = false
+            return
+        }
+        val page = if (reset || !articlesLoaded) 1 else articlePage + 1
+        if (reset) {
+            articles = emptyList()
+            articlePage = 1
+            articlesHasMore = true
+            articlesLoaded = false
+            articlesError = null
+        }
+        isArticlesLoading = true
+        coroutineScope.launch {
+            when (val res = apiService.getUserArticles(uid, page)) {
+                is ApiResult.Success -> {
+                    articles = (articles + res.data.articles).distinctBy { it.listKey }
+                    articlePage = page
+                    articlesHasMore = res.data.hasMore
+                    articlesLoaded = true
+                }
+                is ApiResult.Error -> articlesError = res.message
+                else -> Unit
+            }
+            isArticlesLoading = false
+            isRefreshing = false
+        }
+    }
+
+    fun selectTab(tab: ProfileTab) {
+        if (selectedTab == tab) return
+        selectedTab = tab
+        if (tab != ProfileTab.ALBUM) closeAlbum()
+        when (tab) {
+            ProfileTab.POSTS -> Unit
+            ProfileTab.ALBUM -> loadAlbums()
+            ProfileTab.VIDEO -> if (!videosLoaded) loadVideos() else Unit
+            ProfileTab.ARTICLE -> if (!articlesLoaded) loadArticles() else Unit
+        }
+    }
+
     fun loadData(page: Int = 1, isRefresh: Boolean = false) {
         if (page == 1) {
             if (isRefresh) isRefreshing = true else isInitialLoading = true
@@ -166,6 +456,9 @@ fun UserProfileScreen(
 
         coroutineScope.launch {
             if (page == 1) {
+                // 详细资料走 PC 端登录态接口，独立请求；即便失败也不影响主页主体内容
+                loadProfileDetail()
+
                 // 并发获取博主资料与动态，大幅缩短加载等待时间
                 val timelineDeferred = async { apiService.getUserTimeline(uid, page = 1) }
                 val profileDeferred = async { apiService.getUserProfile(uid) }
@@ -192,7 +485,12 @@ fun UserProfileScreen(
                             description = p.description ?: userProfile!!.description,
                             verified = p.verified || userProfile!!.verified,
                             verifiedReason = p.verifiedReason ?: userProfile!!.verifiedReason,
-                            coverImagePhone = p.coverImagePhone ?: userProfile!!.coverImagePhone
+                            coverImagePhone = p.coverImagePhone ?: userProfile!!.coverImagePhone,
+                            location = p.location ?: userProfile!!.location,
+                            gender = p.gender ?: userProfile!!.gender,
+                            domain = p.domain ?: userProfile!!.domain,
+                            url = p.url ?: userProfile!!.url,
+                            createdAt = p.createdAt ?: userProfile!!.createdAt
                         )
                     }
                 }
@@ -214,7 +512,12 @@ fun UserProfileScreen(
                                     statusesCount = result.user.statusesCount.ifBlank { userProfile!!.statusesCount },
                                     description = result.user.description ?: userProfile!!.description,
                                     verified = result.user.verified || userProfile!!.verified,
-                                    verifiedReason = result.user.verifiedReason ?: userProfile!!.verifiedReason
+                                    verifiedReason = result.user.verifiedReason ?: userProfile!!.verifiedReason,
+                                    location = result.user.location ?: userProfile!!.location,
+                                    gender = result.user.gender ?: userProfile!!.gender,
+                                    domain = result.user.domain ?: userProfile!!.domain,
+                                    url = result.user.url ?: userProfile!!.url,
+                                    createdAt = result.user.createdAt ?: userProfile!!.createdAt
                                 )
                             }
                         }
@@ -257,7 +560,60 @@ fun UserProfileScreen(
         }
     }
 
+    fun refreshCurrentTab() {
+        when (selectedTab) {
+            ProfileTab.POSTS -> loadData(page = 1, isRefresh = true)
+            ProfileTab.ALBUM -> {
+                isRefreshing = true
+                if (openedAlbum != null) loadAlbumPhotos(reset = true) else loadAlbums(force = true)
+            }
+            ProfileTab.VIDEO -> {
+                isRefreshing = true
+                loadVideos(reset = true)
+            }
+            ProfileTab.ARTICLE -> {
+                isRefreshing = true
+                loadArticles(reset = true)
+            }
+        }
+    }
+
+    BackHandler(enabled = openedAlbum != null) {
+        closeAlbum()
+    }
+
     LaunchedEffect(uid) {
+        profileDetail = null
+        detailLoadFailed = false
+        isDetailLoading = false
+        showDetailSheet = false
+        selectedTab = ProfileTab.POSTS
+
+        albums = emptyList()
+        albumsLoaded = false
+        isAlbumsLoading = false
+        albumsError = null
+        openedAlbum = null
+        albumPhotos = emptyList()
+        albumPhotoCursor = "0"
+        albumPhotosHasMore = false
+        isAlbumPhotosLoading = false
+        albumPhotosError = null
+
+        videos = emptyList()
+        videoCursor = "0"
+        videosLoaded = false
+        isVideosLoading = false
+        videosHasMore = false
+        videosError = null
+
+        articles = emptyList()
+        articlePage = 1
+        articlesLoaded = false
+        isArticlesLoading = false
+        articlesHasMore = false
+        articlesError = null
+
         loadData(page = 1)
     }
 
@@ -268,23 +624,14 @@ fun UserProfileScreen(
         PullToRefreshBox(
             isRefreshing = isRefreshing,
             state = pullRefreshState,
-            onRefresh = { loadData(page = 1, isRefresh = true) },
+            onRefresh = { refreshCurrentTab() },
             modifier = Modifier.fillMaxSize()
         ) {
             when {
-                isInitialLoading -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = "正在加载博主主页...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
+                // 注意：首次加载刻意不再整页占位。
+                // 顶栏博主信息（含大头像）是「头像 → 主页」共享元素的落点，
+                // 若首帧被整页 Loading 顶掉，落点不存在，动画会直接断掉、退化为硬切。
+                // 现在首帧就渲染带占位资料的顶栏，加载态只出现在下方的动态区域。
                 errorMessage != null && posts.isEmpty() && userProfile == null -> {
                     Box(
                         modifier = Modifier
@@ -292,11 +639,8 @@ fun UserProfileScreen(
                             .padding(24.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Card(
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
-                            ),
+                        MatterCard(
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
@@ -360,7 +704,8 @@ fun UserProfileScreen(
                             .fillMaxSize()
                             .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
                             .background(MaterialTheme.colorScheme.surface),
-                        contentPadding = PaddingValues(bottom = 24.dp + navBarBottom),
+                        // 右下角留出玻璃悬浮按钮的高度，避免遮住最后一条内容
+                        contentPadding = PaddingValues(bottom = 96.dp + navBarBottom),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         // 沉浸式顶部博主主栏（封面、大头像与资料）
@@ -372,10 +717,34 @@ fun UserProfileScreen(
                                 onCopy = { label, text ->
                                     clipboardManager.setText(AnnotatedString(text))
                                     Toast.makeText(context, "$label 已复制", Toast.LENGTH_SHORT).show()
+                                },
+                                showFollowButton = userProfile != null && !isSelfProfile,
+                                isFollowing = userProfile?.following == true,
+                                isMutual = userProfile?.followMe == true,
+                                isFollowUpdating = isFollowUpdating,
+                                onFollowClick = {
+                                    if (userProfile?.following == true) {
+                                        showUnfollowDialog = true
+                                    } else {
+                                        coroutineScope.launch {
+                                            isFollowUpdating = true
+                                            when (val result = apiService.followUser(uid)) {
+                                                is ApiResult.Success -> {
+                                                    userProfile = userProfile?.copy(following = true)
+                                                }
+                                                is ApiResult.Error -> {
+                                                    followActionError = result.message ?: "关注失败，请稍后重试"
+                                                }
+                                                ApiResult.Loading -> Unit
+                                            }
+                                            isFollowUpdating = false
+                                        }
+                                    }
                                 }
                             )
                         }
 
+                        if (selectedTab == ProfileTab.POSTS) {
                         // 动态数量标题栏
                         item {
                             Row(
@@ -396,13 +765,17 @@ fun UserProfileScreen(
                         }
 
                         // 微博动态列表
-                        if (posts.isEmpty()) {
+                        // 首屏加载态只覆盖「动态区域」：顶栏博主信息始终在位，
+                        // 这样共享元素动画可以立刻开始，不会先闪一屏 Loading 再跳出来
+                        when {
+                        isInitialLoading && posts.isEmpty() -> item {
+                            ProfileTabLoading("正在加载动态…")
+                        }
+                        posts.isEmpty() -> {
                             item {
-                                Card(
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceContainer
-                                    ),
+                                MatterCard(
+                                    shape = MatterShapeTokens.listItem,
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
@@ -463,27 +836,10 @@ fun UserProfileScreen(
                                     }
                                 }
                             }
-                        } else {
+                        }
+                        else -> {
                             items(posts, key = { it.listKey }, contentType = { "post" }) { post ->
-                                WeiboPostCard(
-                                    post = post,
-                                    onUserClick = remember(uid, onUserClick) {
-                                        { clickedUid: Long? ->
-                                            if (clickedUid != null && clickedUid.toString() != uid) {
-                                                onUserClick(clickedUid)
-                                            }
-                                        }
-                                    },
-                                    onPostClick = onPostClick,
-                                    onImageClick = onImageClick,
-                                    onVideoClick = onVideoClick,
-                                    onMentionClick = onMentionClick,
-                                    onTopicClick = onTopicClick,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
-                                        .padding(horizontal = 16.dp)
-                                )
+                                renderPostCard(post)
                             }
 
                             // 底部加载更多
@@ -529,8 +885,277 @@ fun UserProfileScreen(
                                 }
                             }
                         }
+                        } // 动态区域 when
+                        } else if (selectedTab == ProfileTab.ALBUM) {
+                            val album = openedAlbum
+                            if (album == null) {
+                                when {
+                                    isAlbumsLoading && albums.isEmpty() -> item {
+                                        ProfileTabLoading("正在加载相册…")
+                                    }
+
+                                    albumsError != null && albums.isEmpty() -> item {
+                                        ProfileTabError(
+                                            message = albumsError!!,
+                                            onRetry = { loadAlbums(force = true) }
+                                        )
+                                    }
+
+                                    albums.isEmpty() -> item {
+                                        ProfileTabEmpty("暂无公开相册", "该博主还没有创建相册")
+                                    }
+
+                                    else -> {
+                                        item {
+                                            ProfileSectionTitle("相册 (${albums.size})")
+                                        }
+                                        albums.chunked(2).forEach { row ->
+                                            item(key = "album-${row.first().containerId}") {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                                                        .padding(horizontal = 16.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    row.forEach { albumItem ->
+                                                        AlbumCoverCard(
+                                                            album = albumItem,
+                                                            onClick = { openAlbum(albumItem) },
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                    }
+                                                    if (row.size == 1) {
+                                                        Spacer(modifier = Modifier.weight(1f))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                item {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        IconButton(
+                                            onClick = { closeAlbum() },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                contentDescription = "返回相册列表",
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = album.title,
+                                                style = MaterialTheme.typography.titleMediumEmphasized,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            album.photoCount?.let { count ->
+                                                Text(
+                                                    text = "$count 张照片",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                when {
+                                    isAlbumPhotosLoading && albumPhotos.isEmpty() -> item {
+                                        ProfileTabLoading("正在加载照片…")
+                                    }
+
+                                    albumPhotosError != null && albumPhotos.isEmpty() -> item {
+                                        ProfileTabError(
+                                            message = albumPhotosError!!,
+                                            onRetry = { loadAlbumPhotos(reset = true) }
+                                        )
+                                    }
+
+                                    albumPhotos.isEmpty() -> item {
+                                        ProfileTabEmpty("相册为空", null)
+                                    }
+
+                                    else -> {
+                                        albumPhotos.chunked(3).forEachIndexed { rowIndex, row ->
+                                            item(key = "album-photo-$rowIndex") {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                                                        .padding(horizontal = 16.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    row.forEachIndexed { columnIndex, url ->
+                                                        val index = rowIndex * 3 + columnIndex
+                                                        AlbumPhotoCell(
+                                                            url = url,
+                                                            onClick = { onImageClick(albumPhotos, index) },
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                    }
+                                                    repeat(3 - row.size) {
+                                                        Spacer(modifier = Modifier.weight(1f))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        item {
+                                            ProfileLoadMore(
+                                                isLoading = isAlbumPhotosLoading,
+                                                hasMore = albumPhotosHasMore,
+                                                onLoadMore = { loadAlbumPhotos() },
+                                                loadingText = "正在加载更多照片…",
+                                                idleText = "已加载全部照片"
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (selectedTab == ProfileTab.VIDEO) {
+                            when {
+                                isVideosLoading && videos.isEmpty() -> item {
+                                    ProfileTabLoading("正在加载视频…")
+                                }
+
+                                videosError != null && videos.isEmpty() -> item {
+                                    ProfileTabError(
+                                        message = videosError!!,
+                                        onRetry = { loadVideos() }
+                                    )
+                                }
+
+                                videos.isEmpty() -> item {
+                                    ProfileTabEmpty("暂无公开视频", "该博主还没有发布视频")
+                                }
+
+                                else -> {
+                                    item {
+                                        ProfileSectionTitle("视频 (${videos.size})")
+                                    }
+                                    videos.chunked(2).forEachIndexed { rowIndex, row ->
+                                        item(key = "video-$rowIndex") {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                                                    .padding(horizontal = 16.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                row.forEach { videoPost ->
+                                                    VideoGridCard(
+                                                        post = videoPost,
+                                                        onClick = {
+                                                            val pageInfo = videoPost.pageInfo
+                                                            val mediaInfo = pageInfo?.mediaInfo
+                                                            val videoUrl = mediaInfo?.bestVideoUrl
+                                                            if (videoUrl != null) {
+                                                                val title = mediaInfo.videoTitle?.trim()?.ifBlank { null }
+                                                                    ?: mediaInfo.kolTitle?.trim()?.ifBlank { null }
+                                                                    ?: pageInfo.pageTitle?.trim()?.ifBlank { null }
+                                                                    ?: WeiboTextFormatter.formatHtmlText(videoPost.text).take(40)
+                                                                onVideoClick(
+                                                                    videoUrl,
+                                                                    title,
+                                                                    mediaInfo.availableStreams,
+                                                                    pageInfo.pagePic.orEmpty(),
+                                                                    videoPost.idStr ?: videoPost.mid.orEmpty()
+                                                                )
+                                                            } else {
+                                                                onPostClick(videoPost)
+                                                            }
+                                                        },
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                }
+                                                if (row.size == 1) {
+                                                    Spacer(modifier = Modifier.weight(1f))
+                                                }
+                                            }
+                                        }
+                                    }
+                                    item {
+                                        ProfileLoadMore(
+                                            isLoading = isVideosLoading,
+                                            hasMore = videosHasMore,
+                                            onLoadMore = { loadVideos() },
+                                            loadingText = "正在加载更多视频…",
+                                            idleText = "已加载全部视频"
+                                        )
+                                    }
+                                }
+                            }
+                        } else if (selectedTab == ProfileTab.ARTICLE) {
+                            when {
+                                isArticlesLoading && articles.isEmpty() -> item {
+                                    ProfileTabLoading("正在加载文章…")
+                                }
+
+                                articlesError != null && articles.isEmpty() -> item {
+                                    ProfileTabError(
+                                        message = articlesError!!,
+                                        onRetry = { loadArticles() }
+                                    )
+                                }
+
+                                articles.isEmpty() -> item {
+                                    ProfileTabEmpty("暂无公开文章", "该博主还没有发布文章")
+                                }
+
+                                else -> {
+                                    item {
+                                        ProfileSectionTitle("文章 (${articles.size})")
+                                    }
+                                    items(articles, key = { it.listKey }, contentType = { "article" }) { article ->
+                                        renderPostCard(article)
+                                    }
+                                    item {
+                                        ProfileLoadMore(
+                                            isLoading = isArticlesLoading,
+                                            hasMore = articlesHasMore,
+                                            onLoadMore = { loadArticles() },
+                                            loadingText = "正在加载更多文章…",
+                                            idleText = "已加载全部文章"
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
+            }
+
+            // 右下角玻璃悬浮分栏按钮：展开后选择微博 / 相册 / 视频 / 文章
+            if (!isInitialLoading && (userProfile != null || posts.isNotEmpty())) {
+                LiquidGlassFloatingMenu(
+                    items = ProfileTab.entries.map { it.title },
+                    selectedIndex = selectedTab.ordinal,
+                    onSelect = { index -> selectTab(ProfileTab.entries[index]) },
+                    backdrop = backdrop,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(end = 16.dp, bottom = 16.dp),
+                    icon = {
+                        LiquidGlassIcon(
+                            imageVector = Icons.AutoMirrored.Filled.Sort,
+                            contentDescription = "切换内容分栏"
+                        )
+                    },
+                    emptyLabel = "分栏加载中…"
+                )
             }
 
             Box(
@@ -552,15 +1177,80 @@ fun UserProfileScreen(
                     title = {},
                     actions = { scroll ->
                         TopBarActionButton(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "刷新",
+                            imageVector = Icons.Outlined.Badge,
+                            contentDescription = "博主详细资料",
                             scroll = scroll,
                             backdrop = backdrop,
-                            onClick = { loadData(page = 1, isRefresh = true) }
+                            onClick = { showDetailSheet = true }
                         )
                     }
                 )
             }
+        }
+
+        if (showDetailSheet) {
+            BloggerDetailSheet(
+                uid = uid,
+                initialScreenName = initialScreenName,
+                user = userProfile,
+                detail = displayedDetail,
+                isLoading = isDetailLoading,
+                loadFailed = detailLoadFailed,
+                onRetry = { loadProfileDetail() },
+                onDismiss = { showDetailSheet = false }
+            )
+        }
+
+        if (showUnfollowDialog) {
+            AlertDialog(
+                onDismissRequest = { showUnfollowDialog = false },
+                title = { Text("取消关注") },
+                text = {
+                    val name = userProfile?.screenName?.takeIf { it.isNotBlank() }
+                        ?: initialScreenName
+                    Text("确定不再关注 @$name 吗？")
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showUnfollowDialog = false
+                            coroutineScope.launch {
+                                isFollowUpdating = true
+                                when (val result = apiService.unfollowUser(uid)) {
+                                    is ApiResult.Success -> {
+                                        userProfile = userProfile?.copy(following = false)
+                                    }
+                                    is ApiResult.Error -> {
+                                        followActionError = result.message ?: "取消关注失败，请稍后重试"
+                                    }
+                                    ApiResult.Loading -> Unit
+                                }
+                                isFollowUpdating = false
+                            }
+                        }
+                    ) {
+                        Text("取消关注", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showUnfollowDialog = false }) {
+                        Text("再想想")
+                    }
+                }
+            )
+        }
+
+        if (followActionError != null) {
+            AlertDialog(
+                onDismissRequest = { followActionError = null },
+                title = { Text("操作失败") },
+                text = { Text(followActionError.orEmpty()) },
+                confirmButton = {
+                    TextButton(onClick = { followActionError = null }) {
+                        Text("知道了")
+                    }
+                }
+            )
         }
     }
 }
@@ -578,6 +1268,11 @@ private fun ImmersiveProfileHeader(
     userProfile: WeiboUserDto?,
     initialScreenName: String,
     onCopy: (label: String, text: String) -> Unit,
+    showFollowButton: Boolean,
+    isFollowing: Boolean,
+    isMutual: Boolean,
+    isFollowUpdating: Boolean,
+    onFollowClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -594,43 +1289,55 @@ private fun ImmersiveProfileHeader(
                 .fillMaxWidth()
                 .height(coverHeight)
         ) {
+            // 品牌柔和渐变始终铺在最底层：
+            // 首帧（资料未返回）就是它，封面图解码完成后在它上面淡入覆盖，
+            // 既不出现空洞，也不会「凭空闪出一张图」
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primaryContainer,
+                                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f)
+                            )
+                        )
+                    )
+            )
+
             val cover = userProfile?.coverImagePhone
+            var coverLoaded by remember(cover) { mutableStateOf(false) }
+            val coverAlpha by animateFloatAsState(
+                targetValue = if (coverLoaded) 1f else 0f,
+                animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+                label = "ProfileCoverFadeIn"
+            )
             if (!cover.isNullOrBlank()) {
                 AsyncImage(
                     model = cover,
                     contentDescription = "博主封面",
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-                // 底部半透明渐变阴影，使封面过渡到内容区更温润
-                Box(
+                    onSuccess = { coverLoaded = true },
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Black.copy(alpha = 0.35f),
-                                    Color.Transparent,
-                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
-                                )
-                            )
-                        )
-                )
-            } else {
-                // 优雅的品牌柔和渐变作为默认封面
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.primaryContainer,
-                                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f)
-                                )
-                            )
-                        )
+                        .alpha(coverAlpha)
                 )
             }
+
+            // 底部半透明渐变阴影，使封面过渡到内容区更温润
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.35f),
+                                Color.Transparent,
+                                MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                            )
+                        )
+                    )
+            )
         }
 
         // 博主核心信息区（头像上浮重叠，紧凑雅致）
@@ -640,8 +1347,14 @@ private fun ImmersiveProfileHeader(
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
                 .padding(horizontal = 16.dp)
         ) {
+            // 首帧优先复用信息流里已经渲染过的头像地址，保证共享元素一开始就有画面
+            val cachedAvatar = remember(uid) { UserAvatarCache.get(uid) }
             val avatarUrl = userProfile?.bestAvatar
-                ?: "https://tvax1.sinaimg.cn/default/images/default_avatar_male_180.gif"
+                ?: cachedAvatar
+                ?: DEFAULT_AVATAR_URL
+            val avatarSharedKey = remember(uid) { formatAvatarSharedKey(uid) }
+            // 与信息流卡片共用同一个缓存键：头像放大过程中不会白屏/闪烁，高清图加载完成后平滑替换
+            val avatarRequest = rememberSharedAvatarRequest(avatarUrl, avatarSharedKey)
 
             Row(
                 modifier = Modifier
@@ -659,51 +1372,70 @@ private fun ImmersiveProfileHeader(
                         modifier = Modifier.size(80.dp)
                     ) {
                         AsyncImage(
-                            model = avatarUrl,
+                            model = avatarRequest,
                             contentDescription = "博主头像",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(3.dp)
+                                // 与信息流卡片头像使用同一个稳定 key，进入主页时头像连续放大
+                                .weiboAvatarSharedElement(key = avatarSharedKey)
                                 .clip(CircleShape)
                         )
                     }
 
-                    val verifyType = userProfile.getVerifyType()
-                    if (verifyType != WeiboVerifyType.NONE) {
+                    // 首帧优先用列表卡片缓存下来的认证类型，角标才能和头像一起参与共享元素；
+                    // 资料返回后再以服务端结果为准。
+                    val liveVerifyType = userProfile.getVerifyType()
+                    val cachedVerifyType = remember(uid) {
+                        UserAvatarCache.getVerify(uid)?.let { ordinal ->
+                            WeiboVerifyType.values().getOrNull(ordinal)
+                        }
+                    }
+                    val verifyType = if (liveVerifyType != WeiboVerifyType.NONE) {
+                        liveVerifyType
+                    } else {
+                        cachedVerifyType ?: WeiboVerifyType.NONE
+                    }
+                    // 认证角标随资料一起淡入 + 轻微放大，避免在头像角上硬闪出来
+                    ProfileBadgeFadeIn(visible = verifyType != WeiboVerifyType.NONE) {
                         UserVerifyBadge(
                             verifyType = verifyType,
-                            size = 22.dp,
-                            modifier = Modifier.border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                            // 与列表角标使用完全相同的尺寸：
+                            // 共享元素只做位置形变、不做内容缩放，避免首帧图标大小切换
+                            size = 18.dp,
+                            // 实心垫底替代圆环描边：Verified 是不规则花瓣轮廓，
+                            // 只画描边会在花瓣与圆之间的空隙透出封面/头像
+                            backgroundColor = MaterialTheme.colorScheme.surface,
+                            backgroundPadding = 1.dp,
+                            // 与头像共用一次点击选择，角标独立起飞并压在上层
+                            modifier = Modifier.weiboAvatarBadgeSharedElement(
+                                avatarKey = avatarSharedKey
+                            )
                         )
                     }
                 }
 
                 // UID 胶囊
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier
-                        .clickable { onCopy("UID", uid) }
-                        .padding(bottom = 6.dp)
+                MatterChip(
+                    modifier = Modifier.padding(bottom = 6.dp),
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = MaterialTheme.shapes.small,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                    onClick = { onCopy("UID", uid) }
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = "UID: $uid",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "复制UID",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            modifier = Modifier.size(12.dp)
-                        )
-                    }
+                    Text(
+                        text = "UID: $uid",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "复制UID",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.size(12.dp)
+                    )
                 }
             }
 
@@ -713,36 +1445,63 @@ private fun ImmersiveProfileHeader(
                     .fillMaxWidth()
                     .offset(y = (-24).dp)
             ) {
+                // 首帧（接口未返回）优先用信息流卡片上已经显示过的昵称，避免名字先占位再跳变
+                val cachedName = remember(uid) { UserAvatarCache.getName(uid) }
                 val displayName = userProfile?.screenName?.ifBlank { null }
-                    ?: initialScreenName.ifBlank { "博主 $uid" }
+                    ?: initialScreenName.ifBlank { null }
+                    ?: cachedName
+                    ?: "博主 $uid"
 
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    SelectionContainer {
-                        Text(
-                            text = displayName,
-                            style = MaterialTheme.typography.headlineSmallEmphasized,
-                            color = MaterialTheme.colorScheme.onSurface
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                text = displayName,
+                                style = MaterialTheme.typography.headlineSmallEmphasized,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        // VIP 角标只做透明度渐显：它跟在昵称后面，不需要参与布局动画
+                        val vipAlpha by animateFloatAsState(
+                            targetValue = if (userProfile != null) 1f else 0f,
+                            animationSpec = tween(durationMillis = 240, delayMillis = 120, easing = FastOutSlowInEasing),
+                            label = "ProfileVipBadgeFadeIn"
+                        )
+                        UserVipBadge(user = userProfile, modifier = Modifier.alpha(vipAlpha))
+                    }
+
+                    if (showFollowButton) {
+                        FollowButton(
+                            isFollowing = isFollowing,
+                            isMutual = isMutual,
+                            isUpdating = isFollowUpdating,
+                            onClick = onFollowClick
                         )
                     }
-                    UserVipBadge(user = userProfile)
                 }
 
+                // 认证说明：资料返回后淡入 + 自上而下展开（头部高度平滑生长）
                 val bloggerTitle = userProfile?.verifiedReason?.trim()?.ifBlank { null }
-                if (!bloggerTitle.isNullOrBlank()) {
+                ProfileHeaderReveal(visible = !bloggerTitle.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(6.dp))
-                    BloggerSuffixTag(text = bloggerTitle)
+                    BloggerSuffixTag(text = bloggerTitle.orEmpty())
                 }
 
                 // 简介
                 val descriptionText = userProfile?.description?.trim()
-                if (!descriptionText.isNullOrBlank()) {
+                ProfileHeaderReveal(visible = !descriptionText.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(10.dp))
                     SelectionContainer {
                         Text(
-                            text = descriptionText,
+                            text = descriptionText.orEmpty(),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 21.sp
@@ -750,30 +1509,39 @@ private fun ImmersiveProfileHeader(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
-
                 // 统计数据栏：关注、粉丝、微博动态
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainer)
-                        .padding(vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceAround,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    StatMetric(
-                        label = "关注",
-                        count = userProfile?.bestFriendsCount ?: "0"
-                    )
-                    StatMetric(
-                        label = "粉丝",
-                        count = userProfile?.bestFollowersCount ?: "0"
-                    )
-                    StatMetric(
-                        label = "微博动态",
-                        count = userProfile?.bestStatusesCount ?: "0"
-                    )
+                ProfileHeaderReveal(visible = userProfile != null) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    MatterCard(
+                        shape = MatterShapeTokens.listItem,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            StatMetric(
+                                label = "关注",
+                                count = userProfile?.bestFriendsCount ?: "0",
+                                modifier = Modifier.weight(1f)
+                            )
+                            ProfileStatDivider()
+                            StatMetric(
+                                label = "粉丝",
+                                count = userProfile?.bestFollowersCount ?: "0",
+                                modifier = Modifier.weight(1f)
+                            )
+                            ProfileStatDivider()
+                            StatMetric(
+                                label = "微博动态",
+                                count = userProfile?.bestStatusesCount ?: "0",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -785,13 +1553,84 @@ private fun ImmersiveProfileHeader(
     }
 }
 
+/**
+ * 角标类小元素的入场：淡入 + 轻微放大。
+ *
+ * 这里刻意包一层普通 @Composable 而不是直接写 `AnimatedVisibility`：
+ * Row / Column 作用域各自都有一个同名的 `AnimatedVisibility` 重载，
+ * 头部这种「Column 里套 Row 再套 Box」的嵌套会让带作用域的重载产生歧义。
+ */
 @Composable
-private fun StatMetric(label: String, count: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun ProfileBadgeFadeIn(
+    visible: Boolean,
+    delayMillis: Int = 160,
+    content: @Composable () -> Unit
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(durationMillis = 220, delayMillis = delayMillis)) +
+            scaleIn(
+                animationSpec = tween(
+                    durationMillis = 260,
+                    delayMillis = delayMillis,
+                    easing = FastOutSlowInEasing
+                ),
+                initialScale = 0.6f
+            ),
+        exit = fadeOut(tween(durationMillis = 120))
+    ) {
+        content()
+    }
+}
+
+/**
+ * 主页头部「资料就绪后才出现」的区块入场：淡入 + 自上而下展开。
+ *
+ * 为什么不用 `animateContentSize` 包住整个头部：
+ * 那会在每个子块自己展开动画之外再套一层尺寸追帧，两层曲线互相追，收尾时会留下空隙；
+ * 直接让每个块各自展开，父容器高度自然随子块平滑变化，
+ * 下方「全部动态」与列表也会被连续推下去，而不是被整块内容瞬间顶开。
+ */
+@Composable
+private fun ProfileHeaderReveal(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(
+            animationSpec = tween(durationMillis = 260, delayMillis = 60, easing = FastOutSlowInEasing)
+        ) + expandVertically(
+            animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+            expandFrom = Alignment.Top
+        ),
+        exit = fadeOut(animationSpec = tween(durationMillis = 140)) + shrinkVertically(
+            animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+            shrinkTowards = Alignment.Top
+        ),
+        modifier = modifier
+    ) {
+        Column(content = content)
+    }
+}
+
+@Composable
+private fun StatMetric(
+    label: String,
+    count: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Text(
             text = count,
             style = MaterialTheme.typography.titleMediumEmphasized,
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
@@ -799,6 +1638,599 @@ private fun StatMetric(label: String, count: String) {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+/** 统计栏分隔线：与「个人中心」保持一致。 */
+@Composable
+private fun ProfileStatDivider() {
+    VerticalDivider(
+        modifier = Modifier.height(26.dp),
+        thickness = 0.8.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+    )
+}
+
+/**
+ * 博主详细资料 BottomSheet：顶部概览 + PC 端「资料」模块的全部公开字段。
+ * 只展示接口真实下发的字段，缺省项不占位。
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun BloggerDetailSheet(
+    uid: String,
+    initialScreenName: String,
+    user: WeiboUserDto?,
+    detail: UserProfileDetail,
+    isLoading: Boolean,
+    loadFailed: Boolean,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, bottom = 24.dp)
+        ) {
+            // 博主概览
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    AsyncImage(
+                        model = user?.bestAvatar
+                            ?: "https://tvax1.sinaimg.cn/default/images/default_avatar_male_180.gif",
+                        contentDescription = "博主头像",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = user?.screenName?.ifBlank { null }
+                                ?: initialScreenName.ifBlank { "博主 $uid" },
+                            style = MaterialTheme.typography.titleMediumEmphasized,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        UserVipBadge(user = user)
+                    }
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = "UID $uid",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            user?.verifiedReason?.trim()?.ifBlank { null }?.let { reason ->
+                Spacer(modifier = Modifier.height(10.dp))
+                BloggerSuffixTag(text = reason)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                thickness = 0.6.dp
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            when {
+                // 已有资料时刷新不闪加载态，避免 Sheet 内容闪烁
+                !detail.hasProfileInfo && isLoading -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "正在加载博主详细资料…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                !detail.hasProfileInfo -> {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = if (loadFailed) "未能获取该博主的更多资料" else "该博主暂无更多公开资料",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedButton(
+                            onClick = onRetry,
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("重新获取")
+                        }
+                    }
+                }
+
+                else -> ProfileDetailContent(detail = detail)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProfileDetailContent(detail: UserProfileDetail) {
+    // 除「动态」标签外，其余资料统一为无卡片的图标行：
+    // 性别 / 星座 / IP属地 / 所在地 / 阳光信用 / 生日 / 教育 / 职业 / 注册时间
+    val rows = buildList {
+        detail.genderLabel?.let { add(ProfileInfoRowModel(Icons.Outlined.Person, "性别", it)) }
+        detail.constellation?.takeIf { it.isNotBlank() }
+            ?.let { add(ProfileInfoRowModel(Icons.Outlined.Star, "星座", it)) }
+        // 接口的「IP属地：」前缀已在解析层剥离，这里使用本地标签 + 纯属地
+        detail.ipLocation?.takeIf { it.isNotBlank() }
+            ?.let { add(ProfileInfoRowModel(Icons.Outlined.Place, "IP属地", it)) }
+        detail.location?.takeIf { it.isNotBlank() }
+            ?.let { add(ProfileInfoRowModel(Icons.Outlined.LocationCity, "所在地", it)) }
+        detail.sunshineCreditLevel?.takeIf { it.isNotBlank() }
+            ?.let { add(ProfileInfoRowModel(Icons.Outlined.WbSunny, "阳光信用", it)) }
+        detail.birthday?.takeIf { it.isNotBlank() }
+            ?.let { add(ProfileInfoRowModel(Icons.Outlined.Cake, "生日", it)) }
+        detail.school?.takeIf { it.isNotBlank() }
+            ?.let { add(ProfileInfoRowModel(Icons.Outlined.School, "教育", it)) }
+        detail.company?.takeIf { it.isNotBlank() }
+            ?.let { add(ProfileInfoRowModel(Icons.Outlined.Business, "职业", it)) }
+        detail.registeredDate
+            ?.let { add(ProfileInfoRowModel(Icons.Outlined.CalendarMonth, "注册于", it)) }
+    }
+
+    if (rows.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            rows.forEach { row ->
+                ProfileInfoRow(
+                    icon = row.icon,
+                    label = row.label,
+                    value = row.value
+                )
+            }
+        }
+    }
+
+    if (detail.labels.isNotEmpty()) {
+        if (rows.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(14.dp))
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                thickness = 0.6.dp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+        Text(
+            text = "动态",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            detail.labels.forEach { label ->
+                ProfileLabelChip(text = label)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileInfoRow(icon: ImageVector, label: String, value: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(15.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(56.dp)
+        )
+        SelectionContainer {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileLabelChip(text: String) {
+    MatterTag(
+        text = text,
+        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+    )
+}
+
+private data class ProfileInfoRowModel(
+    val icon: ImageVector,
+    val label: String,
+    val value: String
+)
+
+/** 详细资料请求失败时，用基础 userInfo 中已有的字段兜底。 */
+private fun UserProfileDetail.withFallback(user: WeiboUserDto?): UserProfileDetail {
+    if (user == null) return this
+    return copy(
+        location = location ?: user.location?.trim()?.ifBlank { null },
+        gender = gender?.trim()?.ifBlank { null } ?: user.gender?.trim()?.ifBlank { null },
+        description = description ?: user.description?.trim()?.ifBlank { null },
+        registeredAt = registeredAt ?: user.createdAt?.trim()?.ifBlank { null },
+        domain = domain ?: user.domain?.trim()?.ifBlank { null }
+    )
+}
+
+private enum class ProfileTab(val title: String) {
+    POSTS("微博"),
+    ALBUM("相册"),
+    VIDEO("视频"),
+    ARTICLE("文章")
+}
+
+@Composable
+private fun ProfileSectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMediumEmphasized,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+    )
+}
+
+@Composable
+private fun ProfileTabLoading(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileTabEmpty(title: String, subtitle: String?) {
+    MatterCard(
+        shape = MatterShapeTokens.listItem,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMediumEmphasized,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            subtitle?.let {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileTabError(message: String, onRetry: () -> Unit) {
+    MatterCard(
+        shape = MatterShapeTokens.listItem,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "加载失败",
+                style = MaterialTheme.typography.titleMediumEmphasized,
+                color = MaterialTheme.colorScheme.error
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            SelectionContainer {
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            OutlinedButton(onClick = onRetry, shape = RoundedCornerShape(20.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("重试")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileLoadMore(
+    isLoading: Boolean,
+    hasMore: Boolean,
+    onLoadMore: () -> Unit,
+    loadingText: String,
+    idleText: String
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        when {
+            isLoading -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = loadingText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            hasMore -> {
+                OutlinedButton(
+                    onClick = onLoadMore,
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text("加载更多")
+                }
+            }
+
+            else -> {
+                Text(
+                    text = idleText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlbumCoverCard(
+    album: UserAlbum,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    MatterCard(
+        shape = MatterShapeTokens.listItem,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        onClick = onClick,
+        modifier = modifier
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+        ) {
+            if (!album.coverUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = album.coverUrl,
+                    contentDescription = album.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Outlined.Image,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(28.dp)
+                )
+            }
+            album.photoCount?.let { count ->
+                MatterMediaBadge(
+                    text = "$count 张",
+                    containerColor = Color.Black.copy(alpha = 0.55f),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp)
+                )
+            }
+        }
+        Text(
+            text = album.title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp)
+        )
+    }
+}
+
+@Composable
+private fun AlbumPhotoCell(
+    url: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        AsyncImage(
+            model = url,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+}
+
+@Composable
+private fun VideoGridCard(
+    post: WeiboStatusDto,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val pageInfo = post.pageInfo
+    val mediaInfo = pageInfo?.mediaInfo
+    val cover = pageInfo?.pagePic
+    val duration = formatVideoDuration(mediaInfo?.duration)
+    val title = mediaInfo?.videoTitle?.trim()?.ifBlank { null }
+        ?: mediaInfo?.kolTitle?.trim()?.ifBlank { null }
+        ?: pageInfo?.pageTitle?.trim()?.ifBlank { null }
+        ?: WeiboTextFormatter.formatHtmlText(post.text).take(40)
+
+    MatterCard(
+        shape = MatterShapeTokens.listItem,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        onClick = onClick,
+        modifier = modifier
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+        ) {
+            if (!cover.isNullOrBlank()) {
+                AsyncImage(
+                    model = cover,
+                    contentDescription = title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.12f))
+            )
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(34.dp)
+            )
+            duration?.let {
+                MatterMediaBadge(
+                    text = it,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp)
+                )
+            }
+        }
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp)
+        )
+    }
+}
+
+private fun formatVideoDuration(seconds: Int?): String? {
+    if (seconds == null || seconds <= 0) return null
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    val remainSeconds = seconds % 60
+    return if (hours > 0) {
+        "$hours:${minutes.toString().padStart(2, '0')}:${remainSeconds.toString().padStart(2, '0')}"
+    } else {
+        "$minutes:${remainSeconds.toString().padStart(2, '0')}"
     }
 }
 

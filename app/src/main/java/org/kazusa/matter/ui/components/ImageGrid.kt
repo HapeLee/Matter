@@ -42,6 +42,7 @@ import org.kazusa.matter.data.model.withWeiboImageSize
 import org.kazusa.matter.ui.media.morph.LocalImageMorphState
 import org.kazusa.matter.ui.media.morph.rememberStableImageRequest
 
+import org.kazusa.matter.ui.navigation.weiboPostImageSharedElement
 import org.kazusa.matter.ui.media.morph.ImageRatioCache
 
 /**
@@ -68,10 +69,28 @@ private fun gridDisplayUrl(rawUrl: String): String {
 fun ImageGrid(
     images: List<String>,
     modifier: Modifier = Modifier,
+    /**
+     * 当前宫格所属卡片的唯一标识（微博卡片 key / 正文页 key）。
+     * 转载了相同图片的两条微博必须使用不同标识，否则形变进出会张冠李戴。
+     */
+    ownerKey: String = "",
+    /** 卡片到正文的共享容器；独立于图片查看器的 ownerKey。 */
+    sharedContainerKey: String = "",
+    sharedContainerOwnerKey: String? = null,
+    sharedImagePart: String = "image",
     livePhotoMap: Map<String, String> = emptyMap(),
     onImageClick: (Int) -> Unit = {}
 ) {
     if (images.isEmpty()) return
+
+    @Composable
+    fun imageSharedModifier(index: Int): Modifier = Modifier.weiboPostImageSharedElement(
+        containerKey = sharedContainerKey,
+        index = index,
+        shape = RoundedCornerShape(if (images.size == 1) 6.dp else 4.dp),
+        ownerKey = sharedContainerOwnerKey,
+        part = sharedImagePart
+    )
 
     val totalCount = images.size
     val morphState = LocalImageMorphState.current
@@ -86,6 +105,7 @@ fun ImageGrid(
             slotRadiusMap[index] = cornerRadiusPx
             val ratio = ImageRatioCache.get(images[index]) ?: if (bounds.height > 0) bounds.width / bounds.height else 1f
             morphState.open(
+                ownerKey = ownerKey,
                 urls = images,
                 index = index,
                 bounds = bounds,
@@ -107,7 +127,8 @@ fun ImageGrid(
                 imageUrl = images[0],
                 images = images,
                 index = 0,
-                modifier = modifier,
+                ownerKey = ownerKey,
+                modifier = modifier.then(imageSharedModifier(0)),
                 livePhotoMap = livePhotoMap,
                 onPositionReported = { b, r ->
                     slotBoundsMap[0] = b
@@ -126,7 +147,8 @@ fun ImageGrid(
                     imageUrl = images[0],
                     images = images,
                     index = 0,
-                    modifier = Modifier.weight(1f),
+                    ownerKey = ownerKey,
+                    modifier = Modifier.weight(1f).then(imageSharedModifier(0)),
                     livePhotoMap = livePhotoMap,
                     onPositionReported = { b, r -> slotBoundsMap[0] = b; slotRadiusMap[0] = r },
                     onClick = { bounds, radius -> handleImageClick(0, bounds, radius) }
@@ -135,7 +157,8 @@ fun ImageGrid(
                     imageUrl = images[1],
                     images = images,
                     index = 1,
-                    modifier = Modifier.weight(1f),
+                    ownerKey = ownerKey,
+                    modifier = Modifier.weight(1f).then(imageSharedModifier(1)),
                     livePhotoMap = livePhotoMap,
                     onPositionReported = { b, r -> slotBoundsMap[1] = b; slotRadiusMap[1] = r },
                     onClick = { bounds, radius -> handleImageClick(1, bounds, radius) }
@@ -153,7 +176,8 @@ fun ImageGrid(
                         imageUrl = images[0],
                         images = images,
                         index = 0,
-                        modifier = Modifier.weight(1f),
+                        ownerKey = ownerKey,
+                        modifier = Modifier.weight(1f).then(imageSharedModifier(0)),
                         livePhotoMap = livePhotoMap,
                         onPositionReported = { b, r -> slotBoundsMap[0] = b; slotRadiusMap[0] = r },
                         onClick = { bounds, radius -> handleImageClick(0, bounds, radius) }
@@ -162,7 +186,8 @@ fun ImageGrid(
                         imageUrl = images[1],
                         images = images,
                         index = 1,
-                        modifier = Modifier.weight(1f),
+                        ownerKey = ownerKey,
+                        modifier = Modifier.weight(1f).then(imageSharedModifier(1)),
                         livePhotoMap = livePhotoMap,
                         onPositionReported = { b, r -> slotBoundsMap[1] = b; slotRadiusMap[1] = r },
                         onClick = { bounds, radius -> handleImageClick(1, bounds, radius) }
@@ -173,7 +198,8 @@ fun ImageGrid(
                         imageUrl = images[2],
                         images = images,
                         index = 2,
-                        modifier = Modifier.weight(1f),
+                        ownerKey = ownerKey,
+                        modifier = Modifier.weight(1f).then(imageSharedModifier(2)),
                         livePhotoMap = livePhotoMap,
                         onPositionReported = { b, r -> slotBoundsMap[2] = b; slotRadiusMap[2] = r },
                         onClick = { bounds, radius -> handleImageClick(2, bounds, radius) }
@@ -182,7 +208,8 @@ fun ImageGrid(
                         imageUrl = images[3],
                         images = images,
                         index = 3,
-                        modifier = Modifier.weight(1f),
+                        ownerKey = ownerKey,
+                        modifier = Modifier.weight(1f).then(imageSharedModifier(3)),
                         livePhotoMap = livePhotoMap,
                         onPositionReported = { b, r -> slotBoundsMap[3] = b; slotRadiusMap[3] = r },
                         onClick = { bounds, radius -> handleImageClick(3, bounds, radius) }
@@ -214,7 +241,8 @@ fun ImageGrid(
                                 imageUrl = url,
                                 images = images,
                                 index = index,
-                                modifier = Modifier.weight(1f),
+                                ownerKey = ownerKey,
+                                modifier = Modifier.weight(1f).then(imageSharedModifier(index)),
                                 livePhotoMap = livePhotoMap,
                                 extraOverlayText = if (isLastOfNine) "+$extraCount" else null,
                                 onPositionReported = { b, r -> slotBoundsMap[index] = b; slotRadiusMap[index] = r },
@@ -241,6 +269,7 @@ private fun SingleImageView(
     imageUrl: String,
     images: List<String>,
     index: Int,
+    ownerKey: String,
     modifier: Modifier = Modifier,
     livePhotoMap: Map<String, String> = emptyMap(),
     onPositionReported: (Rect, Float) -> Unit = { _, _ -> },
@@ -328,13 +357,13 @@ private fun SingleImageView(
                 val bounds = coords.boundsInWindow()
                 itemBounds = bounds
                 onPositionReported(bounds, cornerRadiusPx)
-                morphState?.registerSlot(images, index, bounds, cornerRadiusPx, imageRatio)
+                morphState?.registerSlot(ownerKey, images, index, bounds, cornerRadiusPx, imageRatio)
             }
             .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .graphicsLayer {
                 // 在绘制阶段读取 morph 进度，避免形变动画期间逐帧重组缩略图
-                alpha = if (morphState?.isSlotHidden(images, index) == true) 0f else 1f
+                alpha = if (morphState?.isSlotHidden(ownerKey, images, index) == true) 0f else 1f
             }
             .clickable { onClick(itemBounds, cornerRadiusPx) }
     ) {
@@ -350,7 +379,7 @@ private fun SingleImageView(
                     val computedRatio = w.toFloat() / h.toFloat()
                     imageRatio = computedRatio
                     ImageRatioCache.put(imageUrl, computedRatio)
-                    morphState?.registerSlot(images, index, itemBounds, cornerRadiusPx, computedRatio)
+                    morphState?.registerSlot(ownerKey, images, index, itemBounds, cornerRadiusPx, computedRatio)
                 }
             },
             modifier = Modifier.fillMaxSize()
@@ -365,20 +394,13 @@ private fun SingleImageView(
         }
 
         if (badgeText != null) {
-            Box(
+            MatterMediaBadge(
+                text = badgeText,
+                containerColor = Color.Black.copy(alpha = 0.65f),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 6.dp, bottom = 6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color.Black.copy(alpha = 0.65f))
-                    .padding(horizontal = 4.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = badgeText,
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelSmall
-                )
-            }
+            )
         }
     }
 }
@@ -395,6 +417,7 @@ private fun GridImageItem(
     imageUrl: String,
     images: List<String>,
     index: Int,
+    ownerKey: String,
     modifier: Modifier = Modifier,
     livePhotoMap: Map<String, String> = emptyMap(),
     extraOverlayText: String? = null,
@@ -425,13 +448,13 @@ private fun GridImageItem(
                 itemBounds = bounds
                 onPositionReported(bounds, cornerRadiusPx)
                 val cachedRatio = ImageRatioCache.get(imageUrl)
-                morphState?.registerSlot(images, index, bounds, cornerRadiusPx, cachedRatio)
+                morphState?.registerSlot(ownerKey, images, index, bounds, cornerRadiusPx, cachedRatio)
             }
             .clip(RoundedCornerShape(4.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .graphicsLayer {
                 // 在绘制阶段读取 morph 进度，避免形变动画期间逐帧重组缩略图
-                alpha = if (morphState?.isSlotHidden(images, index) == true) 0f else 1f
+                alpha = if (morphState?.isSlotHidden(ownerKey, images, index) == true) 0f else 1f
             }
             .clickable { onClick(itemBounds, cornerRadiusPx) },
         contentAlignment = Alignment.Center
@@ -446,7 +469,7 @@ private fun GridImageItem(
                 if (w > 0 && h > 0) {
                     val computedRatio = w.toFloat() / h.toFloat()
                     ImageRatioCache.put(imageUrl, computedRatio)
-                    morphState?.registerSlot(images, index, itemBounds, cornerRadiusPx, computedRatio)
+                    morphState?.registerSlot(ownerKey, images, index, itemBounds, cornerRadiusPx, computedRatio)
                 }
             },
             modifier = Modifier.fillMaxSize()
@@ -467,20 +490,13 @@ private fun GridImageItem(
                 )
             }
         } else if (isLivePhoto || isGif) {
-            Box(
+            MatterMediaBadge(
+                text = if (isLivePhoto) "实况" else "动图",
+                containerColor = Color.Black.copy(alpha = 0.65f),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 4.dp, bottom = 4.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color.Black.copy(alpha = 0.65f))
-                    .padding(horizontal = 4.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = if (isLivePhoto) "实况" else "动图",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelSmall
-                )
-            }
+            )
         }
     }
 }

@@ -21,6 +21,12 @@ internal fun decodeCommentReplies(rawText: String): ApiResult<CommentsDataDto> {
         val message = (envelope["msg"] as? JsonPrimitive)?.content
             ?: (page["msg"] as? JsonPrimitive)?.content
             ?: "获取回复失败，请稍后重试"
+        // 博主开启「精选评论」后，楼中楼接口会直接回 ok=0 + "暂无数据"：
+        // 这不是请求失败，只是这条评论没有可展开的回复，按空页处理，
+        // 否则界面会一直停在「展开 N 条回复 → 点击 → 错误 · 点击重试」的死循环里。
+        if (isWeiboNoContentMessage(message)) {
+            return ApiResult.Success(CommentsDataDto(data = emptyList()))
+        }
         return ApiResult.Error(message = message)
     }
     val replies = page["data"] as? JsonArray

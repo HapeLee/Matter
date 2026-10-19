@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -34,6 +35,9 @@ import org.kazusa.matter.ui.theme.ThemePreferences
 import org.kazusa.matter.data.repository.FavoritesRepository
 import org.kazusa.matter.ui.components.LocalFavoritesRepository
 import org.kazusa.matter.ui.components.LocalFavoriteActionScope
+import org.kazusa.matter.ui.components.LocalWeiboApiService
+import org.kazusa.matter.ui.components.PostLikeStore
+import org.kazusa.matter.ui.detail.CommentLikeStore
 import org.kazusa.matter.ui.saved.SavedPostsScreen
 import org.kazusa.matter.ui.saved.SavedPostsViewModel
 import org.kazusa.matter.data.local.BrowsingCategory
@@ -51,6 +55,10 @@ import org.kazusa.matter.ui.media.morph.ImageMorphOverlay
 import org.kazusa.matter.ui.media.ImageViewerScreen
 import org.kazusa.matter.ui.media.VideoPlayerScreen
 import org.kazusa.matter.ui.onboarding.OnboardingScreen
+import org.kazusa.matter.ui.profile.MyPostsScreen
+import org.kazusa.matter.ui.profile.UserListKind
+import org.kazusa.matter.ui.profile.UserListScreen
+import org.kazusa.matter.ui.profile.UserListViewModel
 import org.kazusa.matter.ui.profile.UserProfileScreen
 import org.kazusa.matter.ui.search.SearchResultScreen
 import org.kazusa.matter.ui.settings.SettingsScreen
@@ -73,6 +81,12 @@ fun MatterNavGraph() {
     val session by authPreferences.sessionFlow.collectAsStateWithLifecycle(initialValue = null)
     val isOnboardingCompleted by authPreferences.isOnboardingCompletedFlow.collectAsStateWithLifecycle(initialValue = null)
     val coroutineScope = rememberCoroutineScope()
+
+    // 换账号时清空会话内的点赞覆盖状态，避免上一个账号的点赞态串到新会话
+    LaunchedEffect(session?.uid) {
+        PostLikeStore.clear()
+        CommentLikeStore.clear()
+    }
 
     // 状态加载中保护，防止 DataStore 首次空流导致欢迎页闪现
     if (isOnboardingCompleted == null || session == null) {
@@ -110,14 +124,18 @@ fun MatterNavGraph() {
         }
     }
     val morphState = rememberImageMorphState()
+    // 记录本次导航真正被点击的共享元素目标，避免同 key 元素在一个页面里重复参与动画
+    val sharedElementTarget = remember { SharedElementTarget() }
     val favoritesRepository = remember(session?.uid, session?.cookieHeader, session?.isLoggedIn, koin) {
         koin.get<FavoritesRepository> { parametersOf(requireNotNull(session)) }
     }
 
     CompositionLocalProvider(
         LocalImageMorphState provides morphState,
+        LocalSharedElementTarget provides sharedElementTarget,
         LocalFavoritesRepository provides favoritesRepository,
-        LocalFavoriteActionScope provides coroutineScope
+        LocalFavoriteActionScope provides coroutineScope,
+        LocalWeiboApiService provides apiService
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             @OptIn(ExperimentalSharedTransitionApi::class)
@@ -142,8 +160,12 @@ fun MatterNavGraph() {
                                 clazzContentKey = { it.id },
                                 metadata = {
                                     when (it.screen) {
-                                        is Screen.ImageViewer, is Screen.VideoPlayer -> NavTransitions.mediaMetadata
-                                        is Screen.PostDetail -> NavTransitions.detailMetadata
+                                        is Screen.ImageViewer -> NavTransitions.mediaMetadata
+                                        is Screen.VideoPlayer -> NavTransitions.videoMetadata
+                                        // 微博正文与博主主页都承载共享元素（卡片形变 / 头像放大），
+                                        // 统一用交叉渐变，避免整页横滑与头像飞行动画互相拉扯
+                                        is Screen.PostDetail,
+                                        is Screen.UserProfile -> NavTransitions.detailMetadata
                                         else -> emptyMap()
                                     }
                                 }
@@ -192,6 +214,15 @@ fun MatterNavGraph() {
                                                     onNavigateToSavedPosts = {
                                                         navigate(Screen.SavedPosts)
                                                     },
+                                                    onNavigateToMyPosts = {
+                                                        navigate(Screen.MyPosts)
+                                                    },
+                                                    onNavigateToFollowing = {
+                                                        navigate(Screen.MyFollowing)
+                                                    },
+                                                    onNavigateToFollowers = {
+                                                        navigate(Screen.MyFollowers)
+                                                    },
                                                     onUserClick = { uid ->
                                                         if (uid != null) {
                                                             navigate(Screen.UserProfile(uid = uid.toString()))
@@ -208,8 +239,8 @@ fun MatterNavGraph() {
                                                     onImageClick = { urls, index ->
                                                         navigate(Screen.ImageViewer(initialIndex = index, urls = urls))
                                                     },
-                                                    onVideoClick = { url, title ->
-                                                        navigate(Screen.VideoPlayer(videoUrl = url, title = title))
+                                                    onVideoClick = { url, title, streams, coverUrl, mid ->
+                                                        navigate(Screen.VideoPlayer(videoUrl = url, title = title, streams = streams, coverUrl = coverUrl, mid = mid))
                                                     },
                                                     onMentionClick = { mentionName ->
                                                         navigate(Screen.UserProfile(uid = mentionName, screenName = mentionName))
@@ -234,10 +265,84 @@ fun MatterNavGraph() {
                                             }
                                         }
 
+                                        Screen.MyPosts -> {
+                                            MyPostsScreen(
+                                                uid = session?.uid.orEmpty(),
+                                                apiService = apiService,
+                                                onBackClick = { navigateBack() },
+                                                onPostClick = { post ->
+                                                    val idStr = post.idStr ?: post.mid ?: post.id?.toString() ?: ""
+                                                    navigateToPostDetail(post, idStr, false)
+                                                },
+                                                onCommentClick = { post ->
+                                                    val idStr = post.idStr ?: post.mid ?: post.id?.toString() ?: ""
+                                                    navigateToPostDetail(post, idStr, true)
+                                                },
+                                                onUserClick = { uid ->
+                                                    if (uid != null) {
+                                                        navigate(Screen.UserProfile(uid = uid.toString()))
+                                                    }
+                                                },
+                                                onImageClick = { urls, index ->
+                                                    navigate(Screen.ImageViewer(initialIndex = index, urls = urls))
+                                                },
+                                                onVideoClick = { url, title, streams, coverUrl, mid ->
+                                                    navigate(Screen.VideoPlayer(videoUrl = url, title = title, streams = streams, coverUrl = coverUrl, mid = mid))
+                                                },
+                                                onMentionClick = { mentionName ->
+                                                    navigate(Screen.UserProfile(uid = mentionName, screenName = mentionName))
+                                                },
+                                                onTopicClick = { topicName ->
+                                                    navigate(Screen.TopicStatus(keyword = topicName, title = "#$topicName#"))
+                                                }
+                                            )
+                                        }
+
+                                        Screen.MyFollowing -> {
+                                            val userListViewModel: UserListViewModel = koinViewModel {
+                                                parametersOf(
+                                                    session?.uid.orEmpty(),
+                                                    UserListKind.FOLLOWING,
+                                                    apiService
+                                                )
+                                            }
+                                            UserListScreen(
+                                                kind = UserListKind.FOLLOWING,
+                                                viewModel = userListViewModel,
+                                                onBackClick = { navigateBack() },
+                                                onUserClick = { uid ->
+                                                    if (uid != null) {
+                                                        navigate(Screen.UserProfile(uid = uid.toString()))
+                                                    }
+                                                }
+                                            )
+                                        }
+
+                                        Screen.MyFollowers -> {
+                                            val userListViewModel: UserListViewModel = koinViewModel {
+                                                parametersOf(
+                                                    session?.uid.orEmpty(),
+                                                    UserListKind.FOLLOWERS,
+                                                    apiService
+                                                )
+                                            }
+                                            UserListScreen(
+                                                kind = UserListKind.FOLLOWERS,
+                                                viewModel = userListViewModel,
+                                                onBackClick = { navigateBack() },
+                                                onUserClick = { uid ->
+                                                    if (uid != null) {
+                                                        navigate(Screen.UserProfile(uid = uid.toString()))
+                                                    }
+                                                }
+                                            )
+                                        }
+
                                         is Screen.UserProfile -> {
                                             UserProfileScreen(
                                                 uid = args.uid,
                                                 initialScreenName = args.screenName,
+                                                currentUid = session?.uid.orEmpty(),
                                                 apiService = apiService,
                                                 historyRepository = historyRepository,
                                                 onBackClick = {
@@ -255,8 +360,8 @@ fun MatterNavGraph() {
                                                 onImageClick = { urls, index ->
                                                     navigate(Screen.ImageViewer(initialIndex = index, urls = urls))
                                                 },
-                                                onVideoClick = { url, title ->
-                                                    navigate(Screen.VideoPlayer(videoUrl = url, title = title))
+                                                onVideoClick = { url, title, streams, coverUrl, mid ->
+                                                    navigate(Screen.VideoPlayer(videoUrl = url, title = title, streams = streams, coverUrl = coverUrl, mid = mid))
                                                 },
                                                 onMentionClick = { mentionName ->
                                                     navigate(Screen.UserProfile(uid = mentionName, screenName = mentionName))
@@ -288,8 +393,8 @@ fun MatterNavGraph() {
                                                 onImageClick = { urls, index ->
                                                     navigate(Screen.ImageViewer(initialIndex = index, urls = urls))
                                                 },
-                                                onVideoClick = { url, title ->
-                                                    navigate(Screen.VideoPlayer(videoUrl = url, title = title))
+                                                onVideoClick = { url, title, streams, coverUrl, mid ->
+                                                    navigate(Screen.VideoPlayer(videoUrl = url, title = title, streams = streams, coverUrl = coverUrl, mid = mid))
                                                 },
                                                 onTopicClick = { topicName ->
                                                     navigate(Screen.TopicStatus(keyword = topicName, title = "#$topicName#"))
@@ -323,8 +428,8 @@ fun MatterNavGraph() {
                                                 onImageClick = { urls, index ->
                                                     navigate(Screen.ImageViewer(initialIndex = index, urls = urls))
                                                 },
-                                                onVideoClick = { url, title ->
-                                                    navigate(Screen.VideoPlayer(videoUrl = url, title = title))
+                                                onVideoClick = { url, title, streams, coverUrl, mid ->
+                                                    navigate(Screen.VideoPlayer(videoUrl = url, title = title, streams = streams, coverUrl = coverUrl, mid = mid))
                                                 },
                                                 onTopicClick = { topicName ->
                                                     navigate(Screen.TopicStatus(keyword = topicName, title = "#$topicName#"))
@@ -393,8 +498,8 @@ fun MatterNavGraph() {
                                                 onImageClick = { urls, index ->
                                                     navigate(Screen.ImageViewer(initialIndex = index, urls = urls))
                                                 },
-                                                onVideoClick = { url, title ->
-                                                    navigate(Screen.VideoPlayer(url, title))
+                                                onVideoClick = { url, title, streams, coverUrl, mid ->
+                                                    navigate(Screen.VideoPlayer(videoUrl = url, title = title, streams = streams, coverUrl = coverUrl, mid = mid))
                                                 },
                                                 onMentionClick = { name -> navigate(Screen.UserProfile(name, name)) },
                                                 onTopicClick = { topic -> navigate(Screen.TopicStatus(topic, title = "#$topic#")) }
@@ -448,8 +553,8 @@ fun MatterNavGraph() {
                                                     onImageClick = { urls, index ->
                                                         navigate(Screen.ImageViewer(initialIndex = index, urls = urls))
                                                     },
-                                                    onVideoClick = { url, title ->
-                                                        navigate(Screen.VideoPlayer(videoUrl = url, title = title))
+                                                    onVideoClick = { url, title, streams, coverUrl, mid ->
+                                                        navigate(Screen.VideoPlayer(videoUrl = url, title = title, streams = streams, coverUrl = coverUrl, mid = mid))
                                                     },
                                                     onMentionClick = { mentionName ->
                                                         navigate(Screen.UserProfile(uid = mentionName, screenName = mentionName))
@@ -483,6 +588,9 @@ fun MatterNavGraph() {
                                             VideoPlayerScreen(
                                                 videoUrl = args.videoUrl,
                                                 title = args.title,
+                                                coverUrl = args.coverUrl,
+                                                mid = args.mid,
+                                                streams = args.streams,
                                                 onBackClick = {
                                                     navigateBack()
                                                 }

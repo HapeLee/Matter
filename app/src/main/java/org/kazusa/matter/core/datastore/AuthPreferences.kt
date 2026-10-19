@@ -28,6 +28,9 @@ class AuthPreferences(private val context: Context) {
         val SCREEN_NAME = stringPreferencesKey("screen_name")
         val AVATAR_URL = stringPreferencesKey("avatar_url")
         val DESCRIPTION = stringPreferencesKey("description")
+        val FOLLOWERS_COUNT = stringPreferencesKey("followers_count")
+        val FRIENDS_COUNT = stringPreferencesKey("friends_count")
+        val STATUSES_COUNT = stringPreferencesKey("statuses_count")
         val IS_LOGGED_IN = booleanPreferencesKey("is_logged_in")
         val IS_ONBOARDING_COMPLETED = booleanPreferencesKey("is_onboarding_completed")
         val LAST_GROUP_ID = stringPreferencesKey("last_group_id")
@@ -130,6 +133,9 @@ class AuthPreferences(private val context: Context) {
                 screenName = prefs[Keys.SCREEN_NAME] ?: "",
                 avatarUrl = prefs[Keys.AVATAR_URL] ?: "",
                 description = prefs[Keys.DESCRIPTION] ?: "",
+                followersCount = prefs[Keys.FOLLOWERS_COUNT] ?: "",
+                friendsCount = prefs[Keys.FRIENDS_COUNT] ?: "",
+                statusesCount = prefs[Keys.STATUSES_COUNT] ?: "",
                 isLoggedIn = prefs[Keys.IS_LOGGED_IN] ?: false
             )
         }
@@ -143,7 +149,10 @@ class AuthPreferences(private val context: Context) {
         token: String = "",
         screenName: String = "",
         avatarUrl: String = "",
-        description: String = ""
+        description: String = "",
+        followersCount: String = "",
+        friendsCount: String = "",
+        statusesCount: String = ""
     ) {
         context.authDataStore.edit { prefs ->
             prefs[Keys.UID] = uid
@@ -155,15 +164,28 @@ class AuthPreferences(private val context: Context) {
             if (screenName.isNotBlank()) prefs[Keys.SCREEN_NAME] = screenName
             if (avatarUrl.isNotBlank()) prefs[Keys.AVATAR_URL] = avatarUrl
             if (description.isNotBlank()) prefs[Keys.DESCRIPTION] = description
+            if (followersCount.isNotBlank()) prefs[Keys.FOLLOWERS_COUNT] = followersCount
+            if (friendsCount.isNotBlank()) prefs[Keys.FRIENDS_COUNT] = friendsCount
+            if (statusesCount.isNotBlank()) prefs[Keys.STATUSES_COUNT] = statusesCount
             prefs[Keys.IS_LOGGED_IN] = true
         }
     }
 
-    suspend fun updateProfile(screenName: String, avatarUrl: String, description: String = "") {
+    suspend fun updateProfile(
+        screenName: String,
+        avatarUrl: String,
+        description: String = "",
+        followersCount: String = "",
+        friendsCount: String = "",
+        statusesCount: String = ""
+    ) {
         context.authDataStore.edit { prefs ->
             if (screenName.isNotBlank()) prefs[Keys.SCREEN_NAME] = screenName
             if (avatarUrl.isNotBlank()) prefs[Keys.AVATAR_URL] = avatarUrl
             if (description.isNotBlank()) prefs[Keys.DESCRIPTION] = description
+            if (followersCount.isNotBlank()) prefs[Keys.FOLLOWERS_COUNT] = followersCount
+            if (friendsCount.isNotBlank()) prefs[Keys.FRIENDS_COUNT] = friendsCount
+            if (statusesCount.isNotBlank()) prefs[Keys.STATUSES_COUNT] = statusesCount
         }
     }
 

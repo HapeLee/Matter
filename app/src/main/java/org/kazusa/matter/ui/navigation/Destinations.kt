@@ -3,6 +3,8 @@ package org.kazusa.matter.ui.navigation
 import kotlinx.serialization.Serializable
 import androidx.navigation3.runtime.NavKey
 
+import org.kazusa.matter.data.model.VideoStreamInfo
+
 @Serializable
 sealed interface Screen : NavKey {
     @Serializable
@@ -38,7 +40,10 @@ sealed interface Screen : NavKey {
     @Serializable
     data class VideoPlayer(
         val videoUrl: String,
-        val title: String = ""
+        val title: String = "",
+        val coverUrl: String = "",
+        val mid: String = "",
+        val streams: List<VideoStreamInfo> = emptyList()
     ) : Screen
 
     /** 浏览记录（本地 Room 表，见 BrowsingHistoryEntity） */
@@ -62,6 +67,18 @@ sealed interface Screen : NavKey {
         val uid: String,
         val screenName: String = ""
     ) : Screen
+
+    /** 我的微博（当前登录账号发布的时间线） */
+    @Serializable
+    data object MyPosts : Screen
+
+    /** 我的关注 */
+    @Serializable
+    data object MyFollowing : Screen
+
+    /** 我的粉丝 */
+    @Serializable
+    data object MyFollowers : Screen
 
     @Serializable
     data class SearchResult(

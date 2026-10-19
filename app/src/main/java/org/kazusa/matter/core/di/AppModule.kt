@@ -18,11 +18,15 @@ import org.kazusa.matter.data.repository.AuthRepository
 import org.kazusa.matter.data.repository.BrowsingHistoryRepository
 import org.kazusa.matter.data.repository.FavoritesRepository
 import org.kazusa.matter.data.repository.GroupRepository
+import org.kazusa.matter.data.repository.HotFeedRepository
 import org.kazusa.matter.data.repository.SearchHistoryRepository
 import org.kazusa.matter.data.repository.TimelineRepository
 import org.kazusa.matter.ui.group.GroupViewModel
 import org.kazusa.matter.ui.history.BrowsingHistoryViewModel
+import org.kazusa.matter.ui.hotfeed.HotFeedViewModel
 import org.kazusa.matter.ui.login.LoginViewModel
+import org.kazusa.matter.ui.profile.UserListKind
+import org.kazusa.matter.ui.profile.UserListViewModel
 import org.kazusa.matter.ui.saved.SavedPostsViewModel
 import org.kazusa.matter.ui.theme.ThemePreferences
 import org.kazusa.matter.ui.timeline.TimelineViewModel
@@ -44,6 +48,7 @@ val dataModule = module {
     single { AuthRepository(get(), get()) }
     single { TimelineRepository(get(), get(), get(), get()) }
     single { GroupRepository(get(), get()) }
+    single { HotFeedRepository(get(), get()) }
     single { BrowsingHistoryRepository(get(), get(), get()) }
     single { SearchHistoryRepository(get(), get()) }
 
@@ -55,8 +60,16 @@ val viewModelModule = module {
     viewModel { LoginViewModel(get()) }
     viewModel { TimelineViewModel(get(), get()) }
     viewModel { GroupViewModel(get()) }
+    viewModel { HotFeedViewModel(get()) }
     viewModel { BrowsingHistoryViewModel(get()) }
     viewModel { parameters -> SavedPostsViewModel(parameters.get<FavoritesRepository>(), get()) }
+    viewModel { parameters ->
+        UserListViewModel(
+            uid = parameters.get<String>(),
+            kind = parameters.get<UserListKind>(),
+            apiService = parameters.get<WeiboApiService>()
+        )
+    }
 }
 
 val appModule = module {

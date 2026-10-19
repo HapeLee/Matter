@@ -13,8 +13,20 @@ data class UserSession(
     val screenName: String = "",
     val avatarUrl: String = "",
     val description: String = "",
+    val followersCount: String = "",
+    val friendsCount: String = "",
+    val statusesCount: String = "",
     val isLoggedIn: Boolean = false
 ) {
+    val displayFollowersCount: String
+        get() = followersCount.ifBlank { "--" }
+
+    val displayFriendsCount: String
+        get() = friendsCount.ifBlank { "--" }
+
+    val displayStatusesCount: String
+        get() = statusesCount.ifBlank { "--" }
+
     val cookieHeader: String
         get() {
             if (rawCookie.isNotBlank()) {

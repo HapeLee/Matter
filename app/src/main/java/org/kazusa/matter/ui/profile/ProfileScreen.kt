@@ -26,15 +26,15 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,6 +56,7 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.data.repository.AuthRepository
 import org.kazusa.matter.ui.components.ImmersiveTopBar
+import org.kazusa.matter.ui.components.MatterCard
 import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.theme.ThemePreferences
 import coil3.compose.AsyncImage
@@ -72,6 +73,9 @@ fun ProfileScreen(
     onNavigateToAppearance: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
     onNavigateToSavedPosts: () -> Unit = {},
+    onNavigateToMyPosts: () -> Unit = {},
+    onNavigateToFollowing: () -> Unit = {},
+    onNavigateToFollowers: () -> Unit = {},
     onLogout: () -> Unit,
     backdrop: LayerBackdrop? = null,
     bottomBarPadding: Dp = 0.dp,
@@ -147,56 +151,91 @@ fun ProfileScreen(
                 ),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 用户资料卡片
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
+            // 用户资料 + 数据统计合并为一张卡片
+            val isGuest = session?.uid.isNullOrBlank() || session?.uid == "guest"
+            MatterCard(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val avatarUrl = session?.avatarUrl?.ifBlank { null }
-                        ?: "https://tvax1.sinaimg.cn/default/images/default_avatar_male_180.gif"
-
-                    AsyncImage(
-                        model = avatarUrl,
-                        contentDescription = "用户头像",
-                        contentScale = ContentScale.Crop,
+                Column {
+                    Row(
                         modifier = Modifier
-                            .size(68.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val avatarUrl = session?.avatarUrl?.ifBlank { null }
+                            ?: "https://tvax1.sinaimg.cn/default/images/default_avatar_male_180.gif"
+
+                        AsyncImage(
+                            model = avatarUrl,
+                            contentDescription = "用户头像",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(68.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                        )
+
+                        Spacer(modifier = Modifier.width(16.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = session?.screenName?.ifBlank { null } ?: "微博用户",
+                                style = MaterialTheme.typography.titleLargeEmphasized,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = session?.description?.ifBlank { null } ?: "暂无个性签名",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = if (session?.uid.isNullOrBlank()) "访客体验模式" else "UID: ${session?.uid}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                        thickness = 0.6.dp
                     )
 
-                    Spacer(modifier = Modifier.width(16.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = session?.screenName?.ifBlank { null } ?: "微博用户",
-                            style = MaterialTheme.typography.titleLargeEmphasized,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                    // 数据统计栏：发博、关注、粉丝（登录后可点击进入对应列表）
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ProfileStatItem(
+                            label = "发博",
+                            count = session?.displayStatusesCount ?: "--",
+                            modifier = Modifier.weight(1f),
+                            onClick = if (!isGuest) onNavigateToMyPosts else null
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = session?.description?.ifBlank { null } ?: "暂无个性签名",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
+                        StatDivider()
+                        ProfileStatItem(
+                            label = "关注",
+                            count = session?.displayFriendsCount ?: "--",
+                            modifier = Modifier.weight(1f),
+                            onClick = if (!isGuest) onNavigateToFollowing else null
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = if (session?.uid.isNullOrBlank()) "访客体验模式" else "UID: ${session?.uid}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        StatDivider()
+                        ProfileStatItem(
+                            label = "粉丝",
+                            count = session?.displayFollowersCount ?: "--",
+                            modifier = Modifier.weight(1f),
+                            onClick = if (!isGuest) onNavigateToFollowers else null
                         )
                     }
                 }
@@ -209,11 +248,8 @@ fun ProfileScreen(
                 color = MaterialTheme.colorScheme.primary
             )
 
-            Card(
-                shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
+            MatterCard(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
@@ -251,11 +287,8 @@ fun ProfileScreen(
             }
 
             // 账号操作区
-            Card(
-                shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
+            MatterCard(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
@@ -320,4 +353,53 @@ private fun ProfileMenuRow(
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+}
+
+@Composable
+private fun ProfileStatItem(
+    label: String,
+    count: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
+    Column(
+        // padding 放在 clip/clickable 之前：水波纹边界随之内缩，
+        // 与左右竖向分隔线、卡片边框之间留出空隙，不再贴边。
+        modifier = modifier
+            .padding(horizontal = 8.dp)
+            .then(
+                if (onClick != null) {
+                    Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(onClick = onClick)
+                } else {
+                    Modifier
+                }
+            )
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = count,
+            style = MaterialTheme.typography.titleMediumEmphasized,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun StatDivider() {
+    VerticalDivider(
+        modifier = Modifier.height(26.dp),
+        thickness = 0.8.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+    )
 }

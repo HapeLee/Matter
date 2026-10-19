@@ -1,8 +1,15 @@
 package org.kazusa.matter.data.model
 
 import androidx.compose.runtime.Immutable
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
 
 @Serializable
 data class TimelineResponse(
@@ -185,14 +192,145 @@ data class WeiboPageInfoDto(
 )
 
 @Serializable
+data class VideoStreamInfo(
+    val label: String,
+    val url: String,
+    val width: Int = 0,
+    val height: Int = 0,
+    val bitrate: Long = 0L
+)
+
+@Serializable
+data class WeiboPlaybackMetaDto(
+    val label: String? = null,
+    @SerialName("quality_desc") val qualityDesc: String? = null,
+    @SerialName("quality_label") val qualityLabel: String? = null,
+    @SerialName("quality_class") val qualityClass: String? = null,
+    val type: Int? = null
+)
+
+@Serializable
+data class WeiboPlaybackPlayInfoDto(
+    val url: String? = null,
+    @Serializable(with = FlexibleIntSerializer::class) val width: Int? = null,
+    @Serializable(with = FlexibleIntSerializer::class) val height: Int? = null,
+    @Serializable(with = FlexibleLongSerializer::class) val bitrate: Long? = null,
+    val fps: Float? = null,
+    val size: Long? = null,
+    @SerialName("mime_type") val mimeType: String? = null
+)
+
+@Serializable
+data class WeiboPlaybackItemDto(
+    val meta: WeiboPlaybackMetaDto? = null,
+    @SerialName("play_info") val playInfo: WeiboPlaybackPlayInfoDto? = null
+)
+
+/**
+ * 微博后端在 playback_list 字段上既可能返回数组，也可能在无数据时返回空字符串 "" 或对象，
+ * 此序列化器保证容错且不阻断外层卡片与微博列表的反序列化。
+ */
+object FlexiblePlaybackListSerializer : KSerializer<List<WeiboPlaybackItemDto>> {
+    override val descriptor: SerialDescriptor =
+        ListSerializer(WeiboPlaybackItemDto.serializer()).descriptor
+
+    override fun serialize(encoder: Encoder, value: List<WeiboPlaybackItemDto>) {
+        ListSerializer(WeiboPlaybackItemDto.serializer()).serialize(encoder, value)
+    }
+
+    override fun deserialize(decoder: Decoder): List<WeiboPlaybackItemDto> {
+        if (decoder !is JsonDecoder) {
+            return emptyList()
+        }
+        val element = decoder.decodeJsonElement()
+        if (element !is JsonArray) {
+            return emptyList()
+        }
+        val list = mutableListOf<WeiboPlaybackItemDto>()
+        for (item in element) {
+            try {
+                val parsed = decoder.json.decodeFromJsonElement(WeiboPlaybackItemDto.serializer(), item)
+                list.add(parsed)
+            } catch (_: Exception) {
+                // 单条格式不符跳过，不影响其余清晰度
+            }
+        }
+        return list
+    }
+}
+
+@Serializable
 data class WeiboMediaInfoDto(
     @SerialName("stream_url") val streamUrl: String? = null,
+    @SerialName("stream_url_hd") val streamUrlHd: String? = null,
+    @SerialName("mp4_1080p") val mp41080pAlt: String? = null,
+    @SerialName("mp4_1080p_mp4") val mp41080p: String? = null,
     @SerialName("mp4_720p_mp4") val mp4720p: String? = null,
     @SerialName("mp4_hd_url") val mp4Hd: String? = null,
-    @SerialName("mp4_sd_url") val mp4Sd: String? = null
+    @SerialName("mp4_sd_url") val mp4Sd: String? = null,
+    @SerialName("mp4_ld_mp4") val mp4Ld: String? = null,
+    @SerialName("h265_mp4_hd") val h265Mp4Hd: String? = null,
+    @SerialName("h265_mp4_ld") val h265Mp4Ld: String? = null,
+    /** 视频时长（秒），视频 tab 的封面角标使用 */
+    @Serializable(with = FlexibleIntSerializer::class) val duration: Int? = null,
+    /** 视频标题：新版字段 / 旧版字段 */
+    @SerialName("video_title") val videoTitle: String? = null,
+    @SerialName("kol_title") val kolTitle: String? = null,
+    @SerialName("author_name") val authorName: String? = null,
+    @Serializable(with = FlexiblePlaybackListSerializer::class)
+    @SerialName("playback_list") val playbackList: List<WeiboPlaybackItemDto> = emptyList()
 ) {
+    /**
+     * 获取所有可用的清晰度档位列表，按分辨率（高 -> 低）及码率降序排列。
+     */
+    val availableStreams: List<VideoStreamInfo>
+        get() {
+            val list = mutableListOf<VideoStreamInfo>()
+            val seenUrls = mutableSetOf<String>()
+
+            // 1. 优先解析现代微博视频的 playback_list
+            playbackList.forEach { item ->
+                val playInfo = item.playInfo
+                val rawUrl = playInfo?.url
+                if (!rawUrl.isNullOrBlank() && seenUrls.add(rawUrl)) {
+                    val label = item.meta?.label
+                        ?: item.meta?.qualityDesc
+                        ?: if ((playInfo.height ?: 0) > 0) "${playInfo.height}P" else "高清"
+                    list.add(
+                        VideoStreamInfo(
+                            label = label,
+                            url = rawUrl,
+                            width = playInfo.width ?: 0,
+                            height = playInfo.height ?: 0,
+                            bitrate = playInfo.bitrate ?: 0L
+                        )
+                    )
+                }
+            }
+
+            // 2. 补充直接字段并去重
+            fun addIfAbsent(label: String, url: String?, width: Int = 0, height: Int = 0) {
+                if (!url.isNullOrBlank() && seenUrls.add(url)) {
+                    list.add(VideoStreamInfo(label = label, url = url, width = width, height = height))
+                }
+            }
+
+            addIfAbsent("1080P 超清", mp41080p ?: mp41080pAlt, 1920, 1080)
+            addIfAbsent("H.265 超清", h265Mp4Hd, 1920, 1080)
+            addIfAbsent("720P 高清", mp4720p, 1280, 720)
+            addIfAbsent("高清", streamUrlHd ?: mp4Hd)
+            addIfAbsent("标清", mp4Sd)
+            addIfAbsent("流畅", mp4Ld ?: h265Mp4Ld)
+            addIfAbsent("默认", streamUrl)
+
+            return list.sortedWith(
+                compareByDescending<VideoStreamInfo> { it.height }
+                    .thenByDescending { it.bitrate }
+            )
+        }
+
     val bestVideoUrl: String?
-        get() = mp4720p ?: mp4Hd ?: mp4Sd ?: streamUrl
+        get() = mp4720p ?: mp4Hd ?: mp4Sd ?: streamUrl ?: availableStreams.firstOrNull()?.url
 }
 
 // 微博卡片与搜索/热搜数据模型
@@ -359,8 +497,8 @@ data class WeiboSearchCardInfo(
 @Serializable
 data class WeiboCardlistInfoDto(
     val containerid: String? = null,
-    val total: Int? = null,
-    val page: Int? = null,
+    @Serializable(with = FlexibleIntSerializer::class) val total: Int? = null,
+    @Serializable(with = FlexibleIntSerializer::class) val page: Int? = null,
     /**
      * `cardlistInfo.cardlist_head_cards`：**搜索页分栏列表的真正来源**（真机实测）。
      *
@@ -841,7 +979,32 @@ fun WeiboCardlistInfoDto.toHotSearchChannels(): List<HotSearchChannel> =
 @Serializable
 data class CommentsResponse(
     val ok: Int = 1,
+    /** 无内容时服务端返回 ok=0 + msg="这里还没有内容"，不能当成加载失败 */
+    val msg: String? = null,
     val data: CommentsDataDto? = null
+)
+
+/**
+ * 评论区的「评论管理」配置，位于评论响应的 `data.status.comment_manage_info`。
+ *
+ * `approval_comment_type = 1` 表示博主开启了「精选评论」：此时评论接口只下发博主精选过的评论，
+ * 而不是全部评论（实测：一条 total_number=1041 的微博只返回 1 条精选评论）。
+ */
+@Serializable
+data class CommentManageInfoDto(
+    @Serializable(with = FlexibleIntSerializer::class) @SerialName("approval_comment_type") val approvalCommentType: Int? = null,
+    @Serializable(with = FlexibleIntSerializer::class) @SerialName("comment_permission_type") val commentPermissionType: Int? = null,
+    @Serializable(with = FlexibleIntSerializer::class) @SerialName("comment_sort_type") val commentSortType: Int? = null,
+    @Serializable(with = FlexibleIntSerializer::class) @SerialName("comment_anon_type") val commentAnonType: Int? = null
+) {
+    /** 博主是否开启了精选评论。 */
+    val isApprovalEnabled: Boolean
+        get() = approvalCommentType == 1
+}
+
+@Serializable
+data class CommentStatusDto(
+    @SerialName("comment_manage_info") val commentManageInfo: CommentManageInfoDto? = null
 )
 
 @Serializable
@@ -849,8 +1012,13 @@ data class CommentsDataDto(
     val data: List<WeiboCommentDto> = emptyList(),
     @Serializable(with = FlexibleIntSerializer::class) @SerialName("total_number") val totalNumber: Int? = null,
     @Serializable(with = FlexibleLongSerializer::class) @SerialName("max_id") val maxId: Long? = null,
-    @Serializable(with = FlexibleIntSerializer::class) @SerialName("max_id_type") val maxIdType: Int? = null
-)
+    @Serializable(with = FlexibleIntSerializer::class) @SerialName("max_id_type") val maxIdType: Int? = null,
+    val status: CommentStatusDto? = null
+) {
+    /** 该微博开启了「博主精选评论」，列表里只有精选出来的评论。 */
+    val approvalCommentsOnly: Boolean
+        get() = status?.commentManageInfo?.isApprovalEnabled == true
+}
 
 @Immutable
 @Serializable
@@ -866,11 +1034,82 @@ data class WeiboCommentDto(
     @Serializable(with = ReplyCommentSerializer::class) @SerialName("reply_comment") val replyComment: WeiboCommentDto? = null,
     @Serializable(with = CommentOptionalTextSerializer::class) @SerialName("reply_original_text") val replyOriginalText: String? = null,
     @Serializable(with = CommentOptionalTextSerializer::class) val source: String? = null,
-    @Serializable(with = CommentOptionalTextSerializer::class) @SerialName("region_name") val regionName: String? = null
+    @Serializable(with = CommentOptionalTextSerializer::class) @SerialName("region_name") val regionName: String? = null,
+    /** 部分端返回 `like`，部分端返回 `liked`，两者都兼容。 */
+    @Serializable(with = FlexibleBooleanSerializer::class) @SerialName("like") val like: Boolean? = null,
+    @Serializable(with = FlexibleBooleanSerializer::class) @SerialName("liked") val liked: Boolean? = null,
+    @Serializable(with = CommentPicIdsSerializer::class) @SerialName("pic_ids") val picIds: List<String> = emptyList(),
+    @Serializable(with = CommentPicInfosSerializer::class) @SerialName("pic_infos") val picInfos: Map<String, WeiboPicInfoDto> = emptyMap(),
+    @Serializable(with = CommentPicUrlsSerializer::class) @SerialName("pic_urls") val picUrls: List<WeiboPicUrlDto> = emptyList(),
+    /** hotflow 下发的单张评论图（`pic`，最常见的一图评论）。 */
+    @Serializable(with = CommentPicSerializer::class) val pic: WeiboCommentPicDto? = null,
+    /** hotflow 下发的多图（`pics`，可能是数组也可能是单个对象，还可能夹带无效项）。 */
+    @Serializable(with = CommentPicsSerializer::class) val pics: List<WeiboCommentPicDto> = emptyList()
 ) {
     /** Lazy 列表使用的稳定 key（避免依赖 data class hashCode 造成 key 漂移）。 */
     val listKey: String
         get() = id?.toString() ?: hashCode().toString()
+
+    /** 当前登录用户是否已点赞该评论。 */
+    val isLiked: Boolean
+        get() = liked == true || like == true
+
+    /**
+     * 评论配图（评论同样支持发图）。
+     *
+     * 微博不同端给的字段并不一致：
+     * - `pic_ids` + `pic_infos`：按 picId 顺序拼大图；
+     * - `pic` / `pics`：hotflow 下发的评论图（一图评论几乎只给 `pic`）；
+     * - `pic_urls`：旧版接口字段。
+     *
+     * 依次尝试，取到第一组可用地址即可。
+     */
+    val imageUrls: List<String> by lazy {
+        val fromIds = picIds.mapNotNull { picId ->
+            picInfos[picId]?.bestDisplayUrl() ?: weiboImageUrlFromId(picId, WeiboImageSize.LARGE)
+        }
+        val fromPicFields = (listOfNotNull(pic) + pics)
+            .distinctBy { it.pid ?: it.large?.url ?: it.url ?: it }
+            .mapNotNull { it.bestDisplayUrl() }
+        when {
+            fromIds.isNotEmpty() -> fromIds
+            fromPicFields.isNotEmpty() -> fromPicFields
+            picUrls.isNotEmpty() -> picUrls.mapNotNull { pic ->
+                (pic.originalPic ?: pic.bmiddlePic ?: pic.thumbnailPic)
+                    ?.withWeiboImageSize(WeiboImageSize.LARGE)
+            }
+            picInfos.isNotEmpty() -> picInfos.values.mapNotNull { it.bestDisplayUrl() }
+            else -> emptyList()
+        }
+    }
+}
+
+/** 评论/正文图片统一取一档足够清晰的展示地址，真正加载时会再降到缩略图。 */
+private fun WeiboPicInfoDto.bestDisplayUrl(): String? {
+    val url = large?.url ?: bmiddle?.url ?: original?.url ?: thumbnail?.url
+    return url?.withWeiboImageSize(WeiboImageSize.LARGE)
+}
+
+/**
+ * 评论配图（`pic` / `pics` 里的元素）。
+ *
+ * 与 [WeiboPicInfoDto] 的区别是它自带一个 `url`（orj360 档）而没有 pic_id，
+ * 且 `pics` 里偶尔会混进 pid 为空、url 形如 `.../orj360/&690` 的无效项。
+ */
+@Serializable
+data class WeiboCommentPicDto(
+    val pid: String? = null,
+    val url: String? = null,
+    val large: WeiboPicDetailDto? = null,
+    val bmiddle: WeiboPicDetailDto? = null,
+    val original: WeiboPicDetailDto? = null
+)
+
+private fun WeiboCommentPicDto.bestDisplayUrl(): String? {
+    val url = large?.url ?: url ?: bmiddle?.url ?: original?.url
+    // 无效项的 url 里带着未替换的参数（如 `&690`），真实图片地址不会出现裸 `&`
+    if (url.isNullOrBlank() || url.contains("&")) return null
+    return url.withWeiboImageSize(WeiboImageSize.LARGE)
 }
 
 // 微博单条详情响应
@@ -879,6 +1118,28 @@ data class WeiboDetailResponse(
     val ok: Int = 1,
     val data: WeiboStatusDto? = null
 )
+
+// 关注 / 粉丝列表一页（移动端 container 接口）
+@Immutable
+data class WeiboUserListPage(
+    val items: List<WeiboSearchCardInfo> = emptyList(),
+    val total: Int? = null,
+    val nextPage: Int? = null
+)
+
+/**
+ * 「我的关注」页的固定分组容器（与微博客户端一致）。
+ *
+ * 容器 id 来自反编译产物 `MyFriendActivity.java`：
+ * - `231093_-_selffollowed`：关注的人
+ * - `231093_-_lastmblog`：最新发博
+ * - `231093_-_recently`：经常访问
+ */
+enum class FollowingListTab(val containerId: String) {
+    ALL("231093_-_selffollowed"),
+    LATEST_POST("231093_-_lastmblog"),
+    RECENT_VISIT("231093_-_recently")
+}
 
 // 博主主页时间线整合结果
 data class UserTimelineResult(
@@ -892,6 +1153,8 @@ data class UserTimelineResult(
 @Serializable
 data class RepostsResponse(
     val ok: Int = 1,
+    /** 无内容时服务端返回 ok=0 + msg="这里还没有内容"，不能当成加载失败 */
+    val msg: String? = null,
     val data: RepostsDataDto? = null
 )
 
@@ -906,6 +1169,8 @@ data class RepostsDataDto(
 @Serializable
 data class AttitudesResponse(
     val ok: Int = 1,
+    /** 无内容时服务端返回 ok=0 + msg="这里还没有内容"，不能当成加载失败 */
+    val msg: String? = null,
     val data: AttitudesDataDto? = null
 )
 

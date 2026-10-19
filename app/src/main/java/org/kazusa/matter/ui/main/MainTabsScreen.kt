@@ -1,5 +1,6 @@
 package org.kazusa.matter.ui.main
 
+import org.kazusa.matter.data.model.VideoStreamInfo
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -16,6 +17,11 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Scaffold
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -32,7 +38,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,9 +53,11 @@ import org.kazusa.matter.ui.theme.ThemePreferences
 import org.kazusa.matter.data.model.HotSearchChannel
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.group.GroupViewModel
+import org.kazusa.matter.ui.hotfeed.HotFeedScreen
+import org.kazusa.matter.ui.hotfeed.HotFeedViewModel
 import org.kazusa.matter.ui.profile.ProfileScreen
 import org.kazusa.matter.ui.search.HotSearchBoardState
-import org.kazusa.matter.ui.search.SearchScreen
+import org.kazusa.matter.ui.search.HotSearchScreen
 import org.kazusa.matter.ui.search.currentLatLon
 import org.kazusa.matter.ui.search.hasCoarseLocationPermission
 import org.kazusa.matter.ui.timeline.TimelineScreen
@@ -61,6 +68,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 
 /**
@@ -77,7 +85,7 @@ internal enum class MainTab(
     val unselectedIcon: ImageVector
 ) {
     Timeline("动态", Icons.Filled.Home, Icons.Outlined.Home),
-    Search("发现", Icons.Filled.Explore, Icons.Outlined.Explore),
+    Search("热门", Icons.Filled.Explore, Icons.Outlined.Explore),
     Profile("我的", Icons.Filled.Person, Icons.Outlined.Person)
 }
 
@@ -96,11 +104,14 @@ fun MainTabsScreen(
     onNavigateToAppearance: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
     onNavigateToSavedPosts: () -> Unit = {},
+    onNavigateToMyPosts: () -> Unit = {},
+    onNavigateToFollowing: () -> Unit = {},
+    onNavigateToFollowers: () -> Unit = {},
     onUserClick: (Long?) -> Unit = {},
     onPostClick: (WeiboStatusDto) -> Unit,
     onCommentClick: (WeiboStatusDto) -> Unit = onPostClick,
     onImageClick: (urls: List<String>, index: Int) -> Unit,
-    onVideoClick: (url: String, title: String) -> Unit,
+    onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit,
     onMentionClick: (String) -> Unit = {},
     onTopicClick: (String) -> Unit = {},
     onSearchSubmit: (String) -> Unit = {},
@@ -113,7 +124,8 @@ fun MainTabsScreen(
     authRepository: AuthRepository = koinInject(),
     themePreferences: ThemePreferences = koinInject(),
     timelineViewModel: TimelineViewModel = koinViewModel(),
-    groupViewModel: GroupViewModel = koinViewModel()
+    groupViewModel: GroupViewModel = koinViewModel(),
+    hotFeedViewModel: HotFeedViewModel = koinViewModel()
 ) {
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { MainTab.entries.size })
     val coroutineScope = rememberCoroutineScope()
@@ -123,32 +135,23 @@ fun MainTabsScreen(
         LazyListState()
     }
 
-    // 发现页同样由主框架持有滚动状态，才能与动态页共享底栏隐藏逻辑与沉浸式顶栏联动
-    val searchListState = rememberSaveable(saver = LazyListState.Saver) {
-        LazyListState()
-    }
+    // 热门 Tab 的展示模式：热门流 / 微博热搜（悬浮底栏左侧按钮切换）
+    var discoverMode by rememberSaveable { mutableStateOf(DiscoverMode.HOT) }
 
+    // 热门页的列表状态由页面内部持有（每份内容一份，支持交叉淡化），
+    // 这里只镜像「当前可见的那一份」，让底栏隐藏逻辑与动态页完全一致（含“到顶立即显示”）
+    val discoverListState = remember { mutableStateOf<LazyListState?>(null) }
 
-
-    // 热搜榜状态：发现页列表与悬浮层里的「换榜」按钮共用同一份
+    // 热搜榜状态：榜单切换由悬浮底栏右侧的分类菜单触发，与热搜列表共用同一份
     val hotSearchState = remember(apiService, coroutineScope) {
         HotSearchBoardState(apiService, coroutineScope)
     }
 
-    // 切榜后把发现页列表平滑滚回顶部
-    val scrollSearchListToTop: () -> Unit = remember(coroutineScope, searchListState) {
-        {
-            coroutineScope.launch {
-                if (searchListState.firstVisibleItemIndex > 12) {
-                    searchListState.scrollToItem(10)
-                }
-                searchListState.animateScrollToItem(0)
-            }
-        }
-    }
+    // 只把 State 往下传：分类菜单在悬浮层里读取，热门流每加载一页不会带着主框架重组
+    val hotFeedState = hotFeedViewModel.uiState.collectAsStateWithLifecycle()
 
     // 「同城」榜要经纬度才有数据（无定位时服务端只回一条「位置信息获取失败」），
-    // 因此只在用户主动切到该榜时才申请 COARSE_LOCATION；授权后再读一次设备位置并切榜。
+    // 因此只在用户主动切到该榜时才申请 COARSE_LOCATION；授权后再取一次位置并切榜。
     val context = LocalContext.current
     var pendingRegionBoard by remember { mutableStateOf<HotSearchChannel?>(null) }
     val locationPermissionLauncher = rememberLauncherForActivityResult(
@@ -158,32 +161,34 @@ fun MainTabsScreen(
         pendingRegionBoard = null
         if (channel != null) {
             coroutineScope.launch {
-                // 授权后主动取一次位置（刚授权时系统往往还没有缓存，只查 lastKnown 会拿不到）
                 hotSearchState.select(
                     channel,
                     latLon = if (granted) currentLatLon(context) else null
                 )
-                scrollSearchListToTop()
             }
         }
     }
 
-    // 选榜：同城榜（服务端 filter_type=region）需要经纬度 ——
-    // 没授权就先申请，授权结果回调里再切榜；已授权直接带位置切。
-    // 悬浮层在调用前会先收起榜单菜单。
-    val selectBoard: (HotSearchChannel) -> Unit = { channel ->
+    // 热搜榜单切换：同城榜需要位置，没授权就先申请，回调里再切
+    val selectHotSearchChannel: (HotSearchChannel) -> Unit = { channel ->
         if (channel.containerid.contains(REGION_FILTER) &&
             !hasCoarseLocationPermission(context)
         ) {
             pendingRegionBoard = channel
-            locationPermissionLauncher.launch(
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            )
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
         } else {
             coroutineScope.launch {
                 hotSearchState.select(channel, latLon = currentLatLon(context))
             }
-            scrollSearchListToTop()
+        }
+    }
+
+    // 左侧悬浮按钮：热搜 ↔ 热门。列表状态由各自页面持有，切换后自然从顶部开始
+    val toggleDiscoverMode: () -> Unit = {
+        discoverMode = if (discoverMode == DiscoverMode.HOT) {
+            DiscoverMode.HOT_SEARCH
+        } else {
+            DiscoverMode.HOT
         }
     }
 
@@ -199,14 +204,15 @@ fun MainTabsScreen(
     val scrollThreshold = with(LocalDensity.current) { 32.dp.toPx() }
     val scrollTracker = remember(scrollThreshold) { BottomBarScrollTracker(scrollThreshold) }
     val currentPendingRestore by rememberUpdatedState(pendingRestoreIndex)
-    val bottomBarScrollConnection = remember(pagerState, timelineListState, searchListState, scrollTracker) {
+    val bottomBarScrollConnection = remember(pagerState, timelineListState, scrollTracker) {
         object : NestedScrollConnection {
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
                 if (source == NestedScrollSource.UserInput) {
-                    // 动态页与发现页都参与「下滑隐藏 / 上滑显示」的沉浸式底栏联动
+                    // 动态页与热门页走同一套规则：能拿到当前列表状态就顺带判断「是否在顶部」，
+                    // 到顶立即显示底栏；否则按滚动增量（32dp 阈值）决定显示 / 隐藏
                     val activeListState = when (pagerState.currentPage) {
                         0 -> if (currentPendingRestore == null) timelineListState else null
-                        1 -> searchListState
+                        1 -> discoverListState.value
                         else -> null
                     }
                     if (activeListState != null) {
@@ -278,14 +284,57 @@ fun MainTabsScreen(
                         )
                     }
                     1 -> {
-                        SearchScreen(
-                            onSearchSubmit = onSearchSubmit,
-                            hotSearchState = hotSearchState,
-                            listState = searchListState,
-                            backdrop = searchBackdrop,
-                            bottomBarPadding = bottomBarPadding,
+                        // 热搜 ↔ 热门切换：两个页面都自带列表状态，可以安全地同时组合，做真正的交叉淡化
+                        AnimatedContent(
+                            targetState = discoverMode,
+                            transitionSpec = {
+                                fadeIn(animationSpec = tween(240)) togetherWith
+                                    fadeOut(animationSpec = tween(160))
+                            },
+                            label = "DiscoverMode",
                             modifier = Modifier.fillMaxSize()
-                        )
+                        ) { mode ->
+                            when (mode) {
+                                DiscoverMode.HOT -> {
+                                    HotFeedScreen(
+                                        viewModel = hotFeedViewModel,
+                                        onUserClick = onUserClick,
+                                        onPostClick = onPostClick,
+                                        onCommentClick = onCommentClick,
+                                        onImageClick = onImageClick,
+                                        onVideoClick = onVideoClick,
+                                        onMentionClick = onMentionClick,
+                                        onTopicClick = onTopicClick,
+                                        // 过渡期间只有当前模式参与顶栏模糊采样，避免两层同时写入同一张 backdrop
+                                        backdrop = searchBackdrop.takeIf { mode == discoverMode },
+                                        bottomBarPadding = bottomBarPadding,
+                                        isActive = mode == discoverMode,
+                                        onActiveListStateChanged = { state ->
+                                            if (discoverListState.value !== state) {
+                                                discoverListState.value = state
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+
+                                DiscoverMode.HOT_SEARCH -> {
+                                    HotSearchScreen(
+                                        hotSearchState = hotSearchState,
+                                        onSearchSubmit = onSearchSubmit,
+                                        backdrop = searchBackdrop.takeIf { mode == discoverMode },
+                                        bottomBarPadding = bottomBarPadding,
+                                        isActive = mode == discoverMode,
+                                        onActiveListStateChanged = { state ->
+                                            if (discoverListState.value !== state) {
+                                                discoverListState.value = state
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            }
+                        }
                     }
                     2 -> {
                         ProfileScreen(
@@ -297,6 +346,9 @@ fun MainTabsScreen(
                             onNavigateToAppearance = onNavigateToAppearance,
                             onNavigateToHistory = onNavigateToHistory,
                             onNavigateToSavedPosts = onNavigateToSavedPosts,
+                            onNavigateToMyPosts = onNavigateToMyPosts,
+                            onNavigateToFollowing = onNavigateToFollowing,
+                            onNavigateToFollowers = onNavigateToFollowers,
                             onLogout = onLogout,
                             backdrop = profileBackdrop,
                             bottomBarPadding = bottomBarPadding,
@@ -306,14 +358,21 @@ fun MainTabsScreen(
                 }
             }
 
-            // 悬浮底栏（胶囊 / 换榜按钮 / 榜单菜单）叠在分页内容之上；
-            // 没有菜单遮罩时这一层不持有任何手势，点击会照常落到下面的内容区。
+            // 悬浮底栏（胶囊 + 左右两颗按钮）叠在分页内容之上；
+            // 这一层不持有任何手势，点击会照常落到下面的内容区。
             MainBottomBarLayer(
                 pagerState = pagerState,
                 visible = isBottomBarVisible,
-                hotSearchState = hotSearchState,
                 unreadCount = unreadCount,
                 backdrop = bottomBarBackdrop,
+                discoverMode = discoverMode,
+                hotFeedUiState = hotFeedState,
+                hotSearchState = hotSearchState,
+                onToggleDiscoverMode = toggleDiscoverMode,
+                onHotCategorySelected = { category ->
+                    hotFeedViewModel.selectCategory(category)
+                },
+                onHotSearchChannelSelected = selectHotSearchChannel,
                 onReselect = { index ->
                     when (index) {
                         0 -> coroutineScope.launch {
@@ -330,15 +389,17 @@ fun MainTabsScreen(
                                 timelineListState.animateScrollToItem(0)
                             }
                         }
-                        1 -> coroutineScope.launch {
-                            if (searchListState.firstVisibleItemIndex > 12) {
-                                searchListState.scrollToItem(10)
+                        1 -> {
+                            // 热门页的列表状态在页面内部（切换会换新列表、从顶部开始），
+                            // 再次点击 Tab 直接刷新当前模式的内容
+                            if (discoverMode == DiscoverMode.HOT) {
+                                hotFeedViewModel.refresh()
+                            } else {
+                                hotSearchState.refresh()
                             }
-                            searchListState.animateScrollToItem(0)
                         }
                     }
-                },
-                onBoardSelected = selectBoard
+                }
             )
         }
     }

@@ -65,6 +65,16 @@ class ImageMorphState(
 
     var currentDisplayUrl by mutableStateOf<String?>(null)
 
+    /**
+     * 本次形变的来源卡片唯一标识（微博卡片 key / 正文页 key）。
+     *
+     * 仅凭图片 URL 列表无法区分「两张转载了相同图片的微博卡片」，
+     * 会导致两张卡片的缩略图一起让位、收拢时飞回错误的那一张。
+     * 这里用卡片身份作为唯一来源，缩略图让位与槽位登记都只对来源卡片生效。
+     */
+    var ownerKey by mutableStateOf<String?>(null)
+        private set
+
     var urls by mutableStateOf<List<String>>(emptyList())
         private set
 
@@ -104,26 +114,45 @@ class ImageMorphState(
 
     /**
      * 判断当前卡片缩略图插槽是否需要让位隐藏（alpha = 0）：
-     * 在形变展开与收拢全程，被点击或当前正浏览的缩略图隐藏，
-     * 避免返回动画时卡片内与飞行的图片同时出现（产生双重重叠）。
+     * 在形变展开与收拢全程，只有「被点击的那张卡片」中当前正浏览的缩略图隐藏，
+     * 避免返回动画时卡片内与飞行的图片同时出现（产生双重重叠），
+     * 同时不会误伤其他转载了相同图片的卡片。
      */
-    fun isSlotHidden(targetUrls: List<String>, index: Int): Boolean {
-        return isPresent && urls == targetUrls && currentIndex == index
+    fun isSlotHidden(
+        ownerKey: String?,
+        targetUrls: List<String>,
+        index: Int
+    ): Boolean {
+        if (!isPresent || currentIndex != index) return false
+        val activeOwner = this.ownerKey
+        return if (activeOwner != null) {
+            !ownerKey.isNullOrBlank() && ownerKey == activeOwner
+        } else {
+            // 来源卡片没有稳定标识时退回 URL 列表判等，保持旧行为
+            urls == targetUrls
+        }
     }
 
     fun registerSlot(
+        ownerKey: String?,
         targetUrls: List<String>,
         index: Int,
         bounds: Rect,
         cornerRadiusPx: Float,
         ratio: Float? = null
     ) {
-        if (!bounds.isEmpty && (urls.isEmpty() || urls == targetUrls)) {
-            slotBoundsMap[index] = bounds
-            slotCornerRadiusMap[index] = cornerRadiusPx
-            if (ratio != null) {
-                slotRatioMap[index] = ratio
-            }
+        if (!isPresent || bounds.isEmpty) return
+        val activeOwner = this.ownerKey
+        val sameSource = if (activeOwner != null) {
+            !ownerKey.isNullOrBlank() && ownerKey == activeOwner
+        } else {
+            urls == targetUrls
+        }
+        if (!sameSource) return
+        slotBoundsMap[index] = bounds
+        slotCornerRadiusMap[index] = cornerRadiusPx
+        if (ratio != null) {
+            slotRatioMap[index] = ratio
         }
     }
 
@@ -156,6 +185,7 @@ class ImageMorphState(
      * 切图翻页后退出时能直接飞向对应槽位，杜绝重叠与错误裁切！
      */
     fun open(
+        ownerKey: String,
         urls: List<String>,
         index: Int,
         bounds: Rect,
@@ -166,6 +196,7 @@ class ImageMorphState(
         livePhotoMap: Map<String, String>? = null,
         scope: CoroutineScope
     ) {
+        this.ownerKey = ownerKey.takeIf { it.isNotBlank() }
         this.urls = urls
         this.livePhotoMap = livePhotoMap ?: emptyMap()
         this.initialIndex = index
@@ -267,6 +298,7 @@ class ImageMorphState(
             this@ImageMorphState.collapseScale = 1f
             this@ImageMorphState.collapseOffset = Offset.Zero
             this@ImageMorphState.currentDisplayUrl = null
+            this@ImageMorphState.ownerKey = null
         }
     }
 

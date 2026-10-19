@@ -24,10 +24,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.State
@@ -274,7 +272,11 @@ fun LiquidGlassMorphMenu(
                     .align(Alignment.BottomEnd)
                     .graphicsLayer { alpha = progress.value.coerceIn(0f, 1f) }
             ) {
-                Icon(Icons.Filled.Close, contentDescription = "关闭榜单菜单", tint = onSurface)
+                LiquidGlassIcon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "关闭榜单菜单",
+                    tint = onSurface
+                )
             }
         }
     }
@@ -333,7 +335,7 @@ private fun MorphMenuRow(
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
+        LiquidGlassText(
             text = text,
             style = MaterialTheme.typography.titleSmallEmphasized,
             color = textColor,
@@ -343,7 +345,7 @@ private fun MorphMenuRow(
         )
         if (selected) {
             Spacer(modifier = Modifier.width(8.dp))
-            Icon(
+            LiquidGlassIcon(
                 imageVector = Icons.Filled.Check,
                 contentDescription = null,
                 tint = checkColor,
@@ -368,7 +370,7 @@ fun BoxScope.LiquidGlassFloatingMenu(
     backdrop: LayerBackdrop?,
     modifier: Modifier = Modifier,
     icon: @Composable () -> Unit = {
-        Icon(
+        LiquidGlassIcon(
             imageVector = Icons.AutoMirrored.Filled.Sort,
             contentDescription = "切换分栏"
         )

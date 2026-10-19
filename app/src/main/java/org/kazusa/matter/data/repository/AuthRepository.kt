@@ -106,6 +106,13 @@ class AuthRepository(
                     ?: configUser?.avatarHd ?: configUser?.avatarLarge ?: configUser?.profileImageUrl
                     ?: ""
                 val description = profile?.description.orEmpty()
+                val followersCount = profile?.followersCount.orEmpty()
+                    .ifBlank { configUser?.followersCount.orEmpty() }
+                val friendsCount = profile?.friendsCount.orEmpty()
+                    .ifBlank { profile?.followCount.orEmpty() }
+                    .ifBlank { configUser?.friendsCount.orEmpty().ifBlank { configUser?.followCount.orEmpty() } }
+                val statusesCount = profile?.statusesCount.orEmpty()
+                    .ifBlank { configUser?.statusesCount.orEmpty() }
 
                 authPreferences.saveSession(
                     uid = uid,
@@ -114,7 +121,10 @@ class AuthRepository(
                     rawCookie = formattedCookie,
                     screenName = screenName,
                     avatarUrl = avatarUrl,
-                    description = description
+                    description = description,
+                    followersCount = followersCount,
+                    friendsCount = friendsCount,
+                    statusesCount = statusesCount
                 )
                 ApiResult.Success(
                     UserSession(
@@ -125,6 +135,9 @@ class AuthRepository(
                         screenName = screenName,
                         avatarUrl = avatarUrl,
                         description = description,
+                        followersCount = followersCount,
+                        friendsCount = friendsCount,
+                        statusesCount = statusesCount,
                         isLoggedIn = true
                     )
                 )
@@ -154,16 +167,26 @@ class AuthRepository(
         val screenName = profile.screenName.ifBlank { current.screenName }
         val avatarUrl = profile.avatarHd ?: profile.avatarLarge ?: profile.profileImageUrl ?: current.avatarUrl
         val description = profile.description.orEmpty()
+        val followersCount = profile.followersCount.ifBlank { current.followersCount }
+        val friendsCount = profile.friendsCount.ifBlank { profile.followCount }
+            .ifBlank { current.friendsCount }
+        val statusesCount = profile.statusesCount.ifBlank { current.statusesCount }
 
         authPreferences.updateProfile(
             screenName = screenName,
             avatarUrl = avatarUrl,
-            description = description
+            description = description,
+            followersCount = followersCount,
+            friendsCount = friendsCount,
+            statusesCount = statusesCount
         )
         return current.copy(
             screenName = screenName,
             avatarUrl = avatarUrl,
-            description = description
+            description = description,
+            followersCount = followersCount,
+            friendsCount = friendsCount,
+            statusesCount = statusesCount
         )
     }
 

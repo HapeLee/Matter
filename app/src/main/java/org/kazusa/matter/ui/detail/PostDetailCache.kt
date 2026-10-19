@@ -53,3 +53,22 @@ fun WeiboStatusDto.getCardSharedKey(): String {
 fun formatPostDetailSharedKey(postId: String): String {
     return if (postId.isNotBlank()) "post_card_$postId" else ""
 }
+
+/**
+ * 「转发卡片内原微博区块」的共享键。
+ *
+ * 转发卡片里渲染的是被转发的原微博；如果直接复用 `post_card_<id>`，
+ * 会和信息流里原微博自己的卡片撞 key，点击转发区域时动画会从那张原微博卡片起飞。
+ * 这里给转发区块单独一套 key，正文页在命中该 key 时使用同名 key 收尾。
+ */
+fun WeiboStatusDto.getRetweetSectionSharedKey(): String {
+    val idPart = idStr?.takeIf { it.isNotBlank() }
+        ?: mid?.takeIf { it.isNotBlank() }
+        ?: id?.toString()?.takeIf { it.isNotBlank() }
+        ?: ""
+    return formatRetweetSectionSharedKey(idPart)
+}
+
+fun formatRetweetSectionSharedKey(postId: String): String {
+    return if (postId.isNotBlank()) "retweet_card_$postId" else ""
+}

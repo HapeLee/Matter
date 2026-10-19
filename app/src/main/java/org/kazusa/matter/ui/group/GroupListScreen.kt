@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,7 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -57,7 +55,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -72,7 +69,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -81,9 +77,13 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import org.kazusa.matter.data.model.WeiboGroupDto
 import org.kazusa.matter.ui.components.ImmersiveTopBar
+import org.kazusa.matter.ui.components.MatterCard
+import org.kazusa.matter.ui.components.MatterSnackbar
+import org.kazusa.matter.ui.components.MatterTag
 import org.kazusa.matter.ui.components.TopBarActionButton
 import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
+import org.kazusa.matter.ui.theme.MatterShapeTokens
 
 @Composable
 fun GroupListScreen(
@@ -134,10 +134,8 @@ fun GroupListScreen(
                 hostState = snackbarHostState,
                 modifier = Modifier.padding(bottom = 16.dp)
             ) { data ->
-                Snackbar(
-                    shape = RoundedCornerShape(16.dp),
+                MatterSnackbar(
                     containerColor = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.94f),
-                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
                     modifier = Modifier.padding(horizontal = 24.dp)
                 ) {
                     Row(
@@ -224,9 +222,8 @@ fun GroupListScreen(
                     ) {
                         // 顶部说明卡片
                         item(key = "header_hint_banner") {
-                            Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                            MatterCard(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 16.dp, vertical = 6.dp)
@@ -397,21 +394,20 @@ private fun SectionHeader(
             style = MaterialTheme.typography.titleSmall,
             color = if (isAccent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = if (isAccent) {
+        MatterTag(
+            text = "${count}个",
+            containerColor = if (isAccent) {
                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
             } else {
                 MaterialTheme.colorScheme.surfaceContainerHighest
-            }
-        ) {
-            Text(
-                text = "${count}个",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (isAccent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-            )
-        }
+            },
+            contentColor = if (isAccent) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+        )
     }
 }
 
@@ -447,16 +443,14 @@ private fun GroupManagementCard(
         else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.6f)
     }
 
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = containerColor,
-        shadowElevation = elevation,
-        tonalElevation = elevation,
+    MatterCard(
+        shape = MatterShapeTokens.listItem,
+        containerColor = containerColor,
+        elevation = elevation,
+        onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .clickable(onClick = onClick)
     ) {
         Row(
             modifier = Modifier
@@ -502,29 +496,17 @@ private fun GroupManagementCard(
                         color = if (isVisibleInTop) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
                     )
                     if (isAllGroup) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                        ) {
-                            Text(
-                                text = "默认置顶",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
-                            )
-                        }
+                        MatterTag(
+                            text = "默认置顶",
+                            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
                     } else if (isSystemGroup) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                        ) {
-                            Text(
-                                text = "系统",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
-                            )
-                        }
+                        MatterTag(
+                            text = "系统",
+                            containerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 

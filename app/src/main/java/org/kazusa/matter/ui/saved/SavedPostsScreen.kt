@@ -19,11 +19,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kyant.backdrop.backdrops.layerBackdrop
 import kotlinx.coroutines.flow.distinctUntilChanged
 import org.kazusa.matter.data.model.UserPostCollection
+import org.kazusa.matter.data.model.VideoStreamInfo
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.components.ImmersiveTopBar
 import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.components.WeiboPostCard
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassFloatingMenu
+import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
 import org.kazusa.matter.ui.effect.rememberScreenBackdrop
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,7 +37,7 @@ fun SavedPostsScreen(
     onCommentClick: (WeiboStatusDto) -> Unit,
     onUserClick: (Long?) -> Unit,
     onImageClick: (List<String>, Int) -> Unit,
-    onVideoClick: (String, String) -> Unit,
+    onVideoClick: (String, String, List<VideoStreamInfo>, String, String) -> Unit,
     onMentionClick: (String) -> Unit,
     onTopicClick: (String) -> Unit
 ) {
@@ -191,7 +193,7 @@ fun SavedPostsScreen(
                     .navigationBarsPadding()
                     .padding(end = 16.dp, bottom = 16.dp),
                 icon = {
-                    Icon(
+                    LiquidGlassIcon(
                         imageVector = Icons.AutoMirrored.Filled.Sort,
                         contentDescription = "切换分类"
                     )

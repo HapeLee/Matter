@@ -35,6 +35,39 @@ object FlexibleStringSerializer : KSerializer<String> {
 }
 
 /**
+ * 支持从布尔值、数字（1/0）或字符串（"true"/"1"）灵活解析为 Boolean?。
+ *
+ * 微博不同端下发的 `following` / `follow_me` 既有 true/false，也有 1/0，
+ * 直接声明成 Boolean 会在后端换格式时整棵树解析失败。
+ */
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+object FlexibleBooleanSerializer : KSerializer<Boolean?> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("FlexibleBoolean", PrimitiveKind.BOOLEAN)
+
+    override fun serialize(encoder: Encoder, value: Boolean?) {
+        if (value != null) encoder.encodeBoolean(value) else encoder.encodeNull()
+    }
+
+    override fun deserialize(decoder: Decoder): Boolean? {
+        return if (decoder is JsonDecoder) {
+            val element = decoder.decodeJsonElement()
+            if (element is JsonPrimitive) {
+                when {
+                    !element.isString -> element.content == "true" || element.content == "1"
+                    else -> element.content.equals("true", ignoreCase = true) || element.content == "1"
+                }
+            } else null
+        } else {
+            try {
+                decoder.decodeBoolean()
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+}
+
+/**
  * 支持从长整型或字符串形式的数字灵活解析为 Long?
  */
 @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)

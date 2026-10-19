@@ -1,6 +1,5 @@
 package org.kazusa.matter.ui.group
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,10 +39,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.kazusa.matter.ui.components.MatterCard
+import org.kazusa.matter.ui.theme.MatterShapeTokens
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -181,17 +181,16 @@ fun FollowGroupBottomSheet(
                         if (onNavigateToManagement != null) {
                             item(key = "manage_groups_btn") {
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Surface(
-                                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
-                                    shape = RoundedCornerShape(16.dp),
+                                MatterCard(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                                    shape = MatterShapeTokens.listItem,
+                                    onClick = {
+                                        onDismissRequest()
+                                        onNavigateToManagement()
+                                    },
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(horizontal = 16.dp, vertical = 4.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .clickable {
-                                            onDismissRequest()
-                                            onNavigateToManagement()
-                                        }
                                 ) {
                                     Row(
                                         modifier = Modifier
@@ -231,18 +230,17 @@ private fun GroupSheetItem(
     memberCount: Int? = null,
     onClick: () -> Unit
 ) {
-    Surface(
-        color = if (isSelected) {
+    MatterCard(
+        containerColor = if (isSelected) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
         } else {
             MaterialTheme.colorScheme.surfaceContainerLow
         },
-        shape = RoundedCornerShape(16.dp),
+        shape = MatterShapeTokens.listItem,
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 3.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
     ) {
         Row(
             modifier = Modifier

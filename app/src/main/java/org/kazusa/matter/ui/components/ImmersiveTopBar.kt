@@ -13,6 +13,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -25,7 +26,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -146,7 +146,14 @@ fun ImmersiveTopBar(
             title = { title(scrollStateHolder) },
             navigationIcon = { navigationIcon(scrollStateHolder) },
             actions = { actions(scrollStateHolder) },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+            // 三个槽位下发同一个前景色：M3 默认是 title=onSurface、action/navigation=onSurfaceVariant，
+            // 同一根顶栏里标题与两侧图标会一深一浅。这里统一成标题色，保证混排一致。
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = Color.Transparent,
+                titleContentColor = TopBarTokens.ContentColor,
+                actionIconContentColor = TopBarTokens.ContentColor,
+                navigationIconContentColor = TopBarTokens.ContentColor
+            ),
             modifier = barModifier
         )
     }
@@ -161,9 +168,21 @@ fun ImmersiveTopBar(
  *   - 触顶时（alpha = 0）：胶囊玻璃完全淡出，标题贴齐屏幕左侧边距（start = 0dp），边缘按钮仅保留 4dp 边距；
  *   - 滚动后（alpha = 1）：胶囊玻璃随滚动遮罩优雅显现，标题平滑缩进（纯文本 16dp / 带图标 12dp），按钮缩进至 16dp；
  * - 排版规范：标准 titleLarge（28sp 行高）+ 上下各 8dp padding，精准达到 44dp 胶囊高度；
- * - 景深规范：前景色较亮时自动附加微阴影（[liquidTextShadow] 与 [LiquidGlassIcon]）。
+ * - 景深规范：玻璃上的文字与图标统一附加浅阴影（[liquidTextShadow] 与 [LiquidGlassIcon]）。
  */
 object TopBarTokens {
+    /**
+     * 顶栏玻璃前景统一色。
+     *
+     * 标题文字、标题内混排图标、左右两侧导航 / 操作图标全部取同一个颜色，
+     * 避免 M3 TopAppBar 按槽位默认下发不同 contentColor（title = onSurface、
+     * action / navigation = onSurfaceVariant）导致「图标比文字淡一档」。
+     */
+    val ContentColor: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = MaterialTheme.colorScheme.onSurface
+
     /** 胶囊与圆形图标按钮的标准高度/直径：44dp */
     val ElementSize: Dp = 44.dp
 
@@ -280,16 +299,16 @@ fun TopBarTitleText(
             leadingIcon != null -> leadingIcon()
             onBackClick != null -> LiquidGlassIcon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "返回"
+                contentDescription = "返回",
+                tint = TopBarTokens.ContentColor
             )
         }
         if (leadingIcon != null || onBackClick != null) {
             Spacer(modifier = Modifier.width(TopBarTokens.TitleIconGap))
         }
-        val contentColor = LocalContentColor.current
         Text(
             text = text,
-            color = contentColor,
+            color = TopBarTokens.ContentColor,
             style = MaterialTheme.typography.headlineMediumEmphasized.copy(
                 shadow = liquidTextShadow()
             ),
@@ -307,6 +326,9 @@ fun TopBarTitleText(
  * 标准顶栏右侧操作图标按钮（如搜索、关闭、分享、刷新）。
  *
  * 统一 44dp 直径，包含滚动透明度渐变、4dp -> 16dp 边距内收，以及图标微阴影。
+ *
+ * 玻璃配方与标题胶囊同源：只按滚动联动 [LiquidGlassIconButton.glassAlpha]，
+ * 不再额外叠加 `tintAlpha`，否则滚动到位后按钮比标题胶囊更白、更不透。
  */
 @Composable
 fun TopBarActionButton(
@@ -316,14 +338,13 @@ fun TopBarActionButton(
     backdrop: LayerBackdrop? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    tint: Color = LocalContentColor.current,
+    tint: Color = TopBarTokens.ContentColor,
 ) {
     LiquidGlassIconButton(
         onClick = onClick,
         backdrop = backdrop,
         size = TopBarTokens.ElementSize,
         glassAlpha = scroll.alpha,
-        tintAlpha = scroll.alpha,
         modifier = modifier.topBarActionPadding(scroll)
     ) {
         LiquidGlassIcon(
@@ -338,6 +359,9 @@ fun TopBarActionButton(
  * 标准顶栏左侧导航图标按钮（如返回键）。
  *
  * 统一 44dp 直径，包含滚动透明度渐变、4dp -> 16dp 边距内收，以及图标微阴影。
+ *
+ * 与 [TopBarActionButton] 一致：玻璃只随滚动联动 [LiquidGlassIconButton.glassAlpha]，
+ * 与标题胶囊保持完全相同的表面亮度。
  */
 @Composable
 fun TopBarNavigationButton(
@@ -347,14 +371,13 @@ fun TopBarNavigationButton(
     backdrop: LayerBackdrop? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    tint: Color = LocalContentColor.current,
+    tint: Color = TopBarTokens.ContentColor,
 ) {
     LiquidGlassIconButton(
         onClick = onClick,
         backdrop = backdrop,
         size = TopBarTokens.ElementSize,
         glassAlpha = scroll.alpha,
-        tintAlpha = scroll.alpha,
         modifier = modifier.topBarNavigationPadding(scroll)
     ) {
         LiquidGlassIcon(

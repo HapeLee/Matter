@@ -1,5 +1,10 @@
 package org.kazusa.matter.ui.search
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,7 +23,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.LocalFireDepartment
@@ -30,13 +34,13 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,37 +61,41 @@ import org.kazusa.matter.data.model.HotSearchItem
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.Alignment
 import org.kazusa.matter.ui.components.ImmersiveTopBar
+import org.kazusa.matter.ui.components.MatterTag
 import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassCapsule
 
 /**
- * 「发现」页（第二个 Tab）。
+ * 「微博热搜」视图（主框架「热门」Tab 下的展示模式之一，由左侧悬浮按钮在热搜 / 热门之间切换）。
  *
- * 视觉与「动态」页保持一致：
- * - 顶栏为沉浸式顶栏，标题是液态玻璃胶囊（[LiquidGlassCapsule]），随滚动淡入；
- * - 内容为 [LazyColumn]，挂载 [layerBackdrop] 作为顶栏玻璃的采样底图，
- *   配合 `contentPadding.top = 顶栏高度`，内容可以从顶栏下方穿行而过。
- *
- * 搜索入口已迁到「动态」页顶栏的 actions 槽（点击进入搜索展示页），
- * 本页只保留榜单标题与热搜流：点热搜条目 / 入口卡直接跳到独立的搜索结果页。
+ * - 顶栏标题是当前榜单名（服务端下发，如「热搜」「文娱」「同城」）；
+ * - 榜单切换交给悬浮底栏右侧的分类按钮，页面内不再放切换条；
+ * - 内容为热搜榜卡片列表，点条目 / 入口卡进入独立的搜索结果页。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SearchScreen(
-    onSearchSubmit: (String) -> Unit,
-    /** 热搜榜状态：发现页列表与悬浮胶囊旁的「换榜」按钮共用同一份状态 */
+fun HotSearchScreen(
     hotSearchState: HotSearchBoardState,
-    listState: LazyListState = rememberLazyListState(),
+    onSearchSubmit: (String) -> Unit,
     backdrop: LayerBackdrop? = null,
     bottomBarPadding: Dp = 0.dp,
+    /** 是否为主框架当前展示的内容；交叉淡化期间离场的那份不应再上报滚动状态 */
+    isActive: Boolean = true,
+    /** 上报当前榜单列表状态，主框架用它复刻动态页的「到顶立即显示底栏」判断 */
+    onActiveListStateChanged: (LazyListState) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val pullRefreshState = rememberPullToRefreshState()
 
+    // 顶栏胶囊需要「当前列表」的滚动状态才能淡入标题底；过渡期间存在两份列表，
+    // 因此这里只镜像当前那一份（切换后由新列表接上）
+    val topBarListState = remember { mutableStateOf(LazyListState()) }
+
     // 顶栏标题直接显示当前榜单名（如「热搜」「文娱」「同城」），切榜 / 刷新后跟着变
     val topBarTitle = hotSearchState.selectedChannel?.name
         ?.takeIf { it.isNotBlank() }
-        ?: "发现"
+        ?: hotSearchState.pageTitle?.takeIf { it.isNotBlank() }
+        ?: "微博热搜"
 
     // 初始加载热搜（下拉刷新走 PullToRefreshBox → hotSearchState.refresh()）
     LaunchedEffect(Unit) {
@@ -97,14 +105,13 @@ fun SearchScreen(
     Scaffold(
         topBar = {
             ImmersiveTopBar(
-                listState = listState,
-                animationLabel = "SearchTopBarScrim",
-                // 搜索入口已迁到「动态」页顶栏 actions 槽，这里只留榜单标题
+                listState = topBarListState.value,
+                animationLabel = "HotSearchTopBarScrim",
                 title = { scroll ->
                     TopBarTitleText(
                         text = topBarTitle,
                         scroll = scroll,
-                        backdrop = backdrop,
+                        backdrop = backdrop
                     )
                 }
             )
@@ -119,29 +126,59 @@ fun SearchScreen(
             onRefresh = { hotSearchState.refresh() },
             modifier = Modifier.fillMaxSize()
         ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
-                    .background(MaterialTheme.colorScheme.surface),
-                contentPadding = PaddingValues(
-                    start = 12.dp,
-                    top = topPadding + 8.dp,
-                    end = 12.dp,
-                    bottom = bottomBarPadding + 20.dp
-                )
-            ) {
-                hotSearchItems(
-                    board = hotSearchState.board,
-                    updatedAt = hotSearchState.lastLoadedAt,
-                    isLoading = hotSearchState.isLoading,
-                    onItemClick = { hotItem -> onSearchSubmit(hotItem.title) },
-                    onEntryClick = { entry ->
-                        // 入口卡（好友热搜 / 榜规则说明）目前没有对应落地页，先按关键词搜索兜底
-                        onSearchSubmit(entry.title)
+            // 直接拿榜单数据当 key：换榜 / 刷新拿到新数据时，新旧列表交叉淡化。
+            // 每份内容自带 LazyListState，切换后从顶部开始，过渡期间两份列表也互不干扰。
+            AnimatedContent(
+                targetState = hotSearchState.board,
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(220)) togetherWith
+                        fadeOut(animationSpec = tween(140))
+                },
+                label = "HotSearchContent"
+            ) { board ->
+                val boardListState = remember(board) { LazyListState() }
+                // 只有「当前」那份内容接管顶栏的滚动采样；离场的那份在淡出期间不再写入
+                val isCurrent = board === hotSearchState.board
+                SideEffect {
+                    if (isActive && isCurrent) {
+                        if (topBarListState.value !== boardListState) {
+                            topBarListState.value = boardListState
+                        }
+                        onActiveListStateChanged(boardListState)
                     }
-                )
+                }
+
+                LazyColumn(
+                    state = boardListState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        // 只让当前那份参与顶栏模糊采样，避免过渡期间两份列表同时写入同一张 backdrop
+                        .then(
+                            if (isCurrent && backdrop != null) {
+                                Modifier.layerBackdrop(backdrop)
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .background(MaterialTheme.colorScheme.surface),
+                    contentPadding = PaddingValues(
+                        start = 12.dp,
+                        top = topPadding + 8.dp,
+                        end = 12.dp,
+                        bottom = bottomBarPadding + 20.dp
+                    )
+                ) {
+                    hotSearchItems(
+                        board = board,
+                        updatedAt = hotSearchState.lastLoadedAt,
+                        isLoading = hotSearchState.isLoading,
+                        onItemClick = { hotItem -> onSearchSubmit(hotItem.title) },
+                        onEntryClick = { entry ->
+                            // 入口卡（好友热搜 / 榜规则说明）目前没有对应落地页，先按关键词搜索兜底
+                            onSearchSubmit(entry.title)
+                        }
+                    )
+                }
             }
         }
     }
@@ -529,17 +566,13 @@ private fun HotSearchRow(
                         modifier = Modifier.height(15.dp)
                     )
                 } else {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            text = "置顶",
-                            style = MaterialTheme.typography.labelSmallEmphasized,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                        )
-                    }
+                    MatterTag(
+                        text = "置顶",
+                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelSmallEmphasized,
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                    )
                 }
             }
         } else if (item.isPromoted) {
@@ -547,17 +580,11 @@ private fun HotSearchRow(
                 modifier = Modifier.width(28.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(4.dp)
-                ) {
-                    Text(
-                        text = "推广",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.tertiary,
-                        modifier = Modifier.padding(end = 4.dp)
-                    )
-                }
+                MatterTag(
+                    text = "推广",
+                    containerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f),
+                    contentColor = MaterialTheme.colorScheme.tertiary
+                )
             }
         } else {
             // 留出等宽占位，保证标题垂直对齐
@@ -590,17 +617,11 @@ private fun HotSearchRow(
 
         if (!categoryTag.isNullOrBlank()) {
             Spacer(modifier = Modifier.width(6.dp))
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
-                shape = RoundedCornerShape(4.dp)
-            ) {
-                Text(
-                    text = categoryTag,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                )
-            }
+            MatterTag(
+                text = categoryTag,
+                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+            )
         }
 
         if (!item.icon.isNullOrBlank()) {
