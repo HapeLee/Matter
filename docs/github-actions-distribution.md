@@ -175,7 +175,7 @@ val appVersionCode = providers.gradleProperty("matterVersionCode").orNull?.trim(
 - 仓库里的 `gradlew` 是被裁剪过的脚本，缺少 `APP_HOME` 计算，导致 `CLASSPATH=/gradle/wrapper/gradle-wrapper.jar` 在 Linux runner 上找不到主类。已用 `./gradlew wrapper --gradle-version 9.8.1` 重新生成。
 - `gh secret set` 经 PowerShell 管道写入时带入了换行，`base64 -d` 报 `invalid input`。工作流已加 `tr -d '\r\n\t '` 容错，secret 也改为不带换行重新写入。
 
-尚未验证：`publish: true` 的 Release 创建与 tag 推送（首次正式发布时确认）。
+2026-10-21 正式发布验证通过：`publish: true` 打出 tag `v1.0.0`、Release 标题 `Matter 1.0.0 (build 16)`，包含 `Matter-1.0.0-16.apk`、`SHA256SUMS.txt`、`mapping.txt`；同一次运行里 Telegram 收到发布说明与 APK 附件。
 
 ## 八、签名、产物与渠道
 
