@@ -197,7 +197,7 @@ val appVersionCode = providers.gradleProperty("matterVersionCode").orNull?.trim(
 
 `create_release` 在 GitHub 发布成功后调用 `.github/scripts/notify-telegram.sh`：先发一条纯文本发布说明（GitHub 的 Markdown 标题会被剥成纯文本，避免 Bot API 解析失败），再用 `sendDocument` 上传 APK。
 
-需要两个额外 secret（未配置时该步骤只打印 notice 并跳过，不影响已完成的 GitHub 发布）：
+需要两个额外 secret（未配置时该步骤只打印 notice 并跳过，不影响已完成的 GitHub 发布；但**发布前没配就等于这次不发**，因为已有 tag 会阻止 `release.yml` 重跑，补救见下方"补发"）：
 
 | Secret | 内容 |
 | --- | --- |
@@ -211,6 +211,16 @@ val appVersionCode = providers.gradleProperty("matterVersionCode").orNull?.trim(
 - 推送只发生在 `publish: true` 的正式发布流程；普通构建不会打扰频道。
 - **仓库为 private 时 Release 链接对非协作者无效**，此时 Telegram 里的下载链接只有你自己能打开；要么把仓库转为 public，要么只依赖频道内的 APK 附件。
 - 脚本用 `curl` + `jq`（runner 预装）调用 Bot API，不引入第三方 action；失败会以 `::error::` 报出，但不回滚已完成的 GitHub Release。
+
+### 补发
+
+`release.yml` 对已存在的 tag 会直接失败（防止同版本被覆盖），所以 Telegram 漏发后不能靠重跑发布流程补救。此时用 `Resend to Telegram` workflow：
+
+```powershell
+gh workflow run resend-telegram.yml --repo HapeLee/Matter --ref main -f tag=v1.0.0
+```
+
+它只下载该 Release 已有的 APK 与说明并重新推送，不重新构建、不创建 tag。构建号从资产文件名（`Matter-<版本>-<构建号>.apk`）推断。
 
 ## 九、风险与未验证项
 

@@ -1,0 +1,49 @@
+name: Resend to Telegram
+
+# 补发：Release 已经建好但 Telegram 没发出去（例如 secret 后补、Bot 临时不可用）时使用。
+# 只读取已有 Release 的产物，不重新构建、不创建 tag。
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已有 Release 的 tag（例如 v1.0.0）
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Push release to Telegram
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TG_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TG_BOT_TOKEN:-}" || -z "${TG_CHAT_ID:-}" ]]; then
+            echo "::error::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 未配置，无法补发"
+            exit 1
+          fi
+
+          mkdir -p dist
+          gh release download "$TAG" --pattern '*.apk' --dir dist
+          APK=$(ls dist/*.apk | head -n 1)
+
+          NOTES=$(gh release view "$TAG" --json body --jq .body)
+          URL=$(gh release view "$TAG" --json url --jq .url)
+          IS_RELEASE=$(gh release view "$TAG" --json isPrerelease --jq 'if .isPrerelease then "false" else "true" end')
+
+          printf '%s\n' "$NOTES" > notes.md
+          VERSION=${TAG#v}
+          CODE=$(basename "$APK" | sed -E 's/.*-([0-9]+)\.apk$/\1/')
+          [[ "$CODE" =~ ^[0-9]+$ ]] || { echo "::error::无法从 $APK 推断构建号"; exit 1; }
+
+          bash .github/scripts/notify-telegram.sh \
+            "$VERSION" "$CODE" "$IS_RELEASE" notes.md "$APK" "$URL"
