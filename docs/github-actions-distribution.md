@@ -189,6 +189,7 @@ val appVersionCode = providers.gradleProperty("matterVersionCode").orNull?.trim(
 - **密钥必须异地备份**。keystore 丢失意味着同 `applicationId` 再也无法发布升级包，用户只能卸载重装；这比 CI 配置重要得多。
 - 首次发布前确认签名指纹，不要先用 debug 密钥发一版再换——那会成为两个不同应用。
 - 当前无 native 依赖，**不要照抄 ABI splits**：拆包只有在体积明显受 native 库影响时才值得，否则徒增产物管理与"装错包"风险。真要拆，`isUniversalApk = true` 保底 + `-PenableAbiSplits` 开关（参考项目的做法）。
+- **APK 体积构成**（v1.0.0 实测 9.0 MB）：`classes.dex` 8.36 MB（92%）、`resources.arsc` 0.38 MB、`res/` 0.15 MB、`lib/` 仅 0.07 MB（4 个 ABI × 2 个 `.so`）。R8 始终生效（12,090 类 / 57,931 方法），按 ABI 拆分最多省 35 KB，没有意义。`minSdk >= 28` 时 AGP 默认不压缩 `classes.dex`（安装更快）；曾评估 `packaging { dex { useLegacyPackaging = true } }` 可把包降到 4.6 MB，因分发场景对下载体积不敏感而**保持默认**。
 - AAB 只能用于 Google Play；自建分发只能给 APK。
 - 渠道：GitHub Releases（已实现，与 tag/源码对应）→ Telegram（已实现，见下）→ 对象存储镜像 / 内测平台（未实现）。
 - 参考项目的 `update-manifests` 孤儿分支值得记一笔：应用内检查更新只需读取一个静态 JSON，不依赖 GitHub API 配额。Matter 目前没有自动更新功能，**暂不实现**，但可以把清单结构留作后续扩展点。
@@ -202,7 +203,9 @@ val appVersionCode = providers.gradleProperty("matterVersionCode").orNull?.trim(
 | Secret | 内容 |
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | `@BotFather` 创建的 bot token |
-| `TELEGRAM_CHAT_ID` | 目标频道/群的 id（`-100…` 形式） |
+| `TELEGRAM_CHAT_ID` | 目标 id，**逗号分隔可多个**，例如 `-1003675920085,-1003959048934`（发布频道 + 交流群组） |
+
+bot 必须在每个目标里是管理员（频道需要「发送消息」权限）。当前配置：`Materado 发布页`（频道 `@materado`，`-1003675920085`）+ `Materado 交流群组`（`-1003959048934`），逐个目标发送，任一失败则以 `::error::` 收尾并使步骤失败。
 
 限制与注意：
 
@@ -211,6 +214,7 @@ val appVersionCode = providers.gradleProperty("matterVersionCode").orNull?.trim(
 - 推送只发生在 `publish: true` 的正式发布流程；普通构建不会打扰频道。
 - **仓库为 private 时 Release 链接对非协作者无效**，此时 Telegram 里的下载链接只有你自己能打开；要么把仓库转为 public，要么只依赖频道内的 APK 附件。
 - 脚本用 `curl` + `jq`（runner 预装）调用 Bot API，不引入第三方 action；失败会以 `::error::` 报出，但不回滚已完成的 GitHub Release。
+- **本机 Git Bash 手动跑该脚本会失败**：Windows 传给 `curl.exe` 的非 ASCII 参数按 ANSI 代码页转换，Telegram 会回 `strings must be encoded in UTF-8`。需要本地补发时改用 Python/其他 UTF-8 安全的方式，或直接走 CI。
 
 ## 九、风险与未验证项
 
