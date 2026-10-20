@@ -119,5 +119,6 @@ gh run watch
 - 编号一致性：`git rev-list --count HEAD` 应等于 APK 的 `versionCode`（CI 用 `aapt2 dump badging` 断言）。
 - 单测入口：`./gradlew.bat :app:testDebugUnitTest`。
 - 正式发布链路无法在本地完整复现，只能通过 Actions 实跑验证；首次发布前先用 `publish: false` 的普通运行确认构建与签名通过。
+- 首次实跑（2026-10-21，`publish: false`）：产物 `Matter-1.0.0-10.apk`，`versionCode=10` 等于提交数，`apksigner verify` 通过（V2，证书 `CN=Matter`）。
 
 参考：[Android 版本管理](https://developer.android.com/studio/publish/versioning)、[SemVer](https://semver.org/lang/zh-CN/)。机制参考同作者项目 `legado-with-MD3`（`app/version.properties` 与 `.github/workflows/auto-release.yml`）。核对日期：2026-10-21。
