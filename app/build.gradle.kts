@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,6 +7,50 @@ plugins {
     // Room 注解处理（浏览历史等本地表）
     alias(libs.plugins.ksp)
     alias(libs.plugins.aboutlibraries.android)
+}
+
+// 显示版本由 version.properties 手工维护，内部编号由 Git 提交数派生。
+// 构建本身从不修改任何计数：同一提交在任何机器上得到同一个 versionCode。
+// 正式发布只由 GitHub Actions 触发（.github/workflows/release.yml）。
+val appVersionProperties = Properties().apply {
+    load(providers.fileContents(rootProject.layout.projectDirectory.file("version.properties")).asText.get().reader())
+}
+
+fun versionSegment(key: String): Int {
+    val raw = appVersionProperties.getProperty(key, "").trim()
+    val value = raw.toIntOrNull()
+    require(value != null && value >= 0) { "$key must be a non-negative integer, was '$raw'" }
+    require(raw == value.toString()) { "$key must not have leading zeros, was '$raw'" }
+    return value
+}
+
+val versionMajor = versionSegment("VERSION_MAJOR")
+val versionMinor = versionSegment("VERSION_MINOR")
+val versionPatch = versionSegment("VERSION_PATCH")
+val versionSuffix = versionSegment("VERSION_SUFFIX")
+require(versionSuffix == 0 || versionSuffix == 1) { "VERSION_SUFFIX must be 0 (release) or 1 (prerelease)" }
+
+val baseVersionName = "$versionMajor.$versionMinor.$versionPatch"
+// 预发布序号 -beta.N 需要已有 tag 才能计算，由 CI 通过 -PmatterVersionName 传入；
+// 本地预发布构建固定为 -beta.local，避免与线上已发布版本重名。
+val appVersionName = providers.gradleProperty("matterVersionName")
+    .getOrElse(if (versionSuffix == 1) "$baseVersionName-beta.local" else baseVersionName)
+    .trim()
+
+// 提交数是仓库属性：本地与 CI 一致，无需回写文件，也不存在并发分配。
+// 注意 --depth 1 的浅克隆只会得到 1，CI 必须 fetch-depth: 0。
+val gitCommitCount = runCatching {
+    providers.exec {
+        commandLine("git", "rev-list", "--count", "HEAD")
+    }.standardOutput.asText.get().trim().toInt()
+}.getOrNull()
+
+val appVersionCode = providers.gradleProperty("matterVersionCode").orNull?.trim()?.toIntOrNull()
+    ?: gitCommitCount
+    ?: 1
+require(appVersionCode in 1..2_100_000_000) { "versionCode must be between 1 and 2100000000, was $appVersionCode" }
+require(Regex("""(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.([1-9][0-9]*|local))?""").matches(appVersionName)) {
+    "versionName must be X.Y.Z or X.Y.Z-alpha.N / beta.N / rc.N"
 }
 
 aboutLibraries {
@@ -20,12 +66,27 @@ android {
 
     defaultConfig {
         applicationId = "org.kazusa.matter"
-        minSdk = 26
+        // 只支持 Android 12（API 31）及以上：动图解码、分区存储、动态取色、
+        // 启动画面等能力都可以直接依赖平台 API，不再保留低版本退回分支
+        minSdk = 31
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // 签名材料只从 Gradle 属性读取（CI 由 secret 解码后追加到 gradle.properties）。
+    // 没有密钥时保持未签名构建，日常开发、单测与 IDE 同步都不受影响。
+    signingConfigs {
+        if (project.hasProperty("RELEASE_STORE_FILE")) {
+            create("release") {
+                storeFile = rootProject.file(project.property("RELEASE_STORE_FILE") as String)
+                storePassword = project.property("RELEASE_STORE_PASSWORD") as String
+                keyAlias = project.property("RELEASE_KEY_ALIAS") as String
+                keyPassword = project.property("RELEASE_KEY_PASSWORD") as String
+            }
+        }
     }
 
     buildTypes {
@@ -35,6 +96,9 @@ android {
             versionNameSuffix = "-debug"
         }
         release {
+            if (project.hasProperty("RELEASE_STORE_FILE")) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -48,6 +112,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_21
     }
     buildFeatures {
+        buildConfig = true
         compose = true
     }
     testOptions {

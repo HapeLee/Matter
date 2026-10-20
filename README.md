@@ -2,6 +2,8 @@
 
 开发与审查约定见 [AGENTS.md](AGENTS.md) 和 [KMP / Compose Multiplatform 架构规范](docs/kmp-cmp-guidelines.md)。当前工程仍为 Android 单模块，跨平台规范用于后续渐进支持 JVM Desktop。
 
+版本号与分发见 [版本管理说明](docs/versioning.md)：内部编号由 Git 提交数派生，正式版通过 GitHub Actions 手动触发构建并发布；本地 `./gradlew` 构建只用于调试。
+
 本项目采用现代 Android 架构规范与最新技术栈（**Jetpack Compose + Material 3 + Koin 依赖注入 + Ktor Client + Jetpack DataStore + Room + Kotlin Coroutines & Flow**）构建，致力于提供高效、优雅且流畅的社交信息流阅读体验。
 
 ---
