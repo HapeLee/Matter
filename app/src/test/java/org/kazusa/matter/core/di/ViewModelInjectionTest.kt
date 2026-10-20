@@ -1,6 +1,7 @@
 package org.kazusa.matter.core.di
 
 import android.app.Application
+import android.os.Bundle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.SAVED_STATE_REGISTRY_OWNER_KEY
@@ -29,6 +30,7 @@ import org.kazusa.matter.core.datastore.UserSession
 import org.kazusa.matter.data.repository.*
 import org.kazusa.matter.data.model.UserPostCollection
 import org.kazusa.matter.ui.saved.SavedPostsViewModel
+import org.kazusa.matter.ui.search.SearchResultViewModel
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
@@ -79,7 +81,45 @@ class ViewModelInjectionTest {
         }
     }
 
-    private class EntryOwner : SavedStateRegistryOwner, ViewModelStoreOwner {
+    @Test
+    @OptIn(KoinInternalApi::class)
+    fun searchViewModelRestoresThroughTheFrameworkSavedStateHandle() = runTest {
+        val app = koinApplication {
+            androidContext(RuntimeEnvironment.getApplication())
+            modules(appModule)
+        }
+        val firstOwner = EntryOwner()
+        var secondOwner: EntryOwner? = null
+        try {
+            fun resolve(owner: EntryOwner): SearchResultViewModel = ViewModelProvider.create(
+                owner.viewModelStore,
+                KoinViewModelFactory(
+                    SearchResultViewModel::class,
+                    app.koin.scopeRegistry.rootScope,
+                    params = { parametersOf("导航参数") }
+                ),
+                owner.extras
+            )[SearchResultViewModel::class]
+
+            val first = resolve(firstOwner)
+            assertEquals("导航参数", first.uiState.value.currentQuery)
+            // 用户主动清空搜索：写入的是空字符串
+            first.clearQuery()
+            assertEquals("", first.uiState.value.currentQuery)
+
+            val savedState = firstOwner.save()
+            val restoredOwner = EntryOwner(savedState).also { secondOwner = it }
+            val restored = resolve(restoredOwner)
+            // 走的是框架 SavedStateHandle（而不是构造函数默认的内存对象），且空字符串不会被当成「没有保存值」
+            assertEquals("", restored.uiState.value.currentQuery)
+        } finally {
+            firstOwner.viewModelStore.clear()
+            secondOwner?.viewModelStore?.clear()
+            app.close()
+        }
+    }
+
+    private class EntryOwner(restoredState: Bundle? = null) : SavedStateRegistryOwner, ViewModelStoreOwner {
         override val lifecycle = LifecycleRegistry.createUnsafe(this)
         override val viewModelStore = ViewModelStore()
         private val controller = SavedStateRegistryController.create(this)
@@ -91,8 +131,11 @@ class ViewModelInjectionTest {
         init {
             controller.performAttach()
             enableSavedStateHandles()
-            controller.performRestore(null)
+            controller.performRestore(restoredState)
             lifecycle.currentState = Lifecycle.State.CREATED
         }
+
+        /** 模拟进程被杀前保存状态。 */
+        fun save(): Bundle = Bundle().also { controller.performSave(it) }
     }
 }

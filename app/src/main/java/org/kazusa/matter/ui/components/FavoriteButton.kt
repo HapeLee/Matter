@@ -40,7 +40,14 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 
 val LocalFavoritesRepository = staticCompositionLocalOf<FavoritesRepository?> { null }
-val LocalFavoriteActionScope = staticCompositionLocalOf<CoroutineScope?> { null }
+
+/**
+ * 点赞 / 收藏等会话级写操作使用的 CoroutineScope。
+ *
+ * 它由导航根提供，生命周期长于任何列表项：列表项划出屏幕被回收时，
+ * 已经发出的请求仍会跑完，不会把状态留在「处理中」。
+ */
+val LocalUserActionScope = staticCompositionLocalOf<CoroutineScope?> { null }
 val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState?> { null }
 
 @Composable
@@ -56,7 +63,7 @@ fun FavoriteButton(
     val busy = id in state.pending
     val favorited = state.overrides[id] ?: post.isFavorited
     // 卡片离开视口时继续完成已发出的操作，确保服务端结果能同步到其他页面。
-    val scope = LocalFavoriteActionScope.current ?: rememberCoroutineScope()
+    val scope = LocalUserActionScope.current ?: rememberCoroutineScope()
     val snackbarHostState = LocalSnackbarHostState.current
     val context = LocalContext.current
     val onClick: () -> Unit = {
@@ -120,6 +127,12 @@ private fun FavoriteIcon(busy: Boolean, favorited: Boolean, onGlass: Boolean = f
     }
 }
 
+/**
+ * 信息流卡片操作栏右侧的收藏按钮（纯图标，无计数）。
+ *
+ * 图标 16dp 与操作栏的 [WeiboActionButton] 对齐；外框固定 38dp 保留触摸热区，
+ * 同时也是卡片操作栏行高的下限（正文页没有这个按钮，行高由文字按钮撑开）。
+ */
 @Composable
 fun FavoriteActionButton(
     post: WeiboStatusDto,
@@ -130,7 +143,7 @@ fun FavoriteActionButton(
     val id = post.favoriteId
     val busy = state != null && id in state.pending
     val favorited = state?.overrides?.get(id) ?: post.isFavorited
-    val scope = LocalFavoriteActionScope.current ?: rememberCoroutineScope()
+    val scope = LocalUserActionScope.current ?: rememberCoroutineScope()
     val snackbarHostState = LocalSnackbarHostState.current
     val context = LocalContext.current
     val morphState = LocalImageMorphState.current
@@ -168,8 +181,8 @@ fun FavoriteActionButton(
     ) {
         if (busy) {
             CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                strokeWidth = 2.dp,
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 1.5.dp,
                 color = tint
             )
         } else {
@@ -177,7 +190,7 @@ fun FavoriteActionButton(
                 imageVector = if (favorited) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
                 contentDescription = if (favorited) "取消收藏" else "收藏微博",
                 tint = tint,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(16.dp)
             )
         }
     }

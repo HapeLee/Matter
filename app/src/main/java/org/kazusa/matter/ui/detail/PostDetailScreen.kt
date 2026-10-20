@@ -6,7 +6,6 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -14,9 +13,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.ui.graphics.RectangleShape
 import org.kazusa.matter.ui.navigation.LocalSharedElementTarget
 import org.kazusa.matter.ui.navigation.weiboCardSharedBounds
@@ -80,7 +76,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -89,7 +84,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.LinkAnnotation
@@ -99,26 +93,25 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import org.kazusa.matter.core.network.ApiResult
-import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.core.util.TimeUtils
 import org.kazusa.matter.core.util.WeiboTextFormatter
 import org.kazusa.matter.core.util.formatInteractionCount
-import org.kazusa.matter.core.util.parseInteractionCount
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.kazusa.matter.data.cache.UserAvatarCache
+import org.kazusa.matter.core.util.parseInteractionCount
 import org.kazusa.matter.data.model.WeiboCommentDto
 import org.kazusa.matter.data.model.WeiboStatusDto
-import org.kazusa.matter.data.repository.BrowsingHistoryRepository
 import org.kazusa.matter.ui.components.AuthorBadgeTag
 import org.kazusa.matter.ui.components.BloggerSuffixTag
 import org.kazusa.matter.ui.components.EmptyMessage
 import org.kazusa.matter.ui.components.ImageGrid
+import org.kazusa.matter.data.repository.LikeState
+import org.kazusa.matter.ui.components.LocalLikeRepository
+import org.kazusa.matter.ui.components.LocalPostLikeStates
 import org.kazusa.matter.ui.components.MatterSnackbar
-import org.kazusa.matter.ui.components.PostLikeState
-import org.kazusa.matter.ui.components.PostLikeStore
 import org.kazusa.matter.ui.components.UserAvatarWithBadge
 import org.kazusa.matter.ui.components.rememberSharedAvatarRequest
 import org.kazusa.matter.ui.components.UserVerifyBadge
@@ -127,6 +120,8 @@ import org.kazusa.matter.ui.components.WeiboVerifyType
 import org.kazusa.matter.ui.components.getVerifyType
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
+import org.koin.compose.viewmodel.koinViewModel
+import org.koin.core.parameter.parametersOf
 import androidx.compose.material3.LocalContentColor
 import org.kazusa.matter.ui.components.ImmersiveTopBar
 import org.kazusa.matter.ui.components.FavoriteButton
@@ -135,6 +130,7 @@ import org.kazusa.matter.ui.components.TopBarActionButton
 import org.kazusa.matter.ui.components.TopBarTitleCapsule
 import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.components.TopBarTokens
+import org.kazusa.matter.ui.components.WeiboActionButton
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassCapsule
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIconButton
@@ -143,26 +139,16 @@ import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 
-import androidx.compose.runtime.mutableIntStateOf
 import org.kazusa.matter.data.model.WeiboAttitudeDto
 import org.kazusa.matter.ui.effect.ContentFadeState
 import org.kazusa.matter.ui.effect.contentFade
 import org.kazusa.matter.ui.effect.rememberContentFadeState
-import kotlinx.coroutines.Job
-
-private enum class DetailSubTab(val label: String) {
-    REPOSTS("转发"),
-    COMMENTS("评论"),
-    ATTITUDES("赞")
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PostDetailScreen(
     postId: String,
     scrollToComments: Boolean = false,
-    apiService: WeiboApiService,
-    historyRepository: BrowsingHistoryRepository,
     onBackClick: () -> Unit,
     onUserClick: (Long?) -> Unit = {},
     onImageClick: (urls: List<String>, index: Int) -> Unit,
@@ -172,308 +158,65 @@ fun PostDetailScreen(
     onPostClick: (WeiboStatusDto) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val initialCachedPost = remember(postId) { PostDetailCache.get(postId) }
-    var post by remember(postId) { mutableStateOf(initialCachedPost) }
-    var comments by remember { mutableStateOf<List<WeiboCommentDto>>(emptyList()) }
+    // 业务状态全部来自 NavEntry 级 ViewModel：请求生命周期、并发与回滚都在里面，
+    // 这里只做读取；页面重建不会丢失分页 / 排序 / 点赞等状态。
+    val viewModel: PostDetailViewModel = koinViewModel { parametersOf(postId) }
+
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // 楼中楼状态按评论 id 存在 ViewModel 里；这里收集一次，按 key 取用
+    val repliesStates by viewModel.repliesStates.collectAsStateWithLifecycle()
+
+    val post = uiState.post
+    val selectedTab = uiState.selectedTab
+    val isLoading = uiState.isLoading
+    val isRefreshing = uiState.isRefreshing
+    val errorMessage = uiState.errorMessage
+    val comments = uiState.comments
     // 博主开启了「精选评论」时接口只下发精选过的评论，需要在评论区给出说明
-    var commentsApprovalOnly by remember { mutableStateOf(false) }
-    var reposts by remember { mutableStateOf<List<WeiboStatusDto>>(emptyList()) }
-    var attitudes by remember { mutableStateOf<List<WeiboAttitudeDto>>(emptyList()) }
+    val commentsApprovalOnly = uiState.commentsApprovalOnly
+    val isCommentsLoading = uiState.isCommentsLoading
+    // 评论首屏请求是否已结束：未结束前一律铺骨架屏
+    val hasLoadedComments = uiState.hasLoadedComments
+    // 内容版本（Compose key 用，不参与业务判断）：评论块整体替换 → 淡入一次；
+    // 下拉刷新 → 重建评论子树，丢弃旧的展开 / 分页缓存
+    val commentsVersion = uiState.contentVersion.comments
+    val commentsSubtreeVersion = uiState.contentVersion.commentsSubtree
+    val reposts = uiState.reposts
+    val isRepostsLoading = uiState.isRepostsLoading
+    val attitudes = uiState.attitudes
+    val isAttitudesLoading = uiState.isAttitudesLoading
+    val sortByHot = uiState.sortByHot // true: 按热度, false: 按时间
 
-    var isLoading by remember(postId) { mutableStateOf(initialCachedPost == null) }
-    var isRefreshing by remember { mutableStateOf(false) }
-    // 下拉刷新成功后自增，让评论区丢弃旧的展开/分页缓存，重新按最新数据展示
-    var refreshGeneration by remember { mutableIntStateOf(0) }
-    // 评论数据每次被整体替换时自增：只用来触发一次列表淡入，不参与数据本身
-    var commentsGeneration by remember { mutableIntStateOf(0) }
-    var isCommentsLoading by remember { mutableStateOf(false) }
-    var isRepostsLoading by remember { mutableStateOf(false) }
-    var isAttitudesLoading by remember { mutableStateOf(false) }
-
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var sortByHot by remember { mutableStateOf(true) } // true: 按热度, false: 按时间
-
-    var selectedTab by remember { mutableStateOf(DetailSubTab.COMMENTS) }
-    var repostsPage by remember { mutableIntStateOf(1) }
-    var attitudesPage by remember { mutableIntStateOf(1) }
-
-    // 点赞状态维护（信息流里点过赞时以共享状态为准，避免两个页面显示不一致）
-    var isLiked by remember(post) {
-        mutableStateOf(post?.let { PostLikeStore.resolve(it).liked } ?: false)
-    }
-    var likeCount by remember(post) {
-        mutableIntStateOf(
-            post?.let { PostLikeStore.resolve(it).count }
-                ?: (parseInteractionCount(post?.attitudesCount) ?: 0)
-        )
-    }
-    var isLiking by remember { mutableStateOf(false) }
+    // 点赞状态只有一份：共享仓库（信息流里点过赞时这里直接读到同一结果）
+    val likeRepository = LocalLikeRepository.current
+    val postLikeStates = LocalPostLikeStates.current
+    val likeState = post?.let { target ->
+        likeRepository?.postState(target, postLikeStates)
+            ?: LikeState(target.isLiked, parseInteractionCount(target.attitudesCount))
+    } ?: LikeState(liked = false, count = null)
+    val isLiked = likeState.liked
+    val likeCount = likeState.count ?: 0
 
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     // 子页签内容（评论 / 转发 / 赞）共用的淡入透明度，结构整体切换时统一补一次
     val contentFade = rememberContentFadeState()
-    // 评论请求：快速连点排序时只让最后一次请求落地，旧请求直接取消
-    var commentsJob by remember { mutableStateOf<Job?>(null) }
-    var commentsRequestToken by remember { mutableIntStateOf(0) }
-    // 最近一次评论请求用的微博 id：正文到达后据此判断要不要再拉一次
-    var commentsRequestedForId by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
     val runtimeShaderSupported = rememberBlurEffectsEnabled()
     val backdrop = if (runtimeShaderSupported) rememberLayerBackdrop() else null
 
-    val showSnackbar: (String) -> Unit = remember(coroutineScope, snackbarHostState) {
-        { message: String ->
-            coroutineScope.launch {
-                snackbarHostState.currentSnackbarData?.dismiss()
-                snackbarHostState.showSnackbar(
-                    message = message,
-                    duration = SnackbarDuration.Short
-                )
-            }
-        }
-    }
+    LaunchedEffect(viewModel) { viewModel.load() }
 
-    fun loadComments(hotSort: Boolean, targetPostId: String? = null) {
-        val idToQuery = targetPostId ?: post?.idStr ?: post?.id?.toString() ?: postId
-        commentsRequestedForId = idToQuery
-        // 切换排序时旧列表保持可见，但并发请求必须让最后一次说了算：
-        // 否则先发的慢请求晚回来会把新排序的结果覆盖掉（列表看起来"点了没反应"）
-        commentsRequestToken += 1
-        val token = commentsRequestToken
-        commentsJob?.cancel()
-        isCommentsLoading = true
-        commentsJob = coroutineScope.launch {
-            try {
-                when (val commentsRes = apiService.getComments(idToQuery, sortByHot = hotSort)) {
-                    is ApiResult.Success -> {
-                        if (token != commentsRequestToken) return@launch
-                        val incoming = commentsRes.data.data
-                        // 只有内容真的换了才触发淡入：同一条微博被重复拉取时数据完全一致，
-                        // 还按「替换」处理会让整块评论空白一帧再淡入，观感就是闪烁
-                        val changed = incoming.map { it.listKey } != comments.map { it.listKey }
-                        comments = incoming
-                        // 只有热门流会下发评论管理信息；按时间排序的接口不带该字段
-                        if (hotSort) commentsApprovalOnly = commentsRes.data.approvalCommentsOnly
-                        if (changed) commentsGeneration += 1
-                    }
-                    // 接口失败与「本来就没有内容」在正文页统一展示为空占位，不再区分红色错误文案
-                    is ApiResult.Error -> Unit
-                    ApiResult.Loading -> {}
-                }
-            } finally {
-                // 已被更新的请求取代时不要收起 loading，否则新请求还在路上就会去画空态
-                if (token == commentsRequestToken) isCommentsLoading = false
-            }
-        }
-    }
-
-    fun loadReposts(page: Int = 1, targetPostId: String? = null) {
-        val idToQuery = targetPostId ?: post?.idStr ?: post?.id?.toString() ?: postId
-        isRepostsLoading = true
-        coroutineScope.launch {
-            try {
-                when (val res = apiService.getReposts(idToQuery, page = page)) {
-                    is ApiResult.Success -> {
-                        reposts = if (page == 1) res.data.data else (reposts + res.data.data).distinctBy { it.listKey }
-                        repostsPage = page
-                    }
-                    is ApiResult.Error -> Unit
-                    ApiResult.Loading -> {}
-                }
-            } finally {
-                isRepostsLoading = false
-            }
-        }
-    }
-
-    fun loadAttitudes(page: Int = 1, targetPostId: String? = null) {
-        val idToQuery = targetPostId ?: post?.idStr ?: post?.id?.toString() ?: postId
-        isAttitudesLoading = true
-        coroutineScope.launch {
-            try {
-                when (val res = apiService.getAttitudes(idToQuery, page = page)) {
-                    is ApiResult.Success -> {
-                        attitudes = if (page == 1) res.data.data else (attitudes + res.data.data).distinctBy { it.listKey }
-                        attitudesPage = page
-                    }
-                    is ApiResult.Error -> Unit
-                    ApiResult.Loading -> {}
-                }
-            } finally {
-                isAttitudesLoading = false
-            }
-        }
-    }
-
-    fun toggleLike() {
-        if (isLiking) return
-        val targetPost = post ?: return
-        val idToLike = targetPost.idStr ?: targetPost.mid ?: targetPost.id?.toString() ?: postId
-        val newLiked = !isLiked
-        val prevLiked = isLiked
-        val prevCount = likeCount
-        isLiked = newLiked
-        likeCount = if (newLiked) prevCount + 1 else (prevCount - 1).coerceAtLeast(0)
-        // 同步到共享状态，返回信息流后卡片上的点赞态保持一致
-        PostLikeStore.put(PostLikeStore.keyOf(targetPost), PostLikeState(newLiked, likeCount))
-        isLiking = true
-        coroutineScope.launch {
-            try {
-                when (val res = apiService.setAttitude(idToLike, newLiked)) {
-                    is ApiResult.Success -> {
-                        val updated = targetPost.copy(
-                            isLiked = newLiked,
-                            attitudesCount = likeCount.toString()
-                        )
-                        post = updated
-                        PostDetailCache.put(updated)
-                    }
-                    is ApiResult.Error -> {
-                        isLiked = prevLiked
-                        likeCount = prevCount
-                        PostLikeStore.put(
-                            PostLikeStore.keyOf(targetPost),
-                            PostLikeState(prevLiked, prevCount)
-                        )
-                        showSnackbar(res.message.ifBlank { "操作失败，请重试" })
-                    }
-                    ApiResult.Loading -> {}
-                }
-            } finally {
-                isLiking = false
-            }
-        }
-    }
-
-
-    /**
-     * 下拉刷新：重新拉取正文与当前子页签的第一页数据。
-     *
-     * 刷新过程中保留旧内容（列表不闪空），只有成功后整体替换；
-     * 失败时若已有内容则用 Snackbar 提示，不破坏当前阅读位置。
-     */
-    fun refreshDetail() {
-        if (isRefreshing || isLoading) return
-        isRefreshing = true
-        coroutineScope.launch {
-            try {
-                var refreshedPost = post
-                when (val res = apiService.getPostDetail(postId)) {
-                    is ApiResult.Success -> {
-                        refreshedPost = res.data
-                        post = res.data
-                        errorMessage = null
-                        PostDetailCache.put(res.data)
-                        val resolvedLike = PostLikeStore.resolve(res.data)
-                        isLiked = resolvedLike.liked
-                        likeCount = resolvedLike.count
-                            ?: (parseInteractionCount(res.data.attitudesCount) ?: 0)
-                    }
-                    is ApiResult.Error -> {
-                        if (post == null) {
-                            errorMessage = res.message
-                        } else {
-                            showSnackbar(res.message.ifBlank { "刷新失败，请稍后重试" })
-                        }
-                    }
-                    ApiResult.Loading -> {}
-                }
-
-                val targetId = refreshedPost?.idStr
-                    ?: refreshedPost?.id?.toString()
-                    ?: postId
-                when (selectedTab) {
-                    DetailSubTab.COMMENTS -> {
-                        // 刷新会整体替换评论：先丢掉还在路上的排序请求，避免它晚回来覆盖新数据。
-                        // 被取消的请求不会再回调收尾，这里手动把 loading 收回，否则排序按钮会一直转圈
-                        commentsRequestToken += 1
-                        commentsJob?.cancel()
-                        isCommentsLoading = false
-                        when (val res = apiService.getComments(targetId, sortByHot = sortByHot)) {
-                            is ApiResult.Success -> {
-                                comments = res.data.data
-                                if (sortByHot) commentsApprovalOnly = res.data.approvalCommentsOnly
-                                refreshGeneration++
-                            }
-                            is ApiResult.Error -> if (comments.isNotEmpty()) {
-                                showSnackbar(res.message.ifBlank { "评论刷新失败，请稍后重试" })
-                            }
-                            ApiResult.Loading -> {}
-                        }
-                    }
-                    DetailSubTab.REPOSTS -> when (
-                        val res = apiService.getReposts(targetId, page = 1)
-                    ) {
-                        is ApiResult.Success -> {
-                            reposts = res.data.data
-                            repostsPage = 1
-                        }
-                        is ApiResult.Error -> if (reposts.isNotEmpty()) {
-                            showSnackbar(res.message.ifBlank { "转发刷新失败，请稍后重试" })
-                        }
-                        ApiResult.Loading -> {}
-                    }
-                    DetailSubTab.ATTITUDES -> when (
-                        val res = apiService.getAttitudes(targetId, page = 1)
-                    ) {
-                        is ApiResult.Success -> {
-                            attitudes = res.data.data
-                            attitudesPage = 1
-                        }
-                        is ApiResult.Error -> if (attitudes.isNotEmpty()) {
-                            showSnackbar(res.message.ifBlank { "点赞列表刷新失败，请稍后重试" })
-                        }
-                        ApiResult.Loading -> {}
-                    }
-                }
-            } finally {
-                isRefreshing = false
-            }
-        }
-    }
-
-    LaunchedEffect(postId) {
-        if (post == null) {
-            isLoading = true
-        }
-        // 加载微博正文
-        var loadedPost: WeiboStatusDto? = null
-        when (val postRes = apiService.getPostDetail(postId)) {
-            is ApiResult.Success -> {
-                loadedPost = postRes.data
-                post = loadedPost
-                val resolvedLike = PostLikeStore.resolve(loadedPost)
-                isLiked = resolvedLike.liked
-                likeCount = resolvedLike.count ?: (loadedPost.attitudesCount.toIntOrNull() ?: 0)
-                // 本地浏览历史：同一条微博只保留最近一次（重复进入会刷新时间并前移）
-                historyRepository.recordPost(postRes.data)
-            }
-            is ApiResult.Error -> {
-                if (post == null) {
-                    errorMessage = postRes.message
-                }
-            }
-            else -> {}
-        }
-        // 初始加载热门评论：命中缓存时页签 effect 可能已经用同一个 id 拉过一次，
-        // 这里按 id 去重，避免同一次进入把评论拉两遍（第二遍会让列表再淡入一次）
-        val targetId = loadedPost?.idStr ?: loadedPost?.id?.toString() ?: postId
-        if (commentsRequestedForId != targetId) loadComments(sortByHot, targetId)
-        isLoading = false
-    }
-
-    LaunchedEffect(selectedTab) {
-        val targetId = post?.idStr ?: post?.id?.toString() ?: postId
-        when (selectedTab) {
-            // 首次进入时正文可能还没到，评论交给正文 effect 用解析后的 id 拉，
-            // 这里不抢先发请求（否则同一份数据会被拉两次）
-            DetailSubTab.COMMENTS ->
-                if (post != null && comments.isEmpty() && !isCommentsLoading) loadComments(sortByHot, targetId)
-            DetailSubTab.REPOSTS -> if (reposts.isEmpty() && !isRepostsLoading) loadReposts(1, targetId)
-            DetailSubTab.ATTITUDES -> if (attitudes.isEmpty() && !isAttitudesLoading) loadAttitudes(1, targetId)
+    // 一次性提示（点赞失败 / 刷新失败）由 ViewModel 发出
+    LaunchedEffect(viewModel) {
+        viewModel.messages.collect { message ->
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(
+                message = message,
+                duration = SnackbarDuration.Short
+            )
         }
     }
 
@@ -482,9 +225,9 @@ fun PostDetailScreen(
     // 归零必须发生在 SideEffect（组合已提交、本帧还没绘制）：放到协程里归零会先按
     // 旧的 alpha=1 画一帧，用户看到的就是评论闪一下。
     SideEffect {
-        contentFade.syncKey(selectedTab to commentsGeneration)
+        contentFade.syncKey(selectedTab to commentsVersion)
     }
-    LaunchedEffect(selectedTab, commentsGeneration) {
+    LaunchedEffect(selectedTab, commentsVersion) {
         contentFade.animateIn()
     }
 
@@ -565,7 +308,7 @@ fun PostDetailScreen(
     ) { innerPadding ->
         PullToRefreshBox(
             isRefreshing = isRefreshing,
-            onRefresh = { refreshDetail() },
+            onRefresh = { viewModel.refresh() },
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.surface)
@@ -635,17 +378,12 @@ fun PostDetailScreen(
                                 likeCount = likeCount,
                                 selectedTab = selectedTab,
                                 onTabSelect = { tab ->
-                                    selectedTab = tab
+                                    viewModel.selectTab(tab)
                                     coroutineScope.launch { listState.animateScrollToItem(1, 0) }
                                 },
-                                onLikeClick = { toggleLike() },
+                                onLikeClick = { viewModel.toggleLike() },
                                 sortByHot = sortByHot,
-                                commentsLoading = isCommentsLoading,
-                                onToggleSort = {
-                                    val newSort = !sortByHot
-                                    sortByHot = newSort
-                                    loadComments(newSort)
-                                },
+                                onToggleSort = { viewModel.toggleSort() },
                                 onUserClick = onUserClick,
                                 onImageClick = onImageClick,
                                 onVideoClick = onVideoClick,
@@ -671,7 +409,7 @@ fun PostDetailScreen(
                                             isLoading = isRepostsLoading,
                                             buttonText = "刷新",
                                             buttonEnabled = !isRepostsLoading,
-                                            onButtonClick = { loadReposts(1) },
+                                            onButtonClick = { viewModel.loadReposts() },
                                             modifier = Modifier.contentFade(contentFade)
                                         )
                                     }
@@ -697,16 +435,18 @@ fun PostDetailScreen(
                             DetailSubTab.COMMENTS -> {
                                 if (comments.isEmpty()) {
                                     // 首屏没有内容时先铺骨架屏，避免「一个转圈 → 一屏文字」的硬切；
-                                    // 已有内容时（排序/刷新中）继续显示旧列表，不退回占位
+                                    // 已有内容时（排序/刷新中）继续显示旧列表，不退回占位。
+                                    // 请求还没结束（含命中缓存先铺正文、评论尚未发起的那段时间）
+                                    // 也算加载中，否则会先闪一下「没有可显示的内容」再变骨架屏。
                                     item(key = "comments_placeholder", contentType = "comment_placeholder") {
-                                        if (isCommentsLoading) {
+                                        if (isCommentsLoading || !hasLoadedComments) {
                                             CommentSkeletonList(modifier = Modifier.contentFade(contentFade))
                                         } else {
                                             EmptyMessage(
                                                 // 开启精选评论后接口只下发精选内容，空列表不代表加载失败
                                                 message = if (commentsApprovalOnly) "博主还没有精选评论" else "没有可显示的内容",
                                                 buttonText = "刷新",
-                                                onButtonClick = { loadComments(sortByHot) },
+                                                onButtonClick = { viewModel.loadComments() },
                                                 modifier = Modifier.contentFade(contentFade)
                                             )
                                         }
@@ -724,12 +464,17 @@ fun PostDetailScreen(
                                         key = { it.listKey },
                                         contentType = { "comment" }
                                     ) { comment ->
-                                        // 刷新后重建评论子树，丢弃旧的“展开回复/分页”缓存
-                                        androidx.compose.runtime.key(refreshGeneration) {
+                                        // 刷新后重建评论子树：楼中楼分页已由 ViewModel 清空，
+                                        // 这里同时把「展开/收起」的界面状态归零
+                                        androidx.compose.runtime.key(commentsSubtreeVersion) {
                                             CommentThread(
                                                 comment = comment,
-                                                postId = post?.idStr ?: post?.id?.toString() ?: postId,
-                                                apiService = apiService,
+                                                // 楼中楼的分页、游标与加载态都在 ViewModel 里按评论 id 管理
+                                                repliesProvider = { comment ->
+                                                    repliesStates[viewModel.repliesKeyOf(comment)]
+                                                        ?: initialCommentReplies(comment)
+                                                },
+                                                onLoadReplies = viewModel::loadCommentReplies,
                                                 postAuthorId = postAuthorId,
                                                 postAuthorName = postAuthorName,
                                                 onUserClick = onUserClick,
@@ -763,7 +508,7 @@ fun PostDetailScreen(
                                             isLoading = isAttitudesLoading,
                                             buttonText = "刷新",
                                             buttonEnabled = !isAttitudesLoading,
-                                            onButtonClick = { loadAttitudes(1) },
+                                            onButtonClick = { viewModel.loadAttitudes() },
                                             modifier = Modifier.contentFade(contentFade)
                                         )
                                     }
@@ -812,8 +557,6 @@ private fun PostDetailBody(
     onTabSelect: (DetailSubTab) -> Unit,
     onLikeClick: () -> Unit,
     sortByHot: Boolean,
-    /** 评论正在拉取：排序切换时旧列表仍然可见，用排序按钮上的小转圈给出「正在换一批」的反馈。 */
-    commentsLoading: Boolean = false,
     onToggleSort: () -> Unit,
     onUserClick: (Long?) -> Unit,
     onImageClick: (urls: List<String>, index: Int) -> Unit,
@@ -1073,11 +816,11 @@ private fun PostDetailBody(
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            DetailActionButton(
+            WeiboActionButton(
                 icon = Icons.Outlined.Repeat,
                 count = post.repostsCount,
-                defaultLabel = "转发",
-                isSelected = selectedTab == DetailSubTab.REPOSTS,
+                label = "转发",
+                emphasized = selectedTab == DetailSubTab.REPOSTS,
                 onClick = { onTabSelect(DetailSubTab.REPOSTS) }
             )
             VerticalDivider(
@@ -1085,11 +828,11 @@ private fun PostDetailBody(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                 thickness = 0.8.dp
             )
-            DetailActionButton(
+            WeiboActionButton(
                 icon = Icons.Outlined.ChatBubbleOutline,
                 count = post.commentsCount,
-                defaultLabel = "评论",
-                isSelected = selectedTab == DetailSubTab.COMMENTS,
+                label = "评论",
+                emphasized = selectedTab == DetailSubTab.COMMENTS,
                 onClick = { onTabSelect(DetailSubTab.COMMENTS) }
             )
             VerticalDivider(
@@ -1112,34 +855,19 @@ private fun PostDetailBody(
                     modifier = Modifier
                         .clip(MaterialTheme.shapes.small)
                         .clickable(onClick = onToggleSort)
-                        .padding(horizontal = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    AnimatedContent(
-                        targetState = commentsLoading,
-                        transitionSpec = { fadeIn() togetherWith fadeOut() },
-                        label = "SortIcon"
-                    ) { loading ->
-                        if (loading) {
-                            // 排序切换时旧评论仍留在屏幕上，用图标位的小转圈表示「正在换一批」
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(13.dp),
-                                strokeWidth = 1.5.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        } else {
-                            Icon(
-                                imageVector = if (sortByHot) Icons.Outlined.Whatshot else Icons.AutoMirrored.Outlined.Sort,
-                                contentDescription = if (sortByHot) "按热度" else "按时间",
-                                tint = if (sortByHot) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                                modifier = Modifier.size(15.dp)
-                            )
-                        }
-                    }
+                    Icon(
+                        imageVector = if (sortByHot) Icons.Outlined.Whatshot else Icons.AutoMirrored.Outlined.Sort,
+                        contentDescription = if (sortByHot) "按热度" else "按时间",
+                        tint = if (sortByHot) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                        modifier = Modifier.size(16.dp)
+                    )
                     Text(
                         text = if (sortByHot) "按热度" else "按时间",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
                         color = if (sortByHot) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
                     )
                 }
@@ -1153,44 +881,12 @@ private fun PostDetailBody(
     }
 }
 
-@Composable
-private fun DetailActionButton(
-    icon: ImageVector,
-    count: String,
-    defaultLabel: String,
-    isSelected: Boolean = false,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val tintColor = if (isSelected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
-    }
-    Row(
-        modifier = modifier
-            .height(38.dp)
-            .clip(MaterialTheme.shapes.small)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = defaultLabel,
-            tint = tintColor,
-            modifier = Modifier.size(16.dp)
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = formatCount(count, defaultLabel),
-            style = if (isSelected) MaterialTheme.typography.labelMediumEmphasized else MaterialTheme.typography.labelMedium,
-            color = tintColor
-        )
-    }
-}
-
+/**
+ * 正文页的赞按钮：整行切到「赞」子页签，只有图标区域执行点赞 / 取消点赞。
+ *
+ * 与信息流卡片（整块点赞）不同，这里的两个动作不能并成一个，因此用
+ * [WeiboActionButton] 的 `onIconClick` 表达图标独立点击区。
+ */
 @Composable
 private fun DetailLikeActionButton(
     isLiked: Boolean,
@@ -1200,49 +896,16 @@ private fun DetailLikeActionButton(
     onTabSelect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val countStr = likeCount.toString()
-    val tintColor = if (isSelected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
-    }
-    val iconTint = if (isLiked) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        tintColor
-    }
-
-    Row(
+    WeiboActionButton(
+        icon = if (isLiked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
+        count = likeCount.toString(),
+        label = "赞",
+        onClick = onTabSelect,
+        iconTint = if (isLiked) MaterialTheme.colorScheme.primary else null,
+        emphasized = isSelected,
+        onIconClick = onLikeClick,
         modifier = modifier
-            .height(38.dp)
-            .clip(MaterialTheme.shapes.small)
-            .clickable(onClick = onTabSelect)
-            .padding(horizontal = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(30.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onLikeClick),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = if (isLiked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
-                contentDescription = if (isLiked) "取消点赞" else "点赞",
-                tint = iconTint,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-        Spacer(modifier = Modifier.width(2.dp))
-        Text(
-            text = formatCount(countStr, "赞"),
-            style = if (isSelected) MaterialTheme.typography.labelMediumEmphasized else MaterialTheme.typography.labelMedium,
-            color = tintColor,
-            modifier = Modifier.padding(end = 4.dp)
-        )
-    }
+    )
 }
 
 /**
@@ -1527,6 +1190,8 @@ private fun AttitudeItemRow(
 @Composable
 internal fun CommentRow(
     comment: WeiboCommentDto,
+    /** 点赞状态由 [LikeRepository] 统一提供，行内不再自行维护副本 */
+    likeState: LikeState,
     isPostAuthor: Boolean = false,
     isReply: Boolean = false,
     onUserClick: (Long?) -> Unit,
@@ -1548,7 +1213,6 @@ internal fun CommentRow(
         rawReplyText.replace("图片评论", "").trim()
     }
     val primaryColor = MaterialTheme.colorScheme.primary
-    val likeState = CommentLikeStore.resolve(comment)
     val likeCountText = likeState.count?.let { formatInteractionCount(it, "") }
         ?: comment.likeCount.takeIf { it.isNotBlank() && it != "0" }.orEmpty()
     val likeTint = if (likeState.liked) {
@@ -1739,15 +1403,6 @@ private fun formatCommentMetadata(comment: WeiboCommentDto): String {
         location.takeIf { it.isNotBlank() },
         source.takeIf { it.isNotBlank() && !sourceIsLocation && it != region }
     ).joinToString(" · ")
-}
-
-private fun formatCount(countStr: String, defaultLabel: String): String {
-    if (countStr.isBlank() || countStr == "0") return defaultLabel
-    val countInt = countStr.toIntOrNull() ?: return countStr
-    return when {
-        countInt >= 10_000 -> String.format("%.1f万", countInt / 10_000.0)
-        else -> countInt.toString()
-    }
 }
 
 private fun formatSubtitle(createdAt: String, source: String?, regionName: String? = null): String {

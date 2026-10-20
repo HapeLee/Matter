@@ -27,10 +27,12 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kyant.backdrop.backdrops.layerBackdrop
 import kotlinx.coroutines.flow.distinctUntilChanged
 import org.kazusa.matter.data.model.FollowingListTab
@@ -65,25 +67,36 @@ fun UserListScreen(
     onBackClick: () -> Unit,
     onUserClick: (Long?) -> Unit
 ) {
-    val sources = viewModel.sources
-    val selectedSource = sources[viewModel.selectedIndex]
-    val state = viewModel.states.getValue(selectedSource.key)
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val sources = uiState.sources
+    val selectedSource = uiState.selectedSource
+    val state = uiState.sectionOf(selectedSource.key)
     val listState = viewModel.listStates.getValue(selectedSource.key)
     val backdrop = rememberScreenBackdrop()
     val pullState = rememberPullToRefreshState()
     val isMultiTab = sources.size > 1
 
-    // 触底自动加载下一页（各分组独立，状态在 ViewModel 中不会随返回丢失）
+    // 「关注的人 / 最新发博」天然都是已关注用户，不依赖服务端按钮文案
+    val forcedFollowing = when (selectedSource.followingTab) {
+        FollowingListTab.ALL,
+        FollowingListTab.LATEST_POST -> true
+        else -> null
+    }
+    // 关注状态是跨页面共享的：在主页取消关注后返回，这类分组的成员资格也要跟着变化
+    val visibleItems = if (forcedFollowing == true) {
+        state.items.filterNot { uiState.followingOf(it.userKey()) == false }
+    } else {
+        state.items
+    }
+
+    // 触底自动加载下一页：列表内容或视口一变就重新判断，具体能不能加载由 state.canLoadMore 决定
     LaunchedEffect(selectedSource.key) {
         snapshotFlow {
             val layout = listState.layoutInfo
-            val current = viewModel.states.getValue(selectedSource.key)
-            current.loaded && !current.isInitialLoading && !current.isRefreshing && !current.isLoadingMore &&
-                current.hasMore && current.error == null &&
-                layout.totalItemsCount > 0 &&
-                (layout.visibleItemsInfo.lastOrNull()?.index ?: 0) >= layout.totalItemsCount - 3
-        }.distinctUntilChanged().collect { shouldLoad ->
-            if (shouldLoad) viewModel.loadMore()
+            layout.totalItemsCount to (layout.visibleItemsInfo.lastOrNull()?.index ?: 0)
+        }.distinctUntilChanged().collect { (total, lastVisible) ->
+            val section = viewModel.uiState.value.sectionOf(selectedSource.key)
+            if (section.canLoadMore && total > 0 && lastVisible >= total - 3) viewModel.loadMore()
         }
     }
 
@@ -155,19 +168,13 @@ fun UserListScreen(
                     }
 
                     items(
-                        items = state.items,
+                        items = visibleItems,
                         key = { it.userListKey() },
                         contentType = { "user" }
                     ) { card ->
                         val userId = card.user?.id ?: card.user?.idStr?.toLongOrNull()
                         val userKey = card.userKey()
-                        // 「关注的人 / 最新发博」天然都是已关注用户，不依赖服务端按钮文案
-                        val forcedFollowing = when (selectedSource.followingTab) {
-                            FollowingListTab.ALL,
-                            FollowingListTab.LATEST_POST -> true
-                            else -> null
-                        }
-                        val effectiveFollowing = userKey?.let { viewModel.followStates[it] }
+                        val effectiveFollowing = uiState.followingOf(userKey)
                             ?: forcedFollowing
                             ?: card.user?.following
                         SearchUserCard(
@@ -175,7 +182,7 @@ fun UserListScreen(
                             onClick = { onUserClick(userId) },
                             onUserClick = onUserClick,
                             followingOverride = effectiveFollowing,
-                            followUpdating = userKey != null && viewModel.followUpdatingUid == userKey,
+                            followUpdating = uiState.isFollowUpdating(userKey),
                             onFollowClick = if (userKey == null) {
                                 null
                             } else {
@@ -240,7 +247,7 @@ fun UserListScreen(
             if (isMultiTab) {
                 LiquidGlassFloatingMenu(
                     items = sources.map { it.title },
-                    selectedIndex = viewModel.selectedIndex,
+                    selectedIndex = uiState.selectedIndex,
                     onSelect = viewModel::selectSource,
                     backdrop = backdrop,
                     modifier = Modifier
@@ -256,7 +263,7 @@ fun UserListScreen(
                 )
             }
 
-            viewModel.pendingUnfollow?.let { card ->
+            uiState.pendingUnfollow?.let { card ->
                 AlertDialog(
                     onDismissRequest = viewModel::dismissUnfollowDialog,
                     title = { Text("取消关注") },
@@ -278,7 +285,7 @@ fun UserListScreen(
                 )
             }
 
-            viewModel.followActionError?.let { message ->
+            uiState.followActionError?.let { message ->
                 AlertDialog(
                     onDismissRequest = viewModel::dismissActionError,
                     title = { Text("操作失败") },

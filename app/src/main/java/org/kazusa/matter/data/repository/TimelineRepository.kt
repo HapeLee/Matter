@@ -49,7 +49,9 @@ class TimelineRepository(
         }
     }
 
-    suspend fun loadCache(gid: String?): TimelineCacheData? = cacheManager.loadCache(gid)
+    /** 读取本地缓存；不是当前账号写下的缓存直接视为没有（账号隔离）。 */
+    suspend fun loadCache(gid: String?): TimelineCacheData? =
+        cacheManager.loadCache(gid, currentUid())
 
     fun getScrollPosition(gid: String?): TimelinePosition = positionManager.getPosition(gid)
 
@@ -73,6 +75,7 @@ class TimelineRepository(
         positionManager.savePosition(gid, scrollIndex, scrollOffset, lastReadPostId, synchronous = false)
         cacheManager.saveCache(
             gid = gid,
+            uid = currentUid(),
             posts = posts,
             page = page,
             hasMore = hasMore,
@@ -86,4 +89,7 @@ class TimelineRepository(
         positionManager.clearPosition(gid)
         cacheManager.clearCache(gid)
     }
+
+    /** 当前登录账号；访客是空串，与任何登录账号天然区分。 */
+    private suspend fun currentUid(): String = authPreferences.sessionFlow.first().uid
 }

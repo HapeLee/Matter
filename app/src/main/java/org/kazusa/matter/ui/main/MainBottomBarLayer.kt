@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.zIndex
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import kotlinx.coroutines.launch
@@ -55,7 +56,7 @@ import org.kazusa.matter.ui.effect.liquid.morphMenuPanelLift
 import org.kazusa.matter.ui.effect.liquid.morphMenuPanelWidth
 import org.kazusa.matter.ui.hotfeed.HotFeedUiState
 import org.kazusa.matter.ui.media.morph.MORPH_SETTLE_SPEC
-import org.kazusa.matter.ui.search.HotSearchBoardState
+import org.kazusa.matter.ui.search.HotSearchBoardViewModel
 
 /** 「热门」Tab 当前的展示模式：热门流 / 微博热搜榜。 */
 internal enum class DiscoverMode { HOT, HOT_SEARCH }
@@ -95,7 +96,7 @@ internal fun MainBottomBarLayer(
     onReselect: (Int) -> Unit,
     discoverMode: DiscoverMode,
     hotFeedUiState: State<HotFeedUiState>,
-    hotSearchState: HotSearchBoardState,
+    hotSearchViewModel: HotSearchBoardViewModel,
     onToggleDiscoverMode: () -> Unit,
     onHotCategorySelected: (HotFeedCategory) -> Unit,
     onHotSearchChannelSelected: (HotSearchChannel) -> Unit,
@@ -116,16 +117,17 @@ internal fun MainBottomBarLayer(
         derivedStateOf { hotFeedUiState.value.selectedCategory?.containerId }
     }
 
+    val hotSearchUi by hotSearchViewModel.uiState.collectAsStateWithLifecycle()
     val isHotMode = discoverMode == DiscoverMode.HOT
     val categoryLabels: List<String> = if (isHotMode) {
         hotCategories.map { it.title }
     } else {
-        hotSearchState.channels.map { it.name }
+        hotSearchUi.channels.map { it.name }
     }
     val selectedCategoryIndex: Int = if (isHotMode) {
         hotCategories.indexOfFirst { it.containerId == hotSelectedContainerId }
     } else {
-        hotSearchState.channels.indexOfFirst { it.containerid == hotSearchState.selectedContainerId }
+        hotSearchUi.channels.indexOfFirst { it.containerid == hotSearchUi.selectedContainerId }
     }
 
     val isDiscoverActive = selectedIndex == discoverPage
@@ -314,7 +316,7 @@ internal fun MainBottomBarLayer(
                         if (isHotMode) {
                             hotCategories.getOrNull(index)?.let(onHotCategorySelected)
                         } else {
-                            hotSearchState.channels.getOrNull(index)?.let(onHotSearchChannelSelected)
+                            hotSearchUi.channels.getOrNull(index)?.let(onHotSearchChannelSelected)
                         }
                     },
                     backdrop = backdrop,

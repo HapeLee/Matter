@@ -16,6 +16,14 @@ data class TimelineCacheData(
     val scrollIndex: Int = 0,
     val scrollOffset: Int = 0,
     val lastReadPostId: String? = null,
+    /**
+     * 写入缓存时的账号 uid。
+     *
+     * 缓存文件名只按分组区分，换账号后同名文件还在；读取时必须先比对这个字段，
+     * 否则新账号首帧会先渲染上一个账号的动态（连同点赞 / 关注态）。
+     * 旧版本缓存没有这个字段（null），一律视为不属于当前账号。
+     */
+    val uid: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -28,6 +36,7 @@ class TimelineCacheManager(private val context: Context) {
 
     suspend fun saveCache(
         gid: String?,
+        uid: String?,
         posts: List<WeiboStatusDto>,
         page: Int,
         hasMore: Boolean,
@@ -44,7 +53,8 @@ class TimelineCacheManager(private val context: Context) {
                 hasMore = hasMore,
                 scrollIndex = scrollIndex,
                 scrollOffset = scrollOffset,
-                lastReadPostId = lastReadPostId
+                lastReadPostId = lastReadPostId,
+                uid = uid
             )
             val jsonString = KtorClientFactory.jsonConfig.encodeToString(TimelineCacheData.serializer(), data)
             tempFile.writeText(jsonString)
@@ -57,30 +67,42 @@ class TimelineCacheManager(private val context: Context) {
         }
     }
 
-    suspend fun loadCache(gid: String?): TimelineCacheData? = withContext(Dispatchers.IO) {
-        try {
-            val file = getCacheFile(gid)
-            if (!file.exists()) return@withContext null
-            val jsonString = file.readText()
-            if (jsonString.isBlank()) return@withContext null
-            KtorClientFactory.jsonConfig.decodeFromString(TimelineCacheData.serializer(), jsonString)
-        } catch (e: Exception) {
-            android.util.Log.e("TimelineCache", "loadCache failed", e)
-            null
+    /**
+     * 读取缓存；[uid] 与缓存里记录的账号不一致时按「没有缓存」处理。
+     *
+     * 比「换账号时删文件」更稳：删文件是另一条协程，新页面可能先读到旧内容；
+     * 这里在读取点直接比对身份，与请求 / 写入的先后顺序无关。
+     */
+    suspend fun loadCache(gid: String?, uid: String?): TimelineCacheData? =
+        withContext(Dispatchers.IO) {
+            try {
+                val file = getCacheFile(gid)
+                if (!file.exists()) return@withContext null
+                val jsonString = file.readText()
+                if (jsonString.isBlank()) return@withContext null
+                val data = KtorClientFactory.jsonConfig
+                    .decodeFromString(TimelineCacheData.serializer(), jsonString)
+                if (data.uid != uid) return@withContext null
+                data
+            } catch (e: Exception) {
+                android.util.Log.e("TimelineCache", "loadCache failed", e)
+                null
+            }
         }
-    }
 
     suspend fun updateScrollPosition(
         gid: String?,
+        uid: String?,
         scrollIndex: Int,
         scrollOffset: Int,
         lastReadPostId: String?
     ) = withContext(Dispatchers.IO) {
         try {
-            val current = loadCache(gid)
+            val current = loadCache(gid, uid)
             if (current != null) {
                 saveCache(
                     gid = gid,
+                    uid = uid,
                     posts = current.posts,
                     page = current.page,
                     hasMore = current.hasMore,

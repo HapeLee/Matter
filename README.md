@@ -1,5 +1,7 @@
 # Matter (基于 Jetpack Compose + Koin + Ktor + DataStore 的现代客户端)
 
+开发与审查约定见 [AGENTS.md](AGENTS.md) 和 [KMP / Compose Multiplatform 架构规范](docs/kmp-cmp-guidelines.md)。当前工程仍为 Android 单模块，跨平台规范用于后续渐进支持 JVM Desktop。
+
 本项目采用现代 Android 架构规范与最新技术栈（**Jetpack Compose + Material 3 + Koin 依赖注入 + Ktor Client + Jetpack DataStore + Room + Kotlin Coroutines & Flow**）构建，致力于提供高效、优雅且流畅的社交信息流阅读体验。
 
 ---

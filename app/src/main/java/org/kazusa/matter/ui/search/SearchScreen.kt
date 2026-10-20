@@ -40,6 +40,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -50,6 +51,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import java.util.Locale
 import com.kyant.backdrop.backdrops.LayerBackdrop
@@ -75,7 +77,7 @@ import org.kazusa.matter.ui.effect.liquid.LiquidGlassCapsule
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HotSearchScreen(
-    hotSearchState: HotSearchBoardState,
+    hotSearchViewModel: HotSearchBoardViewModel,
     onSearchSubmit: (String) -> Unit,
     backdrop: LayerBackdrop? = null,
     bottomBarPadding: Dp = 0.dp,
@@ -91,15 +93,17 @@ fun HotSearchScreen(
     // 因此这里只镜像当前那一份（切换后由新列表接上）
     val topBarListState = remember { mutableStateOf(LazyListState()) }
 
+    val hotSearchUi by hotSearchViewModel.uiState.collectAsStateWithLifecycle()
+
     // 顶栏标题直接显示当前榜单名（如「热搜」「文娱」「同城」），切榜 / 刷新后跟着变
-    val topBarTitle = hotSearchState.selectedChannel?.name
+    val topBarTitle = hotSearchUi.selectedChannel?.name
         ?.takeIf { it.isNotBlank() }
-        ?: hotSearchState.pageTitle?.takeIf { it.isNotBlank() }
+        ?: hotSearchUi.pageTitle?.takeIf { it.isNotBlank() }
         ?: "微博热搜"
 
-    // 初始加载热搜（下拉刷新走 PullToRefreshBox → hotSearchState.refresh()）
+    // 初始加载热搜（下拉刷新走 PullToRefreshBox → hotSearchViewModel.refresh()）
     LaunchedEffect(Unit) {
-        hotSearchState.loadIfNeeded()
+        hotSearchViewModel.loadIfNeeded()
     }
 
     Scaffold(
@@ -121,24 +125,28 @@ fun HotSearchScreen(
         val topPadding = innerPadding.calculateTopPadding()
 
         PullToRefreshBox(
-            isRefreshing = hotSearchState.isRefreshing,
+            isRefreshing = hotSearchUi.isRefreshing,
             state = pullRefreshState,
-            onRefresh = { hotSearchState.refresh() },
+            onRefresh = { hotSearchViewModel.refresh() },
             modifier = Modifier.fillMaxSize()
         ) {
-            // 直接拿榜单数据当 key：换榜 / 刷新拿到新数据时，新旧列表交叉淡化。
-            // 每份内容自带 LazyListState，切换后从顶部开始，过渡期间两份列表也互不干扰。
+            // 换榜：新旧两份内容交叉淡化，各自持有 LazyListState，过渡期间互不干扰。
+            // contentKey 只认 containerid —— 同榜刷新（下拉刷新 / 自动刷新）不重放过渡，
+            // 列表状态也按 containerid remember：数据原地更新、滚动位置保留，
+            // 不会出现「旧列表停在中段 + 新列表在顶部」两份不同位置叠着淡出淡入。
             AnimatedContent(
-                targetState = hotSearchState.board,
+                targetState = hotSearchUi.content,
                 transitionSpec = {
                     fadeIn(animationSpec = tween(220)) togetherWith
                         fadeOut(animationSpec = tween(140))
                 },
+                contentKey = { it.containerId },
                 label = "HotSearchContent"
-            ) { board ->
-                val boardListState = remember(board) { LazyListState() }
+            ) { content ->
+                val board = content.board
+                val boardListState = remember(content.containerId) { LazyListState() }
                 // 只有「当前」那份内容接管顶栏的滚动采样；离场的那份在淡出期间不再写入
-                val isCurrent = board === hotSearchState.board
+                val isCurrent = content === hotSearchUi.content
                 SideEffect {
                     if (isActive && isCurrent) {
                         if (topBarListState.value !== boardListState) {
@@ -170,8 +178,8 @@ fun HotSearchScreen(
                 ) {
                     hotSearchItems(
                         board = board,
-                        updatedAt = hotSearchState.lastLoadedAt,
-                        isLoading = hotSearchState.isLoading,
+                        updatedAt = hotSearchUi.lastLoadedAt,
+                        isLoading = hotSearchUi.isLoading,
                         onItemClick = { hotItem -> onSearchSubmit(hotItem.title) },
                         onEntryClick = { entry ->
                             // 入口卡（好友热搜 / 榜规则说明）目前没有对应落地页，先按关键词搜索兜底
@@ -206,7 +214,7 @@ private val HotSearchCardShape = RoundedCornerShape(18.dp)
  */
 private fun LazyListScope.hotSearchItems(
     board: HotSearchBoard,
-    /** 上次成功加载的时间戳（[HotSearchBoardState.lastLoadedAt]），0 表示还没有 */
+    /** 上次成功加载的时间戳（[HotSearchBoardViewModel.lastLoadedAt]），0 表示还没有 */
     updatedAt: Long,
     isLoading: Boolean,
     onItemClick: (HotSearchItem) -> Unit,
@@ -362,7 +370,7 @@ private fun LazyListScope.hotSearchItems(
 /**
  * 榜单更新时间：列表最上方一行的弱化小字（如「更新于 15:42」）。
  *
- * 只负责展示 [HotSearchBoardState.lastLoadedAt]，不触发任何自动刷新 ——
+ * 只负责展示 [HotSearchBoardViewModel.lastLoadedAt]，不触发任何自动刷新 ——
  * 刷新仍然只能靠下拉刷新 / 切榜。
  */
 @Composable

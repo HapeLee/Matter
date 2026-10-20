@@ -47,7 +47,6 @@ import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import org.kazusa.matter.core.datastore.AuthPreferences
-import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.data.repository.AuthRepository
 import org.kazusa.matter.ui.theme.ThemePreferences
 import org.kazusa.matter.data.model.HotSearchChannel
@@ -56,7 +55,7 @@ import org.kazusa.matter.ui.group.GroupViewModel
 import org.kazusa.matter.ui.hotfeed.HotFeedScreen
 import org.kazusa.matter.ui.hotfeed.HotFeedViewModel
 import org.kazusa.matter.ui.profile.ProfileScreen
-import org.kazusa.matter.ui.search.HotSearchBoardState
+import org.kazusa.matter.ui.search.HotSearchBoardViewModel
 import org.kazusa.matter.ui.search.HotSearchScreen
 import org.kazusa.matter.ui.search.currentLatLon
 import org.kazusa.matter.ui.search.hasCoarseLocationPermission
@@ -119,13 +118,14 @@ fun MainTabsScreen(
     onOpenSearch: () -> Unit = {},
     onLogout: () -> Unit,
     modifier: Modifier = Modifier,
-    apiService: WeiboApiService = koinInject(),
     authPreferences: AuthPreferences = koinInject(),
     authRepository: AuthRepository = koinInject(),
     themePreferences: ThemePreferences = koinInject(),
     timelineViewModel: TimelineViewModel = koinViewModel(),
     groupViewModel: GroupViewModel = koinViewModel(),
-    hotFeedViewModel: HotFeedViewModel = koinViewModel()
+    hotFeedViewModel: HotFeedViewModel = koinViewModel(),
+    // 热搜榜的状态由 ViewModel 持有：榜单切换由悬浮底栏右侧的分类菜单触发，与热搜列表共用同一份
+    hotSearchViewModel: HotSearchBoardViewModel = koinViewModel()
 ) {
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { MainTab.entries.size })
     val coroutineScope = rememberCoroutineScope()
@@ -142,11 +142,6 @@ fun MainTabsScreen(
     // 这里只镜像「当前可见的那一份」，让底栏隐藏逻辑与动态页完全一致（含“到顶立即显示”）
     val discoverListState = remember { mutableStateOf<LazyListState?>(null) }
 
-    // 热搜榜状态：榜单切换由悬浮底栏右侧的分类菜单触发，与热搜列表共用同一份
-    val hotSearchState = remember(apiService, coroutineScope) {
-        HotSearchBoardState(apiService, coroutineScope)
-    }
-
     // 只把 State 往下传：分类菜单在悬浮层里读取，热门流每加载一页不会带着主框架重组
     val hotFeedState = hotFeedViewModel.uiState.collectAsStateWithLifecycle()
 
@@ -161,7 +156,7 @@ fun MainTabsScreen(
         pendingRegionBoard = null
         if (channel != null) {
             coroutineScope.launch {
-                hotSearchState.select(
+                hotSearchViewModel.select(
                     channel,
                     latLon = if (granted) currentLatLon(context) else null
                 )
@@ -178,7 +173,7 @@ fun MainTabsScreen(
             locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
         } else {
             coroutineScope.launch {
-                hotSearchState.select(channel, latLon = currentLatLon(context))
+                hotSearchViewModel.select(channel, latLon = currentLatLon(context))
             }
         }
     }
@@ -320,7 +315,7 @@ fun MainTabsScreen(
 
                                 DiscoverMode.HOT_SEARCH -> {
                                     HotSearchScreen(
-                                        hotSearchState = hotSearchState,
+                                        hotSearchViewModel = hotSearchViewModel,
                                         onSearchSubmit = onSearchSubmit,
                                         backdrop = searchBackdrop.takeIf { mode == discoverMode },
                                         bottomBarPadding = bottomBarPadding,
@@ -367,7 +362,7 @@ fun MainTabsScreen(
                 backdrop = bottomBarBackdrop,
                 discoverMode = discoverMode,
                 hotFeedUiState = hotFeedState,
-                hotSearchState = hotSearchState,
+                hotSearchViewModel = hotSearchViewModel,
                 onToggleDiscoverMode = toggleDiscoverMode,
                 onHotCategorySelected = { category ->
                     hotFeedViewModel.selectCategory(category)
@@ -395,7 +390,7 @@ fun MainTabsScreen(
                             if (discoverMode == DiscoverMode.HOT) {
                                 hotFeedViewModel.refresh()
                             } else {
-                                hotSearchState.refresh()
+                                hotSearchViewModel.refresh()
                             }
                         }
                     }

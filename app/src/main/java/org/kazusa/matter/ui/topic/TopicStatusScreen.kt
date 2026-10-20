@@ -3,7 +3,6 @@ package org.kazusa.matter.ui.topic
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.data.model.VideoStreamInfo
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.repository.SearchHistoryRepository
@@ -23,7 +22,6 @@ import org.kazusa.matter.ui.search.SearchResultScreen
 @Composable
 fun TopicStatusScreen(
     keyword: String,
-    apiService: WeiboApiService,
     searchHistoryRepository: SearchHistoryRepository,
     onBackClick: () -> Unit,
     topicId: String = "",
@@ -43,7 +41,6 @@ fun TopicStatusScreen(
     SearchResultScreen(
         query = formattedQuery,
         title = title.ifBlank { formattedQuery },
-        apiService = apiService,
         searchHistoryRepository = searchHistoryRepository,
         onBackClick = onBackClick,
         onUserClick = onUserClick,

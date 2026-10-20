@@ -24,20 +24,13 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kyant.backdrop.backdrops.layerBackdrop
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.launch
-import org.kazusa.matter.core.network.ApiResult
-import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.data.model.VideoStreamInfo
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.components.EmptyMessage
@@ -45,6 +38,8 @@ import org.kazusa.matter.ui.components.ImmersiveTopBar
 import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.components.WeiboPostCard
 import org.kazusa.matter.ui.effect.rememberScreenBackdrop
+import org.koin.compose.viewmodel.koinViewModel
+import org.koin.core.parameter.parametersOf
 
 /**
  * 「我的微博」页。
@@ -55,7 +50,6 @@ import org.kazusa.matter.ui.effect.rememberScreenBackdrop
 @Composable
 fun MyPostsScreen(
     uid: String,
-    apiService: WeiboApiService,
     onBackClick: () -> Unit,
     onPostClick: (WeiboStatusDto) -> Unit,
     onCommentClick: (WeiboStatusDto) -> Unit,
@@ -65,78 +59,32 @@ fun MyPostsScreen(
     onMentionClick: (String) -> Unit,
     onTopicClick: (String) -> Unit
 ) {
+    // 列表与分页挂在 NavEntry 级 ViewModel 上：进入正文再返回时不会重新请求
+    val viewModel: MyPostsViewModel = koinViewModel { parametersOf(uid) }
+
     val listState = rememberLazyListState()
     val backdrop = rememberScreenBackdrop()
-    val scope = rememberCoroutineScope()
     val pullState = rememberPullToRefreshState()
 
-    val isGuest = uid.isBlank() || uid == "guest"
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val posts = uiState.posts
+    val hasMore = uiState.hasMore
+    val isInitialLoading = uiState.isInitialLoading
+    val isRefreshing = uiState.isRefreshing
+    val isLoadingMore = uiState.isLoadingMore
+    val errorMessage = uiState.errorMessage
+    val isGuest = viewModel.isGuest
 
-    var posts by remember(uid) { mutableStateOf<List<WeiboStatusDto>>(emptyList()) }
-    var currentPage by remember(uid) { mutableIntStateOf(0) }
-    var hasMore by remember(uid) { mutableStateOf(true) }
-    var isInitialLoading by remember(uid) { mutableStateOf(!isGuest) }
-    var isRefreshing by remember(uid) { mutableStateOf(false) }
-    var isLoadingMore by remember(uid) { mutableStateOf(false) }
-    var errorMessage by remember(uid) { mutableStateOf<String?>(null) }
+    LaunchedEffect(viewModel) { viewModel.loadIfNeeded() }
 
-    suspend fun load(targetPage: Int, refresh: Boolean) {
-        if (isGuest) {
-            isInitialLoading = false
-            errorMessage = "登录后才能查看我的微博"
-            return
-        }
-        when {
-            refresh -> isRefreshing = true
-            targetPage <= 1 -> isInitialLoading = true
-            else -> isLoadingMore = true
-        }
-        errorMessage = null
-
-        when (val result = apiService.getUserTimeline(uid, targetPage)) {
-            is ApiResult.Success -> {
-                val pagePosts = result.data.statuses
-                val firstPage = refresh || targetPage <= 1
-                val oldSize = posts.size
-                val merged = if (firstPage) {
-                    pagePosts
-                } else {
-                    (posts + pagePosts).distinctBy { it.listKey }
-                }
-                posts = merged
-                currentPage = targetPage
-                val total = result.data.total
-                hasMore = when {
-                    pagePosts.isEmpty() -> false
-                    total != null -> merged.size < total
-                    firstPage -> true
-                    else -> merged.size > oldSize
-                }
-            }
-            is ApiResult.Error -> {
-                errorMessage = result.message ?: "加载失败"
-                if (targetPage > 1) hasMore = false
-            }
-            ApiResult.Loading -> Unit
-        }
-
-        isInitialLoading = false
-        isRefreshing = false
-        isLoadingMore = false
-    }
-
-    LaunchedEffect(uid) {
-        load(1, refresh = false)
-    }
-
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState, viewModel) {
         snapshotFlow {
             val layout = listState.layoutInfo
-            !isInitialLoading && !isRefreshing && !isLoadingMore && hasMore && errorMessage == null &&
-                layout.totalItemsCount > 0 &&
-                (layout.visibleItemsInfo.lastOrNull()?.index ?: 0) >= layout.totalItemsCount - 3
-        }.distinctUntilChanged().collect { shouldLoad ->
-            if (shouldLoad) scope.launch { load(currentPage + 1, refresh = false) }
+            layout.totalItemsCount to (layout.visibleItemsInfo.lastOrNull()?.index ?: 0)
+        }.distinctUntilChanged().collect { (total, lastVisible) ->
+            // 能否加载由状态里的 canLoadMore 决定；列表增减会重新触发判断
+            val section = viewModel.uiState.value
+            if (section.canLoadMore && total > 0 && lastVisible >= total - 3) viewModel.loadMore()
         }
     }
 
@@ -162,7 +110,7 @@ fun MyPostsScreen(
         ) {
             PullToRefreshBox(
                 isRefreshing = isRefreshing,
-                onRefresh = { scope.launch { load(1, refresh = true) } },
+                onRefresh = { viewModel.refresh() },
                 state = pullState,
                 modifier = Modifier.fillMaxSize(),
                 indicator = {
@@ -197,7 +145,7 @@ fun MyPostsScreen(
                                 isLoading = isInitialLoading,
                                 buttonText = if (errorMessage != null && !isGuest) "重试" else null,
                                 onButtonClick = if (errorMessage != null && !isGuest) {
-                                    { scope.launch { load(1, refresh = true) } }
+                                    { viewModel.retry() }
                                 } else {
                                     null
                                 },
@@ -249,7 +197,7 @@ fun MyPostsScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.error
                                 )
-                                TextButton(onClick = { scope.launch { load(currentPage + 1, refresh = false) } }) {
+                                TextButton(onClick = { viewModel.retry() }) {
                                     Text("重试")
                                 }
                             }

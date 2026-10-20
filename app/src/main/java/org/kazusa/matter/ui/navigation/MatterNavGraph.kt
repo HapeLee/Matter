@@ -29,18 +29,21 @@ import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.core.datastore.MediaPreferences
 import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.data.repository.AuthRepository
-import org.kazusa.matter.data.repository.BrowsingHistoryRepository
 import org.kazusa.matter.data.repository.SearchHistoryRepository
 import org.kazusa.matter.ui.theme.ThemePreferences
 import org.kazusa.matter.data.repository.FavoritesRepository
+import org.kazusa.matter.data.repository.FollowRepository
+import org.kazusa.matter.data.repository.LikeRepository
+import org.kazusa.matter.ui.components.LocalCommentLikeStates
 import org.kazusa.matter.ui.components.LocalFavoritesRepository
-import org.kazusa.matter.ui.components.LocalFavoriteActionScope
+import org.kazusa.matter.ui.components.LocalLikeRepository
+import org.kazusa.matter.ui.components.LocalPostLikeStates
+import org.kazusa.matter.ui.components.LocalUserActionScope
 import org.kazusa.matter.ui.components.LocalWeiboApiService
-import org.kazusa.matter.ui.components.PostLikeStore
-import org.kazusa.matter.ui.detail.CommentLikeStore
 import org.kazusa.matter.ui.saved.SavedPostsScreen
 import org.kazusa.matter.ui.saved.SavedPostsViewModel
 import org.kazusa.matter.data.local.BrowsingCategory
+import org.kazusa.matter.ui.detail.PostDetailCache
 import org.kazusa.matter.ui.detail.PostDetailScreen
 import org.kazusa.matter.ui.history.BrowsingHistoryScreen
 import org.kazusa.matter.ui.history.BrowsingHistoryViewModel
@@ -75,17 +78,22 @@ fun MatterNavGraph() {
     val themePreferences = koinInject<ThemePreferences>()
     val mediaPreferences = koinInject<MediaPreferences>()
     val apiService = koinInject<WeiboApiService>()
-    val historyRepository = koinInject<BrowsingHistoryRepository>()
     val searchHistoryRepository = koinInject<SearchHistoryRepository>()
+    val likeRepository = koinInject<LikeRepository>()
+    val followRepository = koinInject<FollowRepository>()
     val koin = getKoin()
+    // 点赞状态在仓库里是只读 StateFlow；这里收集一次下发给列表项，避免每张卡片各自订阅
+    val postLikeStates by likeRepository.postStates.collectAsStateWithLifecycle()
+    val commentLikeStates by likeRepository.commentStates.collectAsStateWithLifecycle()
     val session by authPreferences.sessionFlow.collectAsStateWithLifecycle(initialValue = null)
     val isOnboardingCompleted by authPreferences.isOnboardingCompletedFlow.collectAsStateWithLifecycle(initialValue = null)
     val coroutineScope = rememberCoroutineScope()
 
-    // 换账号时清空会话内的点赞覆盖状态，避免上一个账号的点赞态串到新会话
+    // 换账号时清空会话内的即时状态：点赞 / 关注覆盖与正文预存缓存都带着账号身份
     LaunchedEffect(session?.uid) {
-        PostLikeStore.clear()
-        CommentLikeStore.clear()
+        likeRepository.clear()
+        followRepository.clear()
+        PostDetailCache.clear()
     }
 
     // 状态加载中保护，防止 DataStore 首次空流导致欢迎页闪现
@@ -117,7 +125,7 @@ fun MatterNavGraph() {
     }
     val navigateToPostDetail: (org.kazusa.matter.data.model.WeiboStatusDto?, String, Boolean) -> Unit = { post, idStr, scrollToComments ->
         if (post != null) {
-            org.kazusa.matter.ui.detail.PostDetailCache.put(post)
+            PostDetailCache.put(post)
         }
         if (idStr.isNotBlank()) {
             navigate(Screen.PostDetail(id = idStr, scrollToComments = scrollToComments))
@@ -134,7 +142,10 @@ fun MatterNavGraph() {
         LocalImageMorphState provides morphState,
         LocalSharedElementTarget provides sharedElementTarget,
         LocalFavoritesRepository provides favoritesRepository,
-        LocalFavoriteActionScope provides coroutineScope,
+        LocalLikeRepository provides likeRepository,
+        LocalPostLikeStates provides postLikeStates,
+        LocalCommentLikeStates provides commentLikeStates,
+        LocalUserActionScope provides coroutineScope,
         LocalWeiboApiService provides apiService
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -268,7 +279,6 @@ fun MatterNavGraph() {
                                         Screen.MyPosts -> {
                                             MyPostsScreen(
                                                 uid = session?.uid.orEmpty(),
-                                                apiService = apiService,
                                                 onBackClick = { navigateBack() },
                                                 onPostClick = { post ->
                                                     val idStr = post.idStr ?: post.mid ?: post.id?.toString() ?: ""
@@ -343,8 +353,6 @@ fun MatterNavGraph() {
                                                 uid = args.uid,
                                                 initialScreenName = args.screenName,
                                                 currentUid = session?.uid.orEmpty(),
-                                                apiService = apiService,
-                                                historyRepository = historyRepository,
                                                 onBackClick = {
                                                     navigateBack()
                                                 },
@@ -376,7 +384,6 @@ fun MatterNavGraph() {
                                             SearchResultScreen(
                                                 query = args.query,
                                                 title = args.title,
-                                                apiService = apiService,
                                                 searchHistoryRepository = searchHistoryRepository,
                                                 onBackClick = {
                                                     navigateBack()
@@ -411,7 +418,6 @@ fun MatterNavGraph() {
                                                 keyword = args.keyword,
                                                 topicId = args.topicId,
                                                 title = args.title.ifBlank { args.keyword },
-                                                apiService = apiService,
                                                 searchHistoryRepository = searchHistoryRepository,
                                                 onBackClick = {
                                                     navigateBack()
@@ -540,8 +546,6 @@ fun MatterNavGraph() {
                                                 PostDetailScreen(
                                                     postId = args.id,
                                                     scrollToComments = args.scrollToComments,
-                                                    apiService = apiService,
-                                                    historyRepository = historyRepository,
                                                     onBackClick = {
                                                         navigateBack()
                                                     },

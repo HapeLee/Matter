@@ -37,6 +37,16 @@ object PostDetailCache {
             cache.remove(id)
         }
     }
+
+    /**
+     * 清空预存缓存。
+     *
+     * 缓存里的 [WeiboStatusDto] 带着上一个账号的点赞 / 关注态，换账号后必须先丢掉，
+     * 否则正文页首帧会按旧账号的状态渲染，直到网络结果回来才纠正。
+     */
+    fun clear() {
+        cache.clear()
+    }
 }
 
 /**

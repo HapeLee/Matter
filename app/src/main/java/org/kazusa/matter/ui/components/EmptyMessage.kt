@@ -1,6 +1,10 @@
 package org.kazusa.matter.ui.components
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -79,6 +83,12 @@ fun EmptyMessage(
     ) {
         AnimatedContent(
             targetState = isLoading,
+            // 只做淡入淡出：默认的 scaleIn / scaleOut 会「弹」一下，尺寸补间还会带着
+            // 下方文案与按钮一起位移；这里关掉尺寸过渡，让占位区的排版保持稳定
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(180)) togetherWith fadeOut(animationSpec = tween(120)))
+                    .using(null)
+            },
             label = "EmptyMessageLoading"
         ) { loading ->
             if (loading) {
