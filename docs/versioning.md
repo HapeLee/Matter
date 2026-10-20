@@ -63,6 +63,8 @@ CI 使用的 secrets：
 
 工作流把 keystore 解码到 `$RUNNER_TEMP`，再把四个 `RELEASE_*` 属性追加到 runner 上的 `gradle.properties`，不写入仓库。
 
+当前发布使用外部 keystore `E:\my-release-key.jks`（别名 `key0`，RSA 2048，有效期至 2050-08-10），证书 SHA-256 为 `ddc9ebf7c8a739e8ebb21903ee4363bc94eba114af33b05068431f9c04dcbb96`。密钥文件本身不在仓库内，只存在于发布者的机器与 secrets 中。
+
 本地需要签名时，把同样的四个属性写进用户级 `~/.gradle/gradle.properties`（不被版本控制跟踪），或在命令行传 `-PRELEASE_STORE_FILE=...`。**不要把它们写进仓库的 `gradle.properties`**。
 
 密钥必须异地备份：keystore 丢失意味着同一 `applicationId` 无法再发布升级包，用户只能卸载重装。首次发布前确认签名指纹，不要先用调试密钥发一版再更换。
