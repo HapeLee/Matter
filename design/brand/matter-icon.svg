@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <title>Matter cat-ear avatar</title>
+  <desc>A compact cat-ear character head inside a charcoal circular outline with a white interior. Silver lavender hair, restrained flat shadows, pale skin and a muted teal hairpin. Facial features are omitted. All shapes are editable vector paths.</desc>
+  <circle id="frame" cx="256" cy="256" r="228" fill="#FFFFFF" stroke="#30313B" stroke-width="14"/>
+  <g id="cat-head">
+    <path id="hair-silhouette" fill="#D8D6E5" d="M156 167 L119 112 Q111 102 112 116 L120 220 C104 248 105 289 120 319 L112 342 L132 337 C133 365 150 388 173 398 C221 420 294 421 340 396 C362 384 378 365 383 343 L402 350 C396 330 389 314 382 298 C390 247 378 202 355 177 L350 105 Q349 91 340 102 L297 156 C250 139 197 144 156 167 Z"/>
+    <g id="ear-interiors" fill="#9293A9">
+      <path d="M126 130 L135 199 Q148 181 164 174 Z"/>
+      <path d="M309 160 L340 117 L343 176 Z"/>
+    </g>
+    <path id="rear-hair-shadow" fill="#A4A3B8" d="M183 212 C162 256 161 322 184 352 C201 374 223 387 252 393 C288 385 316 368 331 341 C350 308 346 252 331 214 L354 216 C379 261 360 320 376 354 C366 372 354 386 340 396 C295 421 221 420 173 398 C150 388 133 365 132 337 C132 291 150 240 183 212 Z"/>
+    <g id="face">
+      <path fill="#FFF0E9" d="M216 192 C242 180 279 183 301 197 C327 214 339 239 338 261 C348 257 354 265 349 277 C346 285 341 290 333 292 C326 317 311 338 290 349 C281 354 273 356 264 356 C249 355 234 350 221 341 C198 325 188 302 187 277 C186 246 195 212 216 192 Z"/>
+      <path fill="#E8CCD0" d="M250 195 C268 214 299 234 328 241 C300 240 274 228 255 213 L247 255 Z"/>
+    </g>
+    <g id="swept-bangs">
+      <path fill="#D8D6E5" d="M156 167 C188 142 222 141 249 151 C232 162 224 186 222 211 C219 243 218 276 203 303 C192 322 194 337 205 349 C181 343 166 325 162 303 C159 326 165 348 179 366 C151 358 135 341 129 322 C118 283 127 211 156 167 Z"/>
+      <path fill="#A4A3B8" d="M213 166 C188 199 177 241 177 278 C177 305 184 323 195 335 C172 325 166 302 168 275 C171 233 187 191 213 166 Z"/>
+      <path fill="#BEBBD1" d="M241 159 C226 184 223 215 220 242 C217 273 210 298 195 315 C219 300 234 274 238 246 C242 214 242 185 254 164 Z"/>
+      <path fill="#E4E1ED" d="M244 164 C255 149 275 152 294 164 C320 180 344 213 347 245 C315 243 276 219 255 191 C250 213 247 236 241 254 C239 223 237 187 244 164 Z"/>
+      <path fill="#A4A3B8" d="M257 171 C285 183 315 213 337 237 C305 223 283 204 257 171 Z"/>
+    </g>
+    <g id="side-locks" fill="#D8D6E5">
+      <path d="M350 280 C339 319 346 353 370 371 C350 367 334 353 328 333 C325 313 334 293 350 280 Z"/>
+      <path d="M164 333 C172 363 196 382 224 390 C202 392 178 383 163 365 C158 356 158 344 164 333 Z"/>
+    </g>
+    <g id="hairpin" stroke="#86B9BC" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M276 181 L313 212"/>
+      <path d="M313 197 L304 217 L321 221"/>
+    </g>
+  </g>
+</svg>

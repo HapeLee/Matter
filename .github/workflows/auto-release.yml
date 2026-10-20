@@ -252,3 +252,23 @@ jobs:
             ARGS+=(--prerelease)
           fi
           gh release create "v$VERSION_NAME" dist/* "${ARGS[@]}"
+
+      # secrets 未配置时只跳过并留下 notice，不阻断已完成的 GitHub 发布
+      - name: Publish to Telegram
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TG_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          VERSION_NAME: ${{ needs.prepare.outputs.name }}
+          VERSION_CODE: ${{ needs.prepare.outputs.code }}
+          IS_RELEASE: ${{ needs.prepare.outputs.is_release }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TG_BOT_TOKEN:-}" || -z "${TG_CHAT_ID:-}" ]]; then
+            echo "::notice::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 未配置，跳过 Telegram 分发"
+            exit 0
+          fi
+          release_url=$(gh release view "v$VERSION_NAME" --json url --jq .url)
+          bash .github/scripts/notify-telegram.sh \
+            "$VERSION_NAME" "$VERSION_CODE" "$IS_RELEASE" notes.md \
+            "$(ls dist/*.apk)" "$release_url"

@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="940" viewBox="0 0 1600 940"><title>Matter / Core studies</title><rect width="1600" height="940" fill="#F3F2EC"/><text x="48" y="68" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="36" font-weight="600" fill="#252A27">Matter / 让中心成为标志</text><text x="50" y="108" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="20" font-weight="400" fill="#71756D">保留你调整后的金色圆环 · 相同尺寸、相同配色，比较中心轮廓</text><rect x="48" y="150" width="364" height="716" rx="24" fill="#FFFFFF"/><g transform="translate(60 171) scale(0.6640625)"><g xmlns="http://www.w3.org/2000/svg" id="ring"><circle cx="256" cy="256" r="186" stroke="#E6A52E" stroke-width="26" fill="none" /></g><g xmlns="http://www.w3.org/2000/svg" id="fries-m"><rect x="-20" y="-73.751" width="40" height="147.503" rx="8" fill="#252A27" transform="translate(161.5 257) rotate(-8.185)" /><rect x="-18" y="-36.056" width="36" height="72.111" rx="8" fill="#252A27" transform="translate(223 229) rotate(-19.440)" /><rect x="-18" y="-36.056" width="36" height="72.111" rx="8" fill="#252A27" transform="translate(289 229) rotate(-160.560)" /><rect x="-20" y="-73.751" width="40" height="147.503" rx="8" fill="#252A27" transform="translate(350.5 257) rotate(8.185)" /></g></g><text x="72" y="551" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="25" font-weight="600" fill="#252A27">现版 / 分段 M</text><text x="72" y="587" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="16" font-weight="400" fill="#71756D">四段各自成立，整体轮廓偏弱</text><path d="M72 619H388" stroke="#E8E9E1"/><text x="72" y="650" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="15" font-weight="400" fill="#71756D">中心单独看</text><g transform="translate(56 665) scale(0.3515625)"><g xmlns="http://www.w3.org/2000/svg" id="fries-m"><rect x="-20" y="-73.751" width="40" height="147.503" rx="8" fill="#252A27" transform="translate(161.5 257) rotate(-8.185)" /><rect x="-18" y="-36.056" width="36" height="72.111" rx="8" fill="#252A27" transform="translate(223 229) rotate(-19.440)" /><rect x="-18" y="-36.056" width="36" height="72.111" rx="8" fill="#252A27" transform="translate(289 229) rotate(-160.560)" /><rect x="-20" y="-73.751" width="40" height="147.503" rx="8" fill="#252A27" transform="translate(350.5 257) rotate(8.185)" /></g></g><text x="238" y="650" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="15" font-weight="400" fill="#71756D">48 / 32 px</text><g transform="translate(244 718.0) scale(0.09375)"><g transform="translate(256 256) scale(0.99) translate(-256 -256)"><g xmlns="http://www.w3.org/2000/svg" id="ring"><circle cx="256" cy="256" r="186" stroke="#E6A52E" stroke-width="26" fill="none" /></g><g xmlns="http://www.w3.org/2000/svg" id="fries-m"><rect x="-20" y="-73.751" width="40" height="147.503" rx="8" fill="#252A27" transform="translate(161.5 257) rotate(-8.185)" /><rect x="-18" y="-36.056" width="36" height="72.111" rx="8" fill="#252A27" transform="translate(223 229) rotate(-19.440)" /><rect x="-18" y="-36.056" width="36" height="72.111" rx="8" fill="#252A27" transform="translate(289 229) rotate(-160.560)" /><rect x="-20" y="-73.751" width="40" height="147.503" rx="8" fill="#252A27" transform="translate(350.5 257) rotate(8.185)" /></g></g></g><g transform="translate(321 726.0) scale(0.0625)"><g transform="translate(256 256) scale(0.99) translate(-256 -256)"><g xmlns="http://www.w3.org/2000/svg" id="ring"><circle cx="256" cy="256" r="186" stroke="#E6A52E" stroke-width="26" fill="none" /></g><g xmlns="http://www.w3.org/2000/svg" id="fries-m"><rect x="-20" y="-73.751" width="40" height="147.503" rx="8" fill="#252A27" transform="translate(161.5 257) rotate(-8.185)" /><rect x="-18" y="-36.056" width="36" height="72.111" rx="8" fill="#252A27" transform="translate(223 229) rotate(-19.440)" /><rect x="-18" y="-36.056" width="36" height="72.111" rx="8" fill="#252A27" transform="translate(289 229) rotate(-160.560)" /><rect x="-20" y="-73.751" width="40" height="147.503" rx="8" fill="#252A27" transform="translate(350.5 257) rotate(8.185)" /></g></g></g><rect x="436" y="150" width="364" height="716" rx="24" fill="#FFFFFF"/><g transform="translate(448 171) scale(0.6640625)"><g xmlns="http://www.w3.org/2000/svg" id="ring"><circle cx="256" cy="256" r="186" stroke="#E6A52E" stroke-width="26" fill="none" /></g><g fill="#252A27">
+<path fill-rule="evenodd" d="
+M256 143
+C284 143 297 174 316 191
+C335 209 368 221 368 251
+C368 282 337 295 318 315
+C299 335 285 366 255 366
+C225 366 212 336 192 317
+C172 298 142 284 142 254
+C142 224 172 211 192 191
+C212 171 226 143 256 143 Z
+M281 216
+A29 29 0 1 0 281 274
+A29 29 0 1 0 281 216 Z"/>
+</g></g><text x="460" y="551" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="25" font-weight="600" fill="#252A27">A / 凝核</text><text x="460" y="587" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="16" font-weight="400" fill="#71756D">柔软实体＋偏心留白，更有物质感</text><path d="M460 619H776" stroke="#E8E9E1"/><text x="460" y="650" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="15" font-weight="400" fill="#71756D">中心单独看</text><g transform="translate(444 665) scale(0.3515625)"><g fill="#252A27">
+<path fill-rule="evenodd" d="
+M256 143
+C284 143 297 174 316 191
+C335 209 368 221 368 251
+C368 282 337 295 318 315
+C299 335 285 366 255 366
+C225 366 212 336 192 317
+C172 298 142 284 142 254
+C142 224 172 211 192 191
+C212 171 226 143 256 143 Z
+M281 216
+A29 29 0 1 0 281 274
+A29 29 0 1 0 281 216 Z"/>
+</g></g><text x="626" y="650" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="15" font-weight="400" fill="#71756D">48 / 32 px</text><g transform="translate(632 718.0) scale(0.09375)"><g transform="translate(256 256) scale(0.99) translate(-256 -256)"><g xmlns="http://www.w3.org/2000/svg" id="ring"><circle cx="256" cy="256" r="186" stroke="#E6A52E" stroke-width="26" fill="none" /></g><g fill="#252A27">
+<path fill-rule="evenodd" d="
+M256 143
+C284 143 297 174 316 191
+C335 209 368 221 368 251
+C368 282 337 295 318 315
+C299 335 285 366 255 366
+C225 366 212 336 192 317
+C172 298 142 284 142 254
+C142 224 172 211 192 191
+C212 171 226 143 256 143 Z
+M281 216
+A29 29 0 1 0 281 274
+A29 29 0 1 0 281 216 Z"/>
+</g></g></g><g transform="translate(709 726.0) scale(0.0625)"><g transform="translate(256 256) scale(0.99) translate(-256 -256)"><g xmlns="http://www.w3.org/2000/svg" id="ring"><circle cx="256" cy="256" r="186" stroke="#E6A52E" stroke-width="26" fill="none" /></g><g fill="#252A27">
+<path fill-rule="evenodd" d="
+M256 143
+C284 143 297 174 316 191
+C335 209 368 221 368 251
+C368 282 337 295 318 315
+C299 335 285 366 255 366
+C225 366 212 336 192 317
+C172 298 142 284 142 254
+C142 224 172 211 192 191
+C212 171 226 143 256 143 Z
+M281 216
+A29 29 0 1 0 281 274
+A29 29 0 1 0 281 216 Z"/>
+</g></g></g><rect x="824" y="150" width="364" height="716" rx="24" fill="#FFFFFF"/><g transform="translate(836 171) scale(0.6640625)"><g xmlns="http://www.w3.org/2000/svg" id="ring"><circle cx="256" cy="256" r="186" stroke="#E6A52E" stroke-width="26" fill="none" /></g><g fill="#252A27"><g transform="rotate(0 256 256)"><path d="M241 155 C254 148 268 153 276 166 L310 222 C318 236 314 249 300 257 C287 265 273 261 265 247 L231 192 C223 178 227 163 241 155 Z"/></g><g transform="rotate(120 256 256)"><path d="M241 155 C254 148 268 153 276 166 L310 222 C318 236 314 249 300 257 C287 265 273 261 265 247 L231 192 C223 178 227 163 241 155 Z"/></g><g transform="rotate(240 256 256)"><path d="M241 155 C254 148 268 153 276 166 L310 222 C318 236 314 249 300 257 C287 265 273 261 265 247 L231 192 C223 178 227 163 241 155 Z"/></g></g></g><text x="848" y="551" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="25" font-weight="600" fill="#252A27">B / 聚合</text><text x="848" y="587" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="16" font-weight="400" fill="#71756D">三个单元向心旋转，更有运动感</text><path d="M848 619H1164" stroke="#E8E9E1"/><text x="848" y="650" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="15" font-weight="400" fill="#71756D">中心单独看</text><g transform="translate(832 665) scale(0.3515625)"><g fill="#252A27"><g transform="rotate(0 256 256)"><path d="M241 155 C254 148 268 153 276 166 L310 222 C318 236 314 249 300 257 C287 265 273 261 265 247 L231 192 C223 178 227 163 241 155 Z"/></g><g transform="rotate(120 256 256)"><path d="M241 155 C254 148 268 153 276 166 L310 222 C318 236 314 249 300 257 C287 265 273 261 265 247 L231 192 C223 178 227 163 241 155 Z"/></g><g transform="rotate(240 256 256)"><path d="M241 155 C254 148 268 153 276 166 L310 222 C318 236 314 249 300 257 C287 265 273 261 265 247 L231 192 C223 178 227 163 241 155 Z"/></g></g></g><text x="1014" y="650" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="15" font-weight="400" fill="#71756D">48 / 32 px</text><g transform="translate(1020 718.0) scale(0.09375)"><g transform="translate(256 256) scale(0.99) translate(-256 -256)"><g xmlns="http://www.w3.org/2000/svg" id="ring"><circle cx="256" cy="256" r="186" stroke="#E6A52E" stroke-width="26" fill="none" /></g><g fill="#252A27"><g transform="rotate(0 256 256)"><path d="M241 155 C254 148 268 153 276 166 L310 222 C318 236 314 249 300 257 C287 265 273 261 265 247 L231 192 C223 178 227 163 241 155 Z"/></g><g transform="rotate(120 256 256)"><path d="M241 155 C254 148 268 153 276 166 L310 222 C318 236 314 249 300 257 C287 265 273 261 265 247 L231 192 C223 178 227 163 241 155 Z"/></g><g transform="rotate(240 256 256)"><path d="M241 155 C254 148 268 153 276 166 L310 222 C318 236 314 249 300 257 C287 265 273 261 265 247 L231 192 C223 178 227 163 241 155 Z"/></g></g></g></g><g transform="translate(1097 726.0) scale(0.0625)"><g transform="translate(256 256) scale(0.99) translate(-256 -256)"><g xmlns="http://www.w3.org/2000/svg" id="ring"><circle cx="256" cy="256" r="186" stroke="#E6A52E" stroke-width="26" fill="none" /></g><g fill="#252A27"><g transform="rotate(0 256 256)"><path d="M241 155 C254 148 268 153 276 166 L310 222 C318 236 314 249 300 257 C287 265 273 261 265 247 L231 192 C223 178 227 163 241 155 Z"/></g><g transform="rotate(120 256 256)"><path d="M241 155 C254 148 268 153 276 166 L310 222 C318 236 314 249 300 257 C287 265 273 261 265 247 L231 192 C223 178 227 163 241 155 Z"/></g><g transform="rotate(240 256 256)"><path d="M241 155 C254 148 268 153 276 166 L310 222 C318 236 314 249 300 257 C287 265 273 261 265 247 L231 192 C223 178 227 163 241 155 Z"/></g></g></g></g><rect x="1212" y="150" width="364" height="716" rx="24" fill="#FFFFFF"/><g transform="translate(1224 171) scale(0.6640625)"><g xmlns="http://www.w3.org/2000/svg" id="ring"><circle cx="256" cy="256" r="186" stroke="#E6A52E" stroke-width="26" fill="none" /></g><path d="M165 325 V199
+Q165 182 181 182 Q189 182 197 194
+L256 278 L315 194
+Q323 182 331 182 Q347 182 347 199 V325"
+fill="none" stroke="#252A27" stroke-width="42"
+stroke-linecap="round" stroke-linejoin="round"/></g><text x="1236" y="551" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="25" font-weight="600" fill="#252A27">C / 连笔 M</text><text x="1236" y="587" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="16" font-weight="400" fill="#71756D">连接笔画、拉深中谷，字形更明确</text><path d="M1236 619H1552" stroke="#E8E9E1"/><text x="1236" y="650" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="15" font-weight="400" fill="#71756D">中心单独看</text><g transform="translate(1220 665) scale(0.3515625)"><path d="M165 325 V199
+Q165 182 181 182 Q189 182 197 194
+L256 278 L315 194
+Q323 182 331 182 Q347 182 347 199 V325"
+fill="none" stroke="#252A27" stroke-width="42"
+stroke-linecap="round" stroke-linejoin="round"/></g><text x="1402" y="650" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="15" font-weight="400" fill="#71756D">48 / 32 px</text><g transform="translate(1408 718.0) scale(0.09375)"><g transform="translate(256 256) scale(0.99) translate(-256 -256)"><g xmlns="http://www.w3.org/2000/svg" id="ring"><circle cx="256" cy="256" r="186" stroke="#E6A52E" stroke-width="26" fill="none" /></g><path d="M165 325 V199
+Q165 182 181 182 Q189 182 197 194
+L256 278 L315 194
+Q323 182 331 182 Q347 182 347 199 V325"
+fill="none" stroke="#252A27" stroke-width="42"
+stroke-linecap="round" stroke-linejoin="round"/></g></g><g transform="translate(1485 726.0) scale(0.0625)"><g transform="translate(256 256) scale(0.99) translate(-256 -256)"><g xmlns="http://www.w3.org/2000/svg" id="ring"><circle cx="256" cy="256" r="186" stroke="#E6A52E" stroke-width="26" fill="none" /></g><path d="M165 325 V199
+Q165 182 181 182 Q189 182 197 194
+L256 278 L315 194
+Q323 182 331 182 Q347 182 347 199 V325"
+fill="none" stroke="#252A27" stroke-width="42"
+stroke-linecap="round" stroke-linejoin="round"/></g></g><text x="48" y="910" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="19" font-weight="400" fill="#71756D">建议优先看 A 的实体感、C 的辨识度；B 更活跃，但也更接近常见旋转符号。</text></svg>
