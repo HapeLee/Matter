@@ -27,7 +27,6 @@ import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -40,14 +39,13 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
-import org.kazusa.matter.core.network.ApiResult
+import org.kazusa.matter.core.util.parseInteractionCount
 import org.kazusa.matter.data.cache.UserAvatarCache
 import org.kazusa.matter.data.model.VideoStreamInfo
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -61,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import org.kazusa.matter.core.util.TimeUtils
 import org.kazusa.matter.core.util.WeiboTextFormatter
 import org.kazusa.matter.data.model.WeiboStatusDto
+import org.kazusa.matter.data.repository.LikeState
 import org.kazusa.matter.ui.media.morph.LocalImageMorphState
 import androidx.compose.ui.graphics.RectangleShape
 import org.kazusa.matter.ui.detail.PostDetailCache
@@ -423,10 +422,10 @@ private fun PostCardContent(
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ActionButton(
+            WeiboActionButton(
                 icon = Icons.Outlined.Repeat,
                 count = post.repostsCount,
-                defaultLabel = "转发",
+                label = "转发",
                 onClick = {}
             )
             VerticalDivider(
@@ -434,10 +433,10 @@ private fun PostCardContent(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                 thickness = 0.8.dp
             )
-            ActionButton(
+            WeiboActionButton(
                 icon = Icons.Outlined.ChatBubbleOutline,
                 count = post.commentsCount,
-                defaultLabel = "评论",
+                label = "评论",
                 onClick = {
                     if (morphState?.isPresent != true) {
                         onCommentClick(post)
@@ -615,50 +614,6 @@ private fun RetweetCard(
     }
 }
 
-@Composable
-private fun ActionButton(
-    icon: ImageVector,
-    count: String,
-    defaultLabel: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    tint: Color? = null,
-    busy: Boolean = false,
-    enabled: Boolean = true
-) {
-    val contentColor = tint ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
-    Row(
-        modifier = modifier
-            .height(38.dp)
-            .clip(MaterialTheme.shapes.small)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        if (busy) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(14.dp),
-                strokeWidth = 1.5.dp,
-                color = contentColor
-            )
-        } else {
-            Icon(
-                imageVector = icon,
-                contentDescription = defaultLabel,
-                tint = contentColor,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = formatCount(count, defaultLabel),
-            style = MaterialTheme.typography.labelMedium,
-            color = contentColor
-        )
-    }
-}
-
 /**
  * 信息流卡片的点赞按钮。
  *
@@ -670,70 +625,39 @@ private fun PostLikeActionButton(
     post: WeiboStatusDto,
     modifier: Modifier = Modifier
 ) {
-    val apiService = LocalWeiboApiService.current
-    val scope = LocalFavoriteActionScope.current ?: rememberCoroutineScope()
+    val repository = LocalLikeRepository.current
+    // 请求交给会话级 scope：列表项被回收时点赞仍会完成，不会留下永久 pending
+    val scope = LocalUserActionScope.current ?: rememberCoroutineScope()
     val snackbarHostState = LocalSnackbarHostState.current
     val context = LocalContext.current
     val morphState = LocalImageMorphState.current
-    val key = remember(post.idStr, post.mid, post.id) { PostLikeStore.keyOf(post) }
-    val likeState = PostLikeStore.resolve(post)
+    val likeState = repository?.postState(post, LocalPostLikeStates.current)
+        ?: LikeState(post.isLiked, parseInteractionCount(post.attitudesCount))
 
     val onLikeClick: () -> Unit = {
-        if (morphState?.isPresent != true && apiService != null && key.isNotBlank() && !likeState.pending) {
-            val previous = likeState.copy(pending = false)
-            val newLiked = !previous.liked
-            val newCount = previous.count?.let { count ->
-                if (newLiked) count + 1 else (count - 1).coerceAtLeast(0)
-            }
-            PostLikeStore.put(key, PostLikeState(newLiked, newCount, pending = true))
+        if (morphState?.isPresent != true && repository != null && !likeState.pending) {
             scope.launch {
-                when (val result = apiService.setAttitude(key, newLiked)) {
-                    is ApiResult.Success -> {
-                        PostLikeStore.put(key, PostLikeState(newLiked, newCount))
-                        PostDetailCache.get(key)?.let { cached ->
-                            PostDetailCache.put(
-                                cached.copy(
-                                    isLiked = newLiked,
-                                    attitudesCount = newCount?.toString() ?: cached.attitudesCount
-                                )
-                            )
-                        }
-                    }
-                    is ApiResult.Error -> {
-                        PostLikeStore.put(key, previous)
-                        val message = result.message.ifBlank { "操作失败，请重试" }
-                        if (snackbarHostState != null) {
-                            snackbarHostState.currentSnackbarData?.dismiss()
-                            snackbarHostState.showSnackbar(message = message, duration = SnackbarDuration.Short)
-                        } else {
-                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                    ApiResult.Loading -> PostLikeStore.put(key, previous)
+                val message = repository.togglePost(post) ?: return@launch
+                if (snackbarHostState != null) {
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                    snackbarHostState.showSnackbar(message = message, duration = SnackbarDuration.Short)
+                } else {
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
 
-    ActionButton(
+    WeiboActionButton(
         icon = if (likeState.liked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
         count = likeState.count?.toString() ?: post.attitudesCount,
-        defaultLabel = "赞",
+        label = "赞",
         tint = if (likeState.liked) MaterialTheme.colorScheme.primary else null,
         busy = likeState.pending,
-        enabled = apiService != null && key.isNotBlank(),
+        enabled = repository != null,
         onClick = onLikeClick,
         modifier = modifier
     )
-}
-
-private fun formatCount(countStr: String, defaultLabel: String): String {
-    if (countStr.isBlank() || countStr == "0") return defaultLabel
-    val countInt = countStr.toIntOrNull() ?: return countStr
-    return when {
-        countInt >= 10_000 -> String.format("%.1f万", countInt / 10_000.0)
-        else -> countInt.toString()
-    }
 }
 
 private fun formatSubtitle(createdAt: String, source: String?, regionName: String? = null): String {

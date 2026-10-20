@@ -20,7 +20,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -29,27 +28,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import org.kazusa.matter.core.network.ApiResult
-import org.kazusa.matter.core.network.WeiboApiService
-import org.kazusa.matter.data.model.CommentsDataDto
+import org.kazusa.matter.core.util.parseInteractionCount
 import org.kazusa.matter.data.model.WeiboCommentDto
+import org.kazusa.matter.data.repository.LikeState
+import org.kazusa.matter.ui.components.LocalCommentLikeStates
+import org.kazusa.matter.ui.components.LocalLikeRepository
 import org.kazusa.matter.ui.components.LocalSnackbarHostState
+import org.kazusa.matter.ui.components.LocalUserActionScope
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-
-/** Keep previews when paging, remove the root and overlapping replies by server identity. */
-internal fun mergeCommentReplies(
-    existing: List<WeiboCommentDto>,
-    incoming: List<WeiboCommentDto>,
-    rootId: Long?
-): List<WeiboCommentDto> {
-    val replies = linkedMapOf<Any, WeiboCommentDto>()
-    (existing + incoming).forEach { reply ->
-        if (rootId == null || reply.id != rootId) replies[reply.id ?: reply] = reply
-    }
-    return replies.values.toList()
-}
 
 /**
  * 折叠状态下点「展开」实际会多出来的回复条数。
@@ -68,45 +54,11 @@ private fun hiddenReplyCount(
     return hiddenLoaded + notLoaded
 }
 
-@Serializable
-internal data class CommentRepliesState(
-    val replies: List<WeiboCommentDto>,
-    val expanded: Boolean = false,
-    val loading: Boolean = false,
-    val error: String? = null,
-    val loadedPage: Boolean = false,
-    val nextMaxId: Long = 0,
-    val nextMaxIdType: Int = 0,
-    val hasMore: Boolean = false,
-    /**
-     * 已确认这条评论拉不到任何回复（例如开启精选评论后楼中楼接口直接回「暂无数据」）。
-     * 置位后不再展示「展开 N 条回复」，避免点了之后空空如也。
-     */
-    val repliesUnavailable: Boolean = false
-) {
-    fun withPage(page: CommentsDataDto, rootId: Long?): CommentRepliesState {
-        val cursor = page.maxId ?: 0
-        val merged = mergeCommentReplies(replies, page.data, rootId)
-        return copy(
-            replies = merged,
-            loading = false,
-            error = null,
-            loadedPage = true,
-            nextMaxId = cursor,
-            nextMaxIdType = page.maxIdType ?: 0,
-            hasMore = page.data.isNotEmpty() && cursor > 0 && cursor != nextMaxId,
-            repliesUnavailable = merged.isEmpty() && page.data.isEmpty()
-        )
-    }
-}
-
-private val commentRepliesSaver = Saver<CommentRepliesState, String>(
-    save = { Json.encodeToString(it.copy(loading = false)) },
-    restore = { Json.decodeFromString<CommentRepliesState>(it) }
-)
-
 /**
  * 单条评论（含其嵌套回复）。
+ *
+ * 回复列表、游标与加载状态由 `PostDetailViewModel` 按评论 id 管理（见 [repliesProvider] /
+ * [onLoadReplies]）；这里只保留「展开 / 收起」这类纯界面状态。
  *
  * [depth] 表示嵌套层级：0 是一级评论，>0 是回复。层级只影响缩进与字号，
  * 不影响数据结构，所以「回复的回复」仍会按各自的服务端 id 独立分页与点赞。
@@ -114,8 +66,10 @@ private val commentRepliesSaver = Saver<CommentRepliesState, String>(
 @Composable
 internal fun CommentThread(
     comment: WeiboCommentDto,
-    postId: String,
-    apiService: WeiboApiService,
+    /** 按评论读取其楼中楼状态；状态由详情 ViewModel 持有。 */
+    repliesProvider: (WeiboCommentDto) -> CommentRepliesState,
+    /** 请求下一页回复；请求与并发控制在详情 ViewModel 内完成。 */
+    onLoadReplies: (WeiboCommentDto) -> Unit,
     postAuthorId: Long?,
     postAuthorName: String?,
     onUserClick: (Long?) -> Unit,
@@ -127,13 +81,16 @@ internal fun CommentThread(
     approvalCommentsOnly: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    var state by rememberSaveable(
-        comment.id ?: comment.listKey,
-        stateSaver = commentRepliesSaver
-    ) {
-        mutableStateOf(CommentRepliesState(mergeCommentReplies(emptyList(), comment.comments, comment.id)))
-    }
+    val state = repliesProvider(comment)
+    // 展开 / 收起是纯界面状态：只需存一个 Bool，不必把回复正文写进 saveable
+    var expanded by rememberSaveable(comment.id ?: comment.listKey) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    // 点赞请求必须跑在会话级 scope 上：评论项划出屏幕被回收时请求仍会完成，
+    // 不会把 pending 永久留在共享状态里
+    val actionScope = LocalUserActionScope.current ?: scope
+    val likeRepository = LocalLikeRepository.current
+    val likeState = likeRepository?.commentState(comment, LocalCommentLikeStates.current)
+        ?: LikeState(comment.isLiked, parseInteractionCount(comment.likeCount))
     val snackbarHostState = LocalSnackbarHostState.current
     val context = LocalContext.current
     val isReply = depth > 0
@@ -141,7 +98,7 @@ internal fun CommentThread(
     fun showMessage(message: String) {
         if (message.isBlank()) return
         if (snackbarHostState != null) {
-            scope.launch {
+            actionScope.launch {
                 snackbarHostState.currentSnackbarData?.dismiss()
                 snackbarHostState.showSnackbar(message = message, duration = SnackbarDuration.Short)
             }
@@ -151,24 +108,11 @@ internal fun CommentThread(
     }
 
     fun toggleLike() {
-        val commentId = comment.id ?: return
-        val current = CommentLikeStore.resolve(comment)
-        if (current.pending) return
-        val newLiked = !current.liked
-        val newCount = current.count?.let { count ->
-            if (newLiked) count + 1 else (count - 1).coerceAtLeast(0)
-        }
-        CommentLikeStore.put(commentId, current.copy(liked = newLiked, count = newCount, pending = true))
-        scope.launch {
-            when (val result = apiService.setAttitude(commentId.toString(), newLiked)) {
-                is ApiResult.Success ->
-                    CommentLikeStore.put(commentId, CommentLikeState(newLiked, newCount))
-                is ApiResult.Error -> {
-                    CommentLikeStore.put(commentId, current.copy(pending = false))
-                    showMessage(result.message.ifBlank { "操作失败，请重试" })
-                }
-                ApiResult.Loading -> CommentLikeStore.put(commentId, current.copy(pending = false))
-            }
+        val repository = likeRepository ?: return
+        if (likeState.pending) return
+        actionScope.launch {
+            val message = repository.toggleComment(comment) ?: return@launch
+            showMessage(message)
         }
     }
 
@@ -183,18 +127,8 @@ internal fun CommentThread(
     }
 
     fun loadMore() {
-        val commentId = comment.id ?: return
-        if (state.loading) return
-        val cursor = state.nextMaxId
-        val cursorType = state.nextMaxIdType
-        state = state.copy(loading = true, error = null)
-        scope.launch {
-            when (val result = apiService.getCommentReplies(postId, commentId, cursor, cursorType)) {
-                is ApiResult.Success -> state = state.withPage(result.data, commentId)
-                is ApiResult.Error -> state = state.copy(loading = false, error = result.message)
-                ApiResult.Loading -> state = state.copy(loading = false)
-            }
-        }
+        if (comment.id == null || state.loading) return
+        onLoadReplies(comment)
     }
 
     val isPostAuthor = (comment.user?.id != null && comment.user.id == postAuthorId) ||
@@ -202,6 +136,7 @@ internal fun CommentThread(
     Column(modifier = modifier) {
         CommentRow(
             comment = comment,
+            likeState = likeState,
             isPostAuthor = isPostAuthor,
             isReply = isReply,
             onUserClick = onUserClick,
@@ -224,13 +159,13 @@ internal fun CommentThread(
                     .background(MaterialTheme.colorScheme.surfaceContainer)
                     .animateContentSize()
             ) {
-                val visibleReplies = if (state.expanded) state.replies else state.replies.take(3)
+                val visibleReplies = if (expanded) state.replies else state.replies.take(3)
                 visibleReplies.forEach { reply ->
                     androidx.compose.runtime.key(reply.listKey) {
                         CommentThread(
                             comment = reply,
-                            postId = postId,
-                            apiService = apiService,
+                            repliesProvider = repliesProvider,
+                            onLoadReplies = onLoadReplies,
                             postAuthorId = postAuthorId,
                             postAuthorName = postAuthorName,
                             onUserClick = onUserClick,
@@ -261,20 +196,20 @@ internal fun CommentThread(
                             modifier = Modifier.align(Alignment.CenterHorizontally)
                         )
                     }
-                    !state.expanded && (state.replies.size > 3 || canFetch) -> {
+                    !expanded && (state.replies.size > 3 || canFetch) -> {
                         // hotflow 只下发前几条回复预览（常常少于 total_number），
                         // 所以按钮上要报的是「点了之后还会多出来几条」：已折叠掉的 + 还没下发的
                         val remaining = hiddenReplyCount(comment, state, visibleReplies.size)
                         CommentReplyAction(
                             text = if (remaining > 0) "展开其余 $remaining 条回复" else "展开回复",
                             onClick = {
-                                state = state.copy(expanded = true)
+                                expanded = true
                                 if (canFetch && !state.loadedPage) loadMore()
                             },
                             modifier = Modifier.align(Alignment.CenterHorizontally)
                         )
                     }
-                    state.expanded && canFetch -> {
+                    expanded && canFetch -> {
                         val notLoaded = ((comment.totalNumber ?: 0) - state.replies.size).coerceAtLeast(0)
                         CommentReplyAction(
                             text = if (notLoaded > 0) "加载其余 $notLoaded 条回复" else "加载更多回复",
@@ -283,11 +218,11 @@ internal fun CommentThread(
                         )
                     }
                 }
-                if (state.expanded) {
+                if (expanded) {
                     CommentReplyAction(
                         text = "收起回复",
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        onClick = { state = state.copy(expanded = false) },
+                        onClick = { expanded = false },
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     )
                 }

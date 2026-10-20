@@ -289,8 +289,8 @@ fun VideoPlayerScreen(
         }
     }
 
-    // 生命周期与按 Home 键（Android 8-11）监听兜底
-    DisposableEffect(Unit) {
+    // 按 Home 键（Android 8-11）监听兜底：只依赖监听相关的键，不跟随播放器重建
+    DisposableEffect(exoPlayer, activity, isPipSupported) {
         val mainActivity = activity as? MainActivity
         if (mainActivity != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isPipSupported) {
             mainActivity.onUserLeaveHintListener = {
@@ -308,8 +308,13 @@ fun VideoPlayerScreen(
                     )
                 } catch (_: Exception) {}
             }
-            exoPlayer.release()
         }
+    }
+
+    // 资源释放跟着播放器实例走：videoUrl 变化会重建 exoPlayer，
+    // 用 DisposableEffect(Unit) 会捕获旧实例，导致新播放器不被释放
+    DisposableEffect(exoPlayer) {
+        onDispose { exoPlayer.release() }
     }
 
     // 监听视频是否已渲染出首帧（首帧渲染前显示封面垫底，避免黑屏过渡）

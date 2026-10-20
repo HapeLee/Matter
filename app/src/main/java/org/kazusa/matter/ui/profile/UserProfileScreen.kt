@@ -83,7 +83,7 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.Animatable
@@ -121,10 +121,9 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -134,6 +133,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -141,14 +141,11 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import org.kazusa.matter.core.network.ApiResult
-import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.data.cache.UserAvatarCache
 import org.kazusa.matter.data.model.UserAlbum
 import org.kazusa.matter.data.model.UserProfileDetail
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.model.WeiboUserDto
-import org.kazusa.matter.data.repository.BrowsingHistoryRepository
 import org.kazusa.matter.ui.components.BloggerSuffixTag
 import org.kazusa.matter.ui.components.UserVerifyBadge
 import org.kazusa.matter.ui.components.UserVipBadge
@@ -163,9 +160,9 @@ import org.kazusa.matter.ui.navigation.weiboAvatarBadgeSharedElement
 import org.kazusa.matter.ui.navigation.weiboAvatarSharedElement
 import org.kazusa.matter.core.util.WeiboTextFormatter
 import coil3.compose.AsyncImage
-import kotlinx.coroutines.async
-import kotlinx.coroutines.launch
 import org.kazusa.matter.ui.components.TopBarNavigationButton
+import org.koin.compose.viewmodel.koinViewModel
+import org.koin.core.parameter.parametersOf
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -174,8 +171,6 @@ fun UserProfileScreen(
     initialScreenName: String = "",
     /** 当前登录用户 uid，用于判断是否为本人主页（本人不展示关注按钮） */
     currentUid: String = "",
-    apiService: WeiboApiService,
-    historyRepository: BrowsingHistoryRepository,
     onBackClick: () -> Unit,
     onUserClick: (Long?) -> Unit = {},
     onPostClick: (WeiboStatusDto) -> Unit,
@@ -185,63 +180,70 @@ fun UserProfileScreen(
     onTopicClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var userProfile by remember { mutableStateOf<WeiboUserDto?>(null) }
-    var posts by remember { mutableStateOf<List<WeiboStatusDto>>(emptyList()) }
-    var totalCount by remember { mutableStateOf<Int?>(null) }
-    var currentPage by remember { mutableIntStateOf(1) }
-    var hasMore by remember { mutableStateOf(true) }
-    var isInitialLoading by remember { mutableStateOf(true) }
-    var isRefreshing by remember { mutableStateOf(false) }
-    var isLoadingMore by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    // PC 端「资料」模块（生日/教育/职业/阳光信用等），失败时保持 null 即可
-    var profileDetail by remember { mutableStateOf<UserProfileDetail?>(null) }
-    var isDetailLoading by remember { mutableStateOf(false) }
-    var detailLoadFailed by remember { mutableStateOf(false) }
-    var showDetailSheet by remember { mutableStateOf(false) }
+    // 数据状态由 NavEntry 级 ViewModel 持有：rememberViewModelStoreNavEntryDecorator 保证
+    // 「主页 → 微博正文 → 返回」这一程里 ViewModel 不被销毁，返回时列表首帧即有内容，
+    // 滚动位置也才有落点可还原（列表为空时 LazyListState 会把下标压回 0）。
+    val viewModel: UserProfileViewModel = koinViewModel { parametersOf(uid) }
 
-    // 关注按钮
-    var isFollowUpdating by remember(uid) { mutableStateOf(false) }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // 页面状态按 tab 拆开：这里只做拍平，渲染代码保持原来的命名
+    val header = uiState.header
+    val userProfile = header.user
+    val profileDetail = header.detail
+    val isDetailLoading = header.isDetailLoading
+    val detailLoadFailed = header.detailLoadFailed
+
+    val postsState = uiState.posts
+    val posts = postsState.items
+    val totalCount = postsState.totalCount
+    val currentPage = postsState.page
+    val hasMore = postsState.hasMore
+    val isInitialLoading = postsState.isInitialLoading
+    val isLoadingMore = postsState.isLoadingMore
+    val errorMessage = postsState.error
+    val isRefreshing = uiState.isRefreshing
+    val selectedTab = uiState.selectedTab
+
+    val albumState = uiState.album
+    val albums = albumState.items
+    val isAlbumsLoading = albumState.isLoading
+    val albumsError = albumState.error
+    val openedAlbum = albumState.opened
+    val albumPhotos = albumState.photos
+    val albumPhotosHasMore = albumState.photosHasMore
+    val isAlbumPhotosLoading = albumState.isPhotosLoading
+    val albumPhotosError = albumState.photosError
+
+    val videoState = uiState.video
+    val videos = videoState.items
+    val isVideosLoading = videoState.isLoading
+    val videosHasMore = videoState.hasMore
+    val videosError = videoState.error
+
+    val articleState = uiState.article
+    val articles = articleState.items
+    val isArticlesLoading = articleState.isLoading
+    val articlesHasMore = articleState.hasMore
+    val articlesError = articleState.error
+
+    // 只在本页生命周期内有效的瞬时 UI 状态（弹窗、资料弹层）
+    var showDetailSheet by remember { mutableStateOf(false) }
     var showUnfollowDialog by remember(uid) { mutableStateOf(false) }
-    var followActionError by remember(uid) { mutableStateOf<String?>(null) }
     val isSelfProfile = currentUid.isNotBlank() && currentUid == uid
 
-    // 主页 tab：微博 / 相册 / 视频 / 文章
-    var selectedTab by remember { mutableStateOf(ProfileTab.POSTS) }
+    // 关注状态来自数据层的共享关注仓库：列表页点过的结果在这里同样生效
+    val followState = uiState.follow
+    val isFollowing = followState?.following == true
+    val isFollowUpdating = followState?.updating == true
+    val followActionError = uiState.followActionError
 
-    // 相册
-    var albums by remember { mutableStateOf<List<UserAlbum>>(emptyList()) }
-    var albumsLoaded by remember { mutableStateOf(false) }
-    var isAlbumsLoading by remember { mutableStateOf(false) }
-    var albumsError by remember { mutableStateOf<String?>(null) }
-    var openedAlbum by remember { mutableStateOf<UserAlbum?>(null) }
-    var albumPhotos by remember { mutableStateOf<List<String>>(emptyList()) }
-    var albumPhotoCursor by remember { mutableStateOf("0") }
-    var albumPhotosHasMore by remember { mutableStateOf(false) }
-    var isAlbumPhotosLoading by remember { mutableStateOf(false) }
-    var albumPhotosError by remember { mutableStateOf<String?>(null) }
 
-    // 视频
-    var videos by remember { mutableStateOf<List<WeiboStatusDto>>(emptyList()) }
-    var videoCursor by remember { mutableStateOf("0") }
-    var videosLoaded by remember { mutableStateOf(false) }
-    var isVideosLoading by remember { mutableStateOf(false) }
-    var videosHasMore by remember { mutableStateOf(false) }
-    var videosError by remember { mutableStateOf<String?>(null) }
-
-    // 文章
-    var articles by remember { mutableStateOf<List<WeiboStatusDto>>(emptyList()) }
-    var articlePage by remember { mutableIntStateOf(1) }
-    var articlesLoaded by remember { mutableStateOf(false) }
-    var isArticlesLoading by remember { mutableStateOf(false) }
-    var articlesHasMore by remember { mutableStateOf(false) }
-    var articlesError by remember { mutableStateOf<String?>(null) }
-
-    val coroutineScope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     val pullRefreshState = rememberPullToRefreshState()
-    val listState = rememberLazyListState()
+    // 数据在 ViewModel 里，返回时列表首帧就是满的，LazyListState 自带的下标+偏移恢复即可生效
+    val listState = rememberSaveable(uid, saver = LazyListState.Saver) { LazyListState() }
     // 设备能力探测结果恒定，记忆化以避免每次重组重复探测（内部可能编译 RuntimeShader）。
     val runtimeShaderSupported = rememberBlurEffectsEnabled()
     val backdrop = if (runtimeShaderSupported) {
@@ -279,342 +281,20 @@ fun UserProfileScreen(
         )
     }
 
-    fun loadProfileDetail() {
-        coroutineScope.launch {
-            isDetailLoading = true
-            detailLoadFailed = false
-            when (val detailRes = apiService.getUserProfileDetail(uid)) {
-                is ApiResult.Success -> profileDetail = detailRes.data
-                is ApiResult.Error -> detailLoadFailed = true
-                else -> Unit
-            }
-            isDetailLoading = false
-        }
-    }
-
-    fun loadAlbums(force: Boolean = false) {
-        if (isAlbumsLoading) {
-            isRefreshing = false
-            return
-        }
-        if (albumsLoaded && !force) {
-            isRefreshing = false
-            return
-        }
-        isAlbumsLoading = true
-        albumsError = null
-        coroutineScope.launch {
-            when (val res = apiService.getUserAlbums(uid)) {
-                is ApiResult.Success -> {
-                    albums = res.data
-                    albumsLoaded = true
-                }
-                is ApiResult.Error -> albumsError = res.message
-                else -> Unit
-            }
-            isAlbumsLoading = false
-            isRefreshing = false
-        }
-    }
-
-    fun loadAlbumPhotos(reset: Boolean = false) {
-        val album = openedAlbum ?: run {
-            isRefreshing = false
-            return
-        }
-        if (isAlbumPhotosLoading) {
-            isRefreshing = false
-            return
-        }
-        if (!reset && !albumPhotosHasMore) {
-            isRefreshing = false
-            return
-        }
-        if (reset) {
-            albumPhotos = emptyList()
-            albumPhotoCursor = "0"
-            albumPhotosHasMore = true
-            albumPhotosError = null
-        }
-        isAlbumPhotosLoading = true
-        val cursor = albumPhotoCursor
-        coroutineScope.launch {
-            when (val res = apiService.getAlbumPhotos(album.containerId, cursor)) {
-                is ApiResult.Success -> {
-                    albumPhotos = (albumPhotos + res.data.photos).distinct()
-                    albumPhotoCursor = res.data.nextCursor
-                    albumPhotosHasMore = res.data.hasMore
-                }
-                is ApiResult.Error -> albumPhotosError = res.message
-                else -> Unit
-            }
-            isAlbumPhotosLoading = false
-            isRefreshing = false
-        }
-    }
-
-    fun openAlbum(album: UserAlbum) {
-        openedAlbum = album
-        loadAlbumPhotos(reset = true)
-    }
-
-    fun closeAlbum() {
-        openedAlbum = null
-        albumPhotos = emptyList()
-        albumPhotoCursor = "0"
-        albumPhotosHasMore = false
-        albumPhotosError = null
-    }
-
-    fun loadVideos(reset: Boolean = false) {
-        if (isVideosLoading) {
-            isRefreshing = false
-            return
-        }
-        if (!reset && videosLoaded && !videosHasMore) {
-            isRefreshing = false
-            return
-        }
-        if (reset) {
-            videos = emptyList()
-            videoCursor = "0"
-            videosHasMore = true
-            videosLoaded = false
-            videosError = null
-        }
-        isVideosLoading = true
-        val cursor = videoCursor
-        coroutineScope.launch {
-            when (val res = apiService.getUserVideos(uid, cursor)) {
-                is ApiResult.Success -> {
-                    videos = (videos + res.data.videos).distinctBy { it.listKey }
-                    videoCursor = res.data.nextCursor
-                    videosHasMore = res.data.hasMore
-                    videosLoaded = true
-                }
-                is ApiResult.Error -> videosError = res.message
-                else -> Unit
-            }
-            isVideosLoading = false
-            isRefreshing = false
-        }
-    }
-
-    fun loadArticles(reset: Boolean = false) {
-        if (isArticlesLoading) {
-            isRefreshing = false
-            return
-        }
-        if (!reset && articlesLoaded && !articlesHasMore) {
-            isRefreshing = false
-            return
-        }
-        val page = if (reset || !articlesLoaded) 1 else articlePage + 1
-        if (reset) {
-            articles = emptyList()
-            articlePage = 1
-            articlesHasMore = true
-            articlesLoaded = false
-            articlesError = null
-        }
-        isArticlesLoading = true
-        coroutineScope.launch {
-            when (val res = apiService.getUserArticles(uid, page)) {
-                is ApiResult.Success -> {
-                    articles = (articles + res.data.articles).distinctBy { it.listKey }
-                    articlePage = page
-                    articlesHasMore = res.data.hasMore
-                    articlesLoaded = true
-                }
-                is ApiResult.Error -> articlesError = res.message
-                else -> Unit
-            }
-            isArticlesLoading = false
-            isRefreshing = false
-        }
-    }
-
-    fun selectTab(tab: ProfileTab) {
-        if (selectedTab == tab) return
-        selectedTab = tab
-        if (tab != ProfileTab.ALBUM) closeAlbum()
-        when (tab) {
-            ProfileTab.POSTS -> Unit
-            ProfileTab.ALBUM -> loadAlbums()
-            ProfileTab.VIDEO -> if (!videosLoaded) loadVideos() else Unit
-            ProfileTab.ARTICLE -> if (!articlesLoaded) loadArticles() else Unit
-        }
-    }
-
-    fun loadData(page: Int = 1, isRefresh: Boolean = false) {
-        if (page == 1) {
-            if (isRefresh) isRefreshing = true else isInitialLoading = true
-            errorMessage = null
-        } else {
-            isLoadingMore = true
-        }
-
-        coroutineScope.launch {
-            if (page == 1) {
-                // 详细资料走 PC 端登录态接口，独立请求；即便失败也不影响主页主体内容
-                loadProfileDetail()
-
-                // 并发获取博主资料与动态，大幅缩短加载等待时间
-                val timelineDeferred = async { apiService.getUserTimeline(uid, page = 1) }
-                val profileDeferred = async { apiService.getUserProfile(uid) }
-
-                val timelineRes = timelineDeferred.await()
-                val profileRes = profileDeferred.await()
-
-                if (profileRes is ApiResult.Success) {
-                    val p = profileRes.data
-                    // 本地浏览历史：同一博主只保留最近一次访问
-                    historyRepository.recordUser(p)
-                    userProfile = if (userProfile == null) {
-                        p
-                    } else {
-                        userProfile!!.copy(
-                            screenName = p.screenName.ifBlank { userProfile!!.screenName },
-                            profileImageUrl = p.profileImageUrl ?: userProfile!!.profileImageUrl,
-                            avatarLarge = p.avatarLarge ?: userProfile!!.avatarLarge,
-                            avatarHd = p.avatarHd ?: userProfile!!.avatarHd,
-                            followersCount = p.followersCount.ifBlank { userProfile!!.followersCount },
-                            friendsCount = p.friendsCount.ifBlank { userProfile!!.friendsCount },
-                            followCount = p.followCount.ifBlank { userProfile!!.followCount },
-                            statusesCount = p.statusesCount.ifBlank { userProfile!!.statusesCount },
-                            description = p.description ?: userProfile!!.description,
-                            verified = p.verified || userProfile!!.verified,
-                            verifiedReason = p.verifiedReason ?: userProfile!!.verifiedReason,
-                            coverImagePhone = p.coverImagePhone ?: userProfile!!.coverImagePhone,
-                            location = p.location ?: userProfile!!.location,
-                            gender = p.gender ?: userProfile!!.gender,
-                            domain = p.domain ?: userProfile!!.domain,
-                            url = p.url ?: userProfile!!.url,
-                            createdAt = p.createdAt ?: userProfile!!.createdAt
-                        )
-                    }
-                }
-
-                when (timelineRes) {
-                    is ApiResult.Success -> {
-                        val result = timelineRes.data
-                        if (result.user != null) {
-                            userProfile = if (userProfile == null) {
-                                result.user
-                            } else {
-                                userProfile!!.copy(
-                                    screenName = result.user.screenName.ifBlank { userProfile!!.screenName },
-                                    profileImageUrl = result.user.profileImageUrl ?: userProfile!!.profileImageUrl,
-                                    avatarLarge = result.user.avatarLarge ?: userProfile!!.avatarLarge,
-                                    avatarHd = result.user.avatarHd ?: userProfile!!.avatarHd,
-                                    followersCount = result.user.followersCount.ifBlank { userProfile!!.followersCount },
-                                    friendsCount = result.user.friendsCount.ifBlank { userProfile!!.friendsCount },
-                                    statusesCount = result.user.statusesCount.ifBlank { userProfile!!.statusesCount },
-                                    description = result.user.description ?: userProfile!!.description,
-                                    verified = result.user.verified || userProfile!!.verified,
-                                    verifiedReason = result.user.verifiedReason ?: userProfile!!.verifiedReason,
-                                    location = result.user.location ?: userProfile!!.location,
-                                    gender = result.user.gender ?: userProfile!!.gender,
-                                    domain = result.user.domain ?: userProfile!!.domain,
-                                    url = result.user.url ?: userProfile!!.url,
-                                    createdAt = result.user.createdAt ?: userProfile!!.createdAt
-                                )
-                            }
-                        }
-
-                        posts = result.statuses
-                        currentPage = 1
-                        hasMore = result.hasMore && result.statuses.isNotEmpty()
-                        if (result.total != null && result.total > 0) {
-                            totalCount = result.total
-                        }
-                        errorMessage = null
-                    }
-                    is ApiResult.Error -> {
-                        errorMessage = timelineRes.message
-                    }
-                    else -> {}
-                }
-            } else {
-                val timelineRes = apiService.getUserTimeline(uid, page = page)
-                when (timelineRes) {
-                    is ApiResult.Success -> {
-                        val result = timelineRes.data
-                        posts = posts + result.statuses
-                        currentPage = page
-                        hasMore = result.hasMore && result.statuses.isNotEmpty()
-                        if (result.total != null && result.total > 0) {
-                            totalCount = result.total
-                        }
-                    }
-                    is ApiResult.Error -> {
-                        Toast.makeText(context, timelineRes.message, Toast.LENGTH_SHORT).show()
-                    }
-                    else -> {}
-                }
-            }
-
-            isInitialLoading = false
-            isRefreshing = false
-            isLoadingMore = false
-        }
-    }
-
-    fun refreshCurrentTab() {
-        when (selectedTab) {
-            ProfileTab.POSTS -> loadData(page = 1, isRefresh = true)
-            ProfileTab.ALBUM -> {
-                isRefreshing = true
-                if (openedAlbum != null) loadAlbumPhotos(reset = true) else loadAlbums(force = true)
-            }
-            ProfileTab.VIDEO -> {
-                isRefreshing = true
-                loadVideos(reset = true)
-            }
-            ProfileTab.ARTICLE -> {
-                isRefreshing = true
-                loadArticles(reset = true)
-            }
-        }
-    }
-
     BackHandler(enabled = openedAlbum != null) {
-        closeAlbum()
+        viewModel.closeAlbum()
     }
 
+    // 首次进入才拉数据；从正文页返回时 ViewModel 还在，不会重复请求也不会回顶
     LaunchedEffect(uid) {
-        profileDetail = null
-        detailLoadFailed = false
-        isDetailLoading = false
-        showDetailSheet = false
-        selectedTab = ProfileTab.POSTS
+        viewModel.loadIfNeeded()
+    }
 
-        albums = emptyList()
-        albumsLoaded = false
-        isAlbumsLoading = false
-        albumsError = null
-        openedAlbum = null
-        albumPhotos = emptyList()
-        albumPhotoCursor = "0"
-        albumPhotosHasMore = false
-        isAlbumPhotosLoading = false
-        albumPhotosError = null
-
-        videos = emptyList()
-        videoCursor = "0"
-        videosLoaded = false
-        isVideosLoading = false
-        videosHasMore = false
-        videosError = null
-
-        articles = emptyList()
-        articlePage = 1
-        articlesLoaded = false
-        isArticlesLoading = false
-        articlesHasMore = false
-        articlesError = null
-
-        loadData(page = 1)
+    // 加载更多失败等一次性提示
+    LaunchedEffect(uiState.message) {
+        val text = uiState.message ?: return@LaunchedEffect
+        Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+        viewModel.consumeMessage()
     }
 
     Scaffold(
@@ -624,7 +304,7 @@ fun UserProfileScreen(
         PullToRefreshBox(
             isRefreshing = isRefreshing,
             state = pullRefreshState,
-            onRefresh = { refreshCurrentTab() },
+            onRefresh = { viewModel.refreshCurrentTab() },
             modifier = Modifier.fillMaxSize()
         ) {
             when {
@@ -682,7 +362,7 @@ fun UserProfileScreen(
                                         Text("复制错误详情")
                                     }
                                     Button(
-                                        onClick = { loadData(page = 1) },
+                                        onClick = { viewModel.load(page = 1) },
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = MaterialTheme.colorScheme.primary
                                         )
@@ -719,26 +399,14 @@ fun UserProfileScreen(
                                     Toast.makeText(context, "$label 已复制", Toast.LENGTH_SHORT).show()
                                 },
                                 showFollowButton = userProfile != null && !isSelfProfile,
-                                isFollowing = userProfile?.following == true,
+                                isFollowing = isFollowing,
                                 isMutual = userProfile?.followMe == true,
                                 isFollowUpdating = isFollowUpdating,
                                 onFollowClick = {
-                                    if (userProfile?.following == true) {
+                                    if (isFollowing) {
                                         showUnfollowDialog = true
                                     } else {
-                                        coroutineScope.launch {
-                                            isFollowUpdating = true
-                                            when (val result = apiService.followUser(uid)) {
-                                                is ApiResult.Success -> {
-                                                    userProfile = userProfile?.copy(following = true)
-                                                }
-                                                is ApiResult.Error -> {
-                                                    followActionError = result.message ?: "关注失败，请稍后重试"
-                                                }
-                                                ApiResult.Loading -> Unit
-                                            }
-                                            isFollowUpdating = false
-                                        }
+                                        viewModel.follow()
                                     }
                                 }
                             )
@@ -821,7 +489,7 @@ fun UserProfileScreen(
                                                     Text("复制错误信息")
                                                 }
                                                 Button(
-                                                    onClick = { loadData(page = 1) }
+                                                    onClick = { viewModel.load(page = 1) }
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Default.Refresh,
@@ -868,7 +536,7 @@ fun UserProfileScreen(
                                         }
                                         hasMore -> {
                                             OutlinedButton(
-                                                onClick = { loadData(page = currentPage + 1) },
+                                                onClick = { viewModel.load(page = currentPage + 1) },
                                                 shape = RoundedCornerShape(20.dp)
                                             ) {
                                                 Text("加载更多动态")
@@ -897,7 +565,7 @@ fun UserProfileScreen(
                                     albumsError != null && albums.isEmpty() -> item {
                                         ProfileTabError(
                                             message = albumsError!!,
-                                            onRetry = { loadAlbums(force = true) }
+                                            onRetry = { viewModel.loadAlbums(force = true) }
                                         )
                                     }
 
@@ -921,7 +589,7 @@ fun UserProfileScreen(
                                                     row.forEach { albumItem ->
                                                         AlbumCoverCard(
                                                             album = albumItem,
-                                                            onClick = { openAlbum(albumItem) },
+                                                            onClick = { viewModel.openAlbum(albumItem) },
                                                             modifier = Modifier.weight(1f)
                                                         )
                                                     }
@@ -943,7 +611,7 @@ fun UserProfileScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         IconButton(
-                                            onClick = { closeAlbum() },
+                                            onClick = { viewModel.closeAlbum() },
                                             modifier = Modifier.size(32.dp)
                                         ) {
                                             Icon(
@@ -980,7 +648,7 @@ fun UserProfileScreen(
                                     albumPhotosError != null && albumPhotos.isEmpty() -> item {
                                         ProfileTabError(
                                             message = albumPhotosError!!,
-                                            onRetry = { loadAlbumPhotos(reset = true) }
+                                            onRetry = { viewModel.loadAlbumPhotos(reset = true) }
                                         )
                                     }
 
@@ -1016,7 +684,7 @@ fun UserProfileScreen(
                                             ProfileLoadMore(
                                                 isLoading = isAlbumPhotosLoading,
                                                 hasMore = albumPhotosHasMore,
-                                                onLoadMore = { loadAlbumPhotos() },
+                                                onLoadMore = { viewModel.loadAlbumPhotos() },
                                                 loadingText = "正在加载更多照片…",
                                                 idleText = "已加载全部照片"
                                             )
@@ -1033,7 +701,7 @@ fun UserProfileScreen(
                                 videosError != null && videos.isEmpty() -> item {
                                     ProfileTabError(
                                         message = videosError!!,
-                                        onRetry = { loadVideos() }
+                                        onRetry = { viewModel.loadVideos() }
                                     )
                                 }
 
@@ -1090,7 +758,7 @@ fun UserProfileScreen(
                                         ProfileLoadMore(
                                             isLoading = isVideosLoading,
                                             hasMore = videosHasMore,
-                                            onLoadMore = { loadVideos() },
+                                            onLoadMore = { viewModel.loadVideos() },
                                             loadingText = "正在加载更多视频…",
                                             idleText = "已加载全部视频"
                                         )
@@ -1106,7 +774,7 @@ fun UserProfileScreen(
                                 articlesError != null && articles.isEmpty() -> item {
                                     ProfileTabError(
                                         message = articlesError!!,
-                                        onRetry = { loadArticles() }
+                                        onRetry = { viewModel.loadArticles() }
                                     )
                                 }
 
@@ -1125,7 +793,7 @@ fun UserProfileScreen(
                                         ProfileLoadMore(
                                             isLoading = isArticlesLoading,
                                             hasMore = articlesHasMore,
-                                            onLoadMore = { loadArticles() },
+                                            onLoadMore = { viewModel.loadArticles() },
                                             loadingText = "正在加载更多文章…",
                                             idleText = "已加载全部文章"
                                         )
@@ -1142,7 +810,7 @@ fun UserProfileScreen(
                 LiquidGlassFloatingMenu(
                     items = ProfileTab.entries.map { it.title },
                     selectedIndex = selectedTab.ordinal,
-                    onSelect = { index -> selectTab(ProfileTab.entries[index]) },
+                    onSelect = { index -> viewModel.selectTab(ProfileTab.entries[index]) },
                     backdrop = backdrop,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -1196,7 +864,7 @@ fun UserProfileScreen(
                 detail = displayedDetail,
                 isLoading = isDetailLoading,
                 loadFailed = detailLoadFailed,
-                onRetry = { loadProfileDetail() },
+                onRetry = { viewModel.loadProfileDetail() },
                 onDismiss = { showDetailSheet = false }
             )
         }
@@ -1214,19 +882,7 @@ fun UserProfileScreen(
                     TextButton(
                         onClick = {
                             showUnfollowDialog = false
-                            coroutineScope.launch {
-                                isFollowUpdating = true
-                                when (val result = apiService.unfollowUser(uid)) {
-                                    is ApiResult.Success -> {
-                                        userProfile = userProfile?.copy(following = false)
-                                    }
-                                    is ApiResult.Error -> {
-                                        followActionError = result.message ?: "取消关注失败，请稍后重试"
-                                    }
-                                    ApiResult.Loading -> Unit
-                                }
-                                isFollowUpdating = false
-                            }
+                            viewModel.unfollow()
                         }
                     ) {
                         Text("取消关注", color = MaterialTheme.colorScheme.error)
@@ -1240,13 +896,13 @@ fun UserProfileScreen(
             )
         }
 
-        if (followActionError != null) {
+        followActionError?.let { message ->
             AlertDialog(
-                onDismissRequest = { followActionError = null },
+                onDismissRequest = { viewModel.consumeFollowError() },
                 title = { Text("操作失败") },
-                text = { Text(followActionError.orEmpty()) },
+                text = { Text(message) },
                 confirmButton = {
-                    TextButton(onClick = { followActionError = null }) {
+                    TextButton(onClick = { viewModel.consumeFollowError() }) {
                         Text("知道了")
                     }
                 }
@@ -1899,13 +1555,6 @@ private fun UserProfileDetail.withFallback(user: WeiboUserDto?): UserProfileDeta
         registeredAt = registeredAt ?: user.createdAt?.trim()?.ifBlank { null },
         domain = domain ?: user.domain?.trim()?.ifBlank { null }
     )
-}
-
-private enum class ProfileTab(val title: String) {
-    POSTS("微博"),
-    ALBUM("相册"),
-    VIDEO("视频"),
-    ARTICLE("文章")
 }
 
 @Composable

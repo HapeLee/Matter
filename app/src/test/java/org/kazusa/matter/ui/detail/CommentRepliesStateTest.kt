@@ -2,7 +2,6 @@
 
 import org.kazusa.matter.data.model.CommentsDataDto
 import org.kazusa.matter.data.model.WeiboCommentDto
-import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -38,14 +37,21 @@ class CommentRepliesStateTest {
     }
 
     @Test
-    fun repliesWithoutIdsArePreservedAndSavedStateRetainsExpansionAndCursor() {
+    fun repliesWithoutIdsArePreservedAndCursorAdvances() {
         val replies = mergeCommentReplies(
             listOf(WeiboCommentDto(text = "甲")),
             listOf(WeiboCommentDto(text = "乙")),
             null
         )
         assertEquals(2, replies.size)
-        val state = CommentRepliesState(replies, expanded = true, loadedPage = true, nextMaxId = 200, hasMore = true)
-        assertEquals(state, Json.decodeFromString<CommentRepliesState>(Json.encodeToString(state)))
+        val state = CommentRepliesState(replies, loadedPage = true, nextMaxId = 200, hasMore = true)
+        val next = state.withPage(
+            CommentsDataDto(data = listOf(WeiboCommentDto(id = 7, text = "丙")), maxId = 300),
+            rootId = null
+        )
+        assertEquals(300L, next.nextMaxId)
+        assertTrue(next.loadedPage)
+        assertTrue(next.hasMore)
+        assertEquals(3, next.replies.size)
     }
 }

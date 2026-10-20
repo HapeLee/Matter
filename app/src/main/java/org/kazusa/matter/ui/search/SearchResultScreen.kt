@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -43,16 +42,16 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -70,10 +69,6 @@ import org.kazusa.matter.ui.effect.rememberScreenBackdrop
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
-import org.kazusa.matter.core.network.ApiResult
-import org.kazusa.matter.core.network.WeiboApiService
-import org.kazusa.matter.data.model.SearchPageResult
-import org.kazusa.matter.data.model.SearchResultItem
 import org.kazusa.matter.data.model.SearchResultKind
 import org.kazusa.matter.data.local.SearchHistoryEntity
 import org.kazusa.matter.data.model.WeiboStatusDto
@@ -88,46 +83,8 @@ import org.kazusa.matter.ui.components.WeiboPostCard
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassFloatingMenu
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIconButton
-
-/**
- * 一个搜索分栏。
- *
- * 分栏**全部来自服务端**：微博 `container/getIndex`（`page_type=searchall`）响应里的
- * `data.cardlistInfo.cardlist_head_cards[0].channel_list[]`（每项含 `name` / `containerid`），
- * 即「搜索分类」是服务端下发的，客户端不硬编码。解析见
- * [org.kazusa.matter.data.model.WeiboCardlistInfoDto.cardlistHeadCards]。
- *
- * 服务端没有下发分栏时，退化为单个兜底分栏 [fallbackSearchTab]
- * （[containerId] == null，用默认的首屏 containerid 请求）。
- */
-private class SearchTab(
-    val label: String,
-    /** 服务端给该分栏的 containerid；null = 使用默认「综合」containerid */
-    val containerId: String?,
-    /** 服务端 `tabs[].showDot`：是否在分栏上显示红点 */
-    val showDot: Boolean = false
-) {
-    val state = SearchTabListState()
-    val listState = LazyListState()
-}
-
-/** 服务端没给分栏时的兜底分栏。 */
-private fun fallbackSearchTab(): SearchTab = SearchTab(label = "综合", containerId = null)
-
-/**
- * 单个分栏的列表状态（各分栏独立分页 / 刷新 / 加载更多）。
- */
-@Stable
-private class SearchTabListState {
-    var items by mutableStateOf<List<SearchResultItem>>(emptyList())
-    var page by mutableIntStateOf(1)
-    var isLoading by mutableStateOf(false)
-    var isRefreshing by mutableStateOf(false)
-    var isLoadingMore by mutableStateOf(false)
-    var hasMore by mutableStateOf(true)
-    var errorMessage by mutableStateOf<String?>(null)
-    var loaded by mutableStateOf(false)
-}
+import org.koin.compose.viewmodel.koinViewModel
+import org.koin.core.parameter.parametersOf
 
 /**
  * 独立的搜索结果页：顶部沉浸式液态玻璃顶栏 + 居中悬浮的液态玻璃分栏条，
@@ -142,7 +99,6 @@ private class SearchTabListState {
 fun SearchResultScreen(
     query: String,
     title: String = query,
-    apiService: WeiboApiService,
     /** 本地搜索记录仓库：搜索词为空时展示记录，提交搜索时写入记录 */
     searchHistoryRepository: SearchHistoryRepository,
     onBackClick: () -> Unit,
@@ -155,13 +111,19 @@ fun SearchResultScreen(
     onChipClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val tabs = remember { mutableStateListOf(fallbackSearchTab()) }
-    var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
-    // 分栏集合被服务端结果替换时自增，用于重启「首次加载 / 触底加载」副作用
-    var tabsRevision by remember { mutableIntStateOf(0) }
+    // 分栏与各分栏的数据由 NavEntry 级 ViewModel 持有：点进正文再返回时不会重新请求。
+    // 滚动位置属于界面状态，按稳定分栏 id 存在本页的 saveable 里。
+    val viewModel: SearchResultViewModel = koinViewModel { parametersOf(query) }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val tabs = uiState.tabs
+    val tabsRevision = uiState.tabsRevision
+    val currentQuery = uiState.currentQuery
 
-    var currentQuery by rememberSaveable(query) { mutableStateOf(query) }
     var searchInput by rememberSaveable(query) { mutableStateOf(query) }
+    // 进程恢复后 ViewModel 里的关键词可能比导航参数新（也可能已被用户清空），输入框要跟上
+    LaunchedEffect(currentQuery) {
+        if (currentQuery != searchInput) searchInput = currentQuery
+    }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -176,115 +138,34 @@ fun SearchResultScreen(
     var showClearHistoryDialog by remember { mutableStateOf(false) }
 
     // 搜索记录列表自己的滚动状态：空词时顶栏遮罩跟着它联动
-    val historyListState = rememberLazyListState()
+    val historyListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
 
     val backdrop = rememberScreenBackdrop()
 
-    val safeIndex = selectedIndex.coerceIn(0, tabs.lastIndex.coerceAtLeast(0))
+    val safeIndex = uiState.safeIndex
     val currentTab = tabs[safeIndex]
-    val currentState = currentTab.state
-    val currentListState = currentTab.listState
-
-    /** 用服务端下发的分栏替换兜底分栏，并把首屏数据种到默认分栏上。 */
-    fun applyServerTabs(pageData: SearchPageResult) {
-        val serverTabs = pageData.tabs.map { dto ->
-            SearchTab(
-                label = dto.title?.takeIf { it.isNotBlank() } ?: "分栏",
-                containerId = dto.containerid?.takeIf { it.isNotBlank() },
-                showDot = dto.showDot
-            )
-        }
-        if (serverTabs.isEmpty()) return
-
-        val defaultIndex = pageData.defaultTabIndex.coerceIn(0, serverTabs.lastIndex)
-        serverTabs[defaultIndex].state.apply {
-            items = pageData.items
-            page = 1
-            loaded = true
-            hasMore = pageData.items.isNotEmpty()
-        }
-
-        tabs.clear()
-        tabs.addAll(serverTabs)
-        selectedIndex = defaultIndex
-        tabsRevision++
+    val currentState = uiState.stateOf(currentTab.id)
+    // 分栏是服务端下发的，位置随会话变化，所以滚动位置按「关键词 + 分栏 id」存在 saveable 里
+    val tabScrollStates = rememberSaveable(saver = searchTabScrollSaver) {
+        mutableStateMapOf<String, LazyListState>()
     }
-
-    fun loadTab(index: Int, pageToLoad: Int, isRefresh: Boolean = false) {
-        val tab = tabs.getOrNull(index) ?: return
-        val state = tab.state
-        if (pageToLoad == 1) {
-            if (isRefresh) state.isRefreshing = true else state.isLoading = true
-            state.errorMessage = null
-        } else {
-            state.isLoadingMore = true
-        }
-        // containerId == null 说明当前是兜底「综合」栏，首屏响应可能带回服务端分栏
-        val mayDiscoverTabs = pageToLoad == 1 && tab.containerId == null
-
-        coroutineScope.launch {
-            when (
-                val res = apiService.searchWeiboPage(
-                    keyword = currentQuery.trim(),
-                    page = pageToLoad,
-                    containerId = tab.containerId
-                )
-            ) {
-                is ApiResult.Success -> {
-                    val pageData = res.data
-                    if (mayDiscoverTabs && pageData.tabs.isNotEmpty()) {
-                        applyServerTabs(pageData)
-                    } else {
-                        state.items = if (pageToLoad == 1) {
-                            pageData.items
-                        } else {
-                            state.items + pageData.items
-                        }
-                        state.page = pageToLoad
-                        state.hasMore = pageData.items.isNotEmpty()
-                    }
-                }
-                is ApiResult.Error -> {
-                    if (state.items.isEmpty()) state.errorMessage = res.message
-                    state.hasMore = false
-                }
-                is ApiResult.Loading -> Unit
-            }
-            state.isLoading = false
-            state.isRefreshing = false
-            state.isLoadingMore = false
-            state.loaded = true
-        }
+    val scrollKey = "${currentQuery}##${currentTab.id}"
+    val currentListState = remember(scrollKey) {
+        tabScrollStates.getOrPut(scrollKey) { LazyListState() }
     }
 
     fun submitSearch(newKeyword: String) {
-        val trimmed = newKeyword.trim()
         focusManager.clearFocus()
         keyboardController?.hide()
-        // 空关键词提交 = 回到「搜索记录」态
-        if (trimmed.isBlank()) {
-            currentQuery = ""
-            return
-        }
-        // 提交即写入本地搜索记录（同关键词只更新时间）
-        coroutineScope.launch { searchHistoryRepository.record(trimmed) }
-        if (trimmed == currentQuery) {
-            loadTab(safeIndex, pageToLoad = 1, isRefresh = true)
-        } else {
-            currentQuery = trimmed
-            tabs.clear()
-            tabs.add(fallbackSearchTab())
-            selectedIndex = 0
-            tabsRevision++
-        }
+        viewModel.submitSearch(newKeyword)
     }
 
     // 每个分栏首次选中或搜索词变更时才加载，切换 Tab 不会重复请求
     LaunchedEffect(safeIndex, currentQuery, tabsRevision) {
         if (currentQuery.isBlank()) return@LaunchedEffect
-        val tab = tabs[safeIndex]
-        if (!tab.state.loaded && !tab.state.isLoading && !tab.state.isRefreshing) {
-            loadTab(safeIndex, pageToLoad = 1)
+        val state = viewModel.uiState.value.stateOf(tabs[safeIndex].id)
+        if (!state.loaded && !state.isLoading && !state.isRefreshing) {
+            viewModel.loadTab(safeIndex, pageToLoad = 1)
         }
     }
 
@@ -292,16 +173,13 @@ fun SearchResultScreen(
     LaunchedEffect(safeIndex, currentQuery, tabsRevision) {
         if (currentQuery.isBlank()) return@LaunchedEffect
         val tab = tabs[safeIndex]
-        snapshotFlow { tab.listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+        snapshotFlow { currentListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
             .distinctUntilChanged()
             .collect { lastVisible ->
-                val total = tab.listState.layoutInfo.totalItemsCount
-                if (
-                    tab.state.loaded && tab.state.hasMore && total > 0 &&
-                    lastVisible >= total - 3 &&
-                    !tab.state.isLoading && !tab.state.isRefreshing && !tab.state.isLoadingMore
-                ) {
-                    loadTab(safeIndex, pageToLoad = tab.state.page + 1)
+                val state = viewModel.uiState.value.stateOf(tab.id)
+                val total = currentListState.layoutInfo.totalItemsCount
+                if (state.canLoadMore && total > 0 && lastVisible >= total - 3) {
+                    viewModel.loadTab(safeIndex, pageToLoad = state.page + 1)
                 }
             }
     }
@@ -350,12 +228,12 @@ fun SearchResultScreen(
                         onQueryChange = { text ->
                             searchInput = text
                             // 文本被手动清空 → 退回搜索记录
-                            if (text.isBlank() && currentQuery.isNotBlank()) currentQuery = ""
+                            if (text.isBlank() && currentQuery.isNotBlank()) viewModel.clearQuery()
                         },
                         onSearch = { submitSearch(it) },
                         onClear = {
                             searchInput = ""
-                            currentQuery = ""
+                            viewModel.clearQuery()
                         },
                         focusRequester = focusRequester,
                         backdrop = backdrop,
@@ -397,7 +275,7 @@ fun SearchResultScreen(
             } else PullToRefreshBox(
                 isRefreshing = currentState.isRefreshing,
                 state = pullRefreshState,
-                onRefresh = { loadTab(safeIndex, pageToLoad = 1, isRefresh = true) },
+                onRefresh = { viewModel.loadTab(safeIndex, pageToLoad = 1, isRefresh = true) },
                 modifier = Modifier
                     .fillMaxSize()
                     // 切分栏 / 首次拉到数据时淡入，避免加载态与数据态硬切
@@ -507,6 +385,33 @@ fun SearchResultScreen(
                                     }
                                 }
                             }
+
+                            // 分页失败：明确区分「这一次没拉到」与「没有下一页」，给一次原地重试
+                            val pageError = currentState.errorMessage
+                            if (pageError != null && !currentState.isLoadingMore) {
+                                item(key = "load_error", contentType = "error") {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            text = pageError,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                        TextButton(
+                                            onClick = {
+                                                viewModel.loadTab(safeIndex, pageToLoad = currentState.page + 1)
+                                            }
+                                        ) {
+                                            Text("重试")
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -518,7 +423,7 @@ fun SearchResultScreen(
                 LiquidGlassFloatingMenu(
                     items = tabs.map { it.label },
                     selectedIndex = safeIndex,
-                    onSelect = { selectedIndex = it },
+                    onSelect = { viewModel.selectTab(it) },
                     backdrop = backdrop,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -536,6 +441,34 @@ fun SearchResultScreen(
         }
     }
 }
+
+/**
+ * 各个分栏的滚动位置（首行下标 + 像素偏移）。
+ *
+ * key 是 `关键词##分栏id`：分栏由服务端下发、数量与顺序会变，用 id 而不是下标做标识，
+ * 分栏重排后不会把滚动位置串到别的分栏上；换关键词后旧位置自然失效。
+ */
+private val searchTabScrollSaver = listSaver<SnapshotStateMap<String, LazyListState>, Any>(
+    save = { states ->
+        states.entries.flatMap { (key, listState) ->
+            listOf(key, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        }
+    },
+    restore = { values ->
+        mutableStateMapOf<String, LazyListState>().apply {
+            var cursor = 0
+            while (cursor + 2 < values.size) {
+                val key = values[cursor] as? String
+                val firstIndex = values[cursor + 1] as? Int
+                val offset = values[cursor + 2] as? Int
+                if (key != null && firstIndex != null && offset != null) {
+                    put(key, LazyListState(firstIndex, offset))
+                }
+                cursor += 3
+            }
+        }
+    }
+)
 
 @Composable
 private fun CenteredHint(content: @Composable () -> Unit) {

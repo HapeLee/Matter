@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -194,6 +195,29 @@ fun HotFeedScreen(
                                         color = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(22.dp)
                                     )
+                                }
+                            }
+                        }
+
+                        // 分页失败：保留「还有下一页」的事实，只在这里给一次原地重试
+                        val pageError = uiState.pageErrorMessage
+                        if (pageError != null && !uiState.isLoadingMore) {
+                            item(key = "hot_feed_page_error", contentType = "error") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = pageError,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                    TextButton(onClick = viewModel::retryLoadMore) {
+                                        Text("重试")
+                                    }
                                 }
                             }
                         }
