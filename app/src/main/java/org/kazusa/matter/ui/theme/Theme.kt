@@ -1,6 +1,5 @@
 package org.kazusa.matter.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MaterialExpressiveTheme
@@ -49,7 +48,7 @@ fun MatterTheme(
     val context = LocalContext.current
     // 动态取色方案计算开销较大，按关键输入记忆化，避免每次重组重算
     val activeColorScheme = remember(context, isDark, appThemeState.dynamicColor, appThemeState.isAmoled) {
-        if (appThemeState.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (appThemeState.dynamicColor) {
             // Android 12+ 原生 Monet 动态取色
             val baseScheme = if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
             if (isDark && appThemeState.isAmoled) {

@@ -57,6 +57,8 @@ import org.kazusa.matter.ui.media.morph.rememberImageMorphState
 import org.kazusa.matter.ui.media.morph.ImageMorphOverlay
 import org.kazusa.matter.ui.media.ImageViewerScreen
 import org.kazusa.matter.ui.media.VideoPlayerScreen
+import org.kazusa.matter.ui.message.ChatScreen
+import org.kazusa.matter.ui.message.MessagesScreen
 import org.kazusa.matter.ui.onboarding.OnboardingScreen
 import org.kazusa.matter.ui.profile.MyPostsScreen
 import org.kazusa.matter.ui.profile.UserListKind
@@ -234,6 +236,9 @@ fun MatterNavGraph() {
                                                     onNavigateToFollowers = {
                                                         navigate(Screen.MyFollowers)
                                                     },
+                                                    onNavigateToMessages = {
+                                                        navigate(Screen.Messages)
+                                                    },
                                                     onUserClick = { uid ->
                                                         if (uid != null) {
                                                             navigate(Screen.UserProfile(uid = uid.toString()))
@@ -345,6 +350,43 @@ fun MatterNavGraph() {
                                                         navigate(Screen.UserProfile(uid = uid.toString()))
                                                     }
                                                 }
+                                            )
+                                        }
+
+                                        Screen.Messages -> {
+                                            MessagesScreen(
+                                                onBackClick = { navigateBack() },
+                                                onConversationClick = { conversation ->
+                                                    navigate(
+                                                        Screen.Chat(
+                                                            peerUid = conversation.peerUid,
+                                                            peerName = conversation.peerName
+                                                        )
+                                                    )
+                                                },
+                                                onNoticeClick = { notice ->
+                                                    // 提醒优先打开对应微博；解析不到 statusId 时退回对方主页
+                                                    val statusId = notice.statusId
+                                                    when {
+                                                        !statusId.isNullOrBlank() -> navigate(
+                                                            Screen.PostDetail(id = statusId)
+                                                        )
+                                                        notice.peerUid.isNotBlank() -> navigate(
+                                                            Screen.UserProfile(
+                                                                uid = notice.peerUid,
+                                                                screenName = notice.peerName
+                                                            )
+                                                        )
+                                                    }
+                                                }
+                                            )
+                                        }
+
+                                        is Screen.Chat -> {
+                                            ChatScreen(
+                                                peerUid = args.peerUid,
+                                                peerName = args.peerName,
+                                                onBackClick = { navigateBack() }
                                             )
                                         }
 

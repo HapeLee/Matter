@@ -81,6 +81,19 @@ fun String?.withWeiboImageSize(size: WeiboImageSize): String? {
     }
 }
 
-/** 由图片 ID 拼出指定档位的微博 CDN 地址 */
-fun weiboImageUrlFromId(picId: String, size: WeiboImageSize): String =
-    "https://wx1.sinaimg.cn/${size.segment}/$picId.jpg"
+/** 微博图片 ID 可能自带的扩展名；旧格式不带，带上时必须原样保留 */
+private val WEIBO_PIC_ID_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp")
+
+/**
+ * 由图片 ID 拼出指定档位的微博 CDN 地址。
+ *
+ * 微博不同接口下发的 picId 有两种形态：旧格式是纯 ID，新格式自带扩展名。
+ * 不做判断直接拼 `.jpg` 会拼出 `xxx.jpg.jpg`（CDN 直接 404），
+ * 评论楼中楼这类只给 `pic_ids`、不给 `pic_infos` 的返回尤其容易踩到。
+ */
+fun weiboImageUrlFromId(picId: String, size: WeiboImageSize): String {
+    val id = picId.trim()
+    val extension = id.substringAfterLast('.', "").lowercase()
+    val fileName = if (extension in WEIBO_PIC_ID_EXTENSIONS) id else "$id.jpg"
+    return "https://wx1.sinaimg.cn/${size.segment}/$fileName"
+}

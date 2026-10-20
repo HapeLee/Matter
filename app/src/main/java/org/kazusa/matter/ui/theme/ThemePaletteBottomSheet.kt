@@ -1,6 +1,5 @@
 package org.kazusa.matter.ui.theme
 
-import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -207,8 +206,7 @@ fun ThemePaletteBottomSheet(
             }
 
             // 3. Android 12+ 原生 Monet 动态取色开关
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MatterCard(
+            MatterCard(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -242,7 +240,6 @@ fun ThemePaletteBottomSheet(
                         )
                     }
                 }
-            }
 
             // 4. Kolor 调色板样式选项 (柔和 / 中性 / 鲜艳 等)
             Text(
@@ -252,7 +249,7 @@ fun ThemePaletteBottomSheet(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = if (themeState.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                text = if (themeState.dynamicColor)
                     "切换调色板样式将自动切换至自定义主题"
                 else
                     "控制色彩衍生的对比度、饱和度与风格",
@@ -308,7 +305,7 @@ fun ThemePaletteBottomSheet(
 
             // 5. Kolor 自定义种子调色板 (预设色彩 + 自定义种子色)
             Text(
-                text = if (themeState.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                text = if (themeState.dynamicColor)
                     "预设调色板与种子色 (选择将切换为自定义主题)"
                 else
                     "自定义主题色 (Kolor 种子色)",

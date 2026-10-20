@@ -24,8 +24,10 @@ import org.kazusa.matter.data.repository.HotFeedRepository
 import org.kazusa.matter.data.repository.HotSearchRepository
 import org.kazusa.matter.data.repository.SearchHistoryRepository
 import org.kazusa.matter.data.repository.TimelineRepository
+import org.kazusa.matter.data.repository.MessageRepository
 import org.kazusa.matter.data.repository.UserRepository
 import org.kazusa.matter.data.repository.WeiboHotSearchRepository
+import org.kazusa.matter.data.repository.WeiboMessageRepository
 import org.kazusa.matter.data.repository.WeiboUserRepository
 import org.kazusa.matter.data.repository.LikeRepository
 import org.kazusa.matter.ui.detail.PostDetailViewModel
@@ -33,6 +35,8 @@ import org.kazusa.matter.ui.group.GroupViewModel
 import org.kazusa.matter.ui.history.BrowsingHistoryViewModel
 import org.kazusa.matter.ui.hotfeed.HotFeedViewModel
 import org.kazusa.matter.ui.login.LoginViewModel
+import org.kazusa.matter.ui.message.ChatViewModel
+import org.kazusa.matter.ui.message.MessageCenterViewModel
 import org.kazusa.matter.ui.profile.MyPostsViewModel
 import org.kazusa.matter.ui.profile.UserListKind
 import org.kazusa.matter.ui.profile.UserListViewModel
@@ -71,6 +75,9 @@ val dataModule = module {
     // 用户域 / 热搜域的数据入口：页面 ViewModel 依赖接口，不直接持有 WeiboApiService
     single<UserRepository> { WeiboUserRepository(get()) }
     single<HotSearchRepository> { WeiboHotSearchRepository(get()) }
+
+    // 私信域：独立协议（api.weibo.com/webim），与会话绑定的 Cookie 每次请求时重新读取
+    single<MessageRepository> { WeiboMessageRepository(get(), get()) }
 
     // 由导航根按会话请求并记忆；不能声明为应用单例，否则收藏状态会跨账号复用。
     factory { parameters -> FavoritesRepository(parameters.get<UserSession>(), get()) }
@@ -127,6 +134,16 @@ val viewModelModule = module {
         MyPostsViewModel(
             uid = parameters.get<String>(),
             userRepository = get()
+        )
+    }
+    // 消息页：私信 / @我 / 评论 / 赞 四个分区各自分页，状态都在同一个 ViewModel 里
+    viewModel { MessageCenterViewModel(get()) }
+    // 会话详情：按 NavEntry 作用域创建，返回列表再进来时聊天记录仍在
+    viewModel { parameters ->
+        ChatViewModel(
+            peerUid = parameters.get<String>(),
+            peerName = parameters.get<String>(),
+            repository = get()
         )
     }
 }

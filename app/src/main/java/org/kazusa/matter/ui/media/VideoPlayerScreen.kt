@@ -3,7 +3,6 @@ package org.kazusa.matter.ui.media
 import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.pm.PackageManager
-import android.os.Build
 import android.util.Rational
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -61,10 +60,7 @@ import androidx.media3.ui.PlayerView
 import org.kazusa.matter.MainActivity
 import org.kazusa.matter.data.model.VideoStreamInfo
 import androidx.activity.ComponentActivity
-import android.Manifest
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.rememberCoroutineScope
@@ -113,11 +109,10 @@ fun VideoPlayerScreen(
 
     // 画中画 (PiP) 支持与状态
     val isPipSupported = remember(context) {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+        context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
     }
     var isInPipMode by remember {
-        mutableStateOf(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) activity?.isInPictureInPictureMode == true else false)
+        mutableStateOf(activity?.isInPictureInPictureMode == true)
     }
 
     // 视频保存相关逻辑
@@ -147,30 +142,13 @@ fun VideoPlayerScreen(
         }
     }
 
-    val storagePermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            performSaveVideo()
-        } else {
-            Toast.makeText(context, "未授予存储权限，无法保存视频", Toast.LENGTH_SHORT).show()
-        }
-    }
-
     val requestSaveVideo: () -> Unit = {
-        val needsPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-            context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
-            PackageManager.PERMISSION_GRANTED
-        if (needsPermission) {
-            storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-        } else {
-            performSaveVideo()
-        }
+        performSaveVideo()
     }
 
     // 监听画中画模式变化
     DisposableEffect(componentActivity) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && componentActivity != null) {
+        if (componentActivity != null) {
             val listener = Consumer<androidx.core.app.PictureInPictureModeChangedInfo> { info ->
                 isInPipMode = info.isInPictureInPictureMode
             }
@@ -236,14 +214,12 @@ fun VideoPlayerScreen(
 
     // 主动进入画中画
     fun enterPictureInPicture() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity != null && isPipSupported) {
+        if (activity != null && isPipSupported) {
             val aspect = calculatePipAspectRatio(exoPlayer.videoSize)
             val builder = PictureInPictureParams.Builder()
                 .setAspectRatio(aspect)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                builder.setAutoEnterEnabled(true)
-                builder.setSeamlessResizeEnabled(true)
-            }
+                .setAutoEnterEnabled(true)
+                .setSeamlessResizeEnabled(true)
             try {
                 activity.enterPictureInPictureMode(builder.build())
             } catch (_: Exception) {}
@@ -254,7 +230,7 @@ fun VideoPlayerScreen(
     DisposableEffect(exoPlayer, activity) {
         val sizeListener = object : Player.Listener {
             override fun onVideoSizeChanged(videoSize: VideoSize) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && activity != null && isPipSupported) {
+                if (activity != null && isPipSupported) {
                     val aspect = calculatePipAspectRatio(videoSize)
                     try {
                         activity.setPictureInPictureParams(
@@ -292,7 +268,7 @@ fun VideoPlayerScreen(
     // 按 Home 键（Android 8-11）监听兜底：只依赖监听相关的键，不跟随播放器重建
     DisposableEffect(exoPlayer, activity, isPipSupported) {
         val mainActivity = activity as? MainActivity
-        if (mainActivity != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isPipSupported) {
+        if (mainActivity != null && isPipSupported) {
             mainActivity.onUserLeaveHintListener = {
                 if (exoPlayer.isPlaying) {
                     enterPictureInPicture()
@@ -301,7 +277,7 @@ fun VideoPlayerScreen(
         }
         onDispose {
             mainActivity?.onUserLeaveHintListener = null
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && activity != null && isPipSupported) {
+            if (activity != null && isPipSupported) {
                 try {
                     activity.setPictureInPictureParams(
                         PictureInPictureParams.Builder().setAutoEnterEnabled(false).build()

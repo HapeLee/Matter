@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
-import android.os.Build
 import android.os.CancellationSignal
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
@@ -71,8 +70,8 @@ suspend fun currentLatLon(context: Context, timeoutMs: Long = 8_000L): Pair<Doub
 
     val manager = context.locationManager() ?: return null
     val provider = LOCATION_PROVIDERS.firstOrNull { manager.isProviderEnabled(it) }
-    if (provider == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-        android.util.Log.d(TAG, "hotSearch location: no enabled provider or API < 30")
+    if (provider == null) {
+        android.util.Log.d(TAG, "hotSearch location: no enabled provider")
         return null
     }
 
@@ -83,7 +82,7 @@ suspend fun currentLatLon(context: Context, timeoutMs: Long = 8_000L): Pair<Doub
             cont.invokeOnCancellation { signal.cancel() }
             val consumer = Consumer<Location> { result -> if (cont.isActive) cont.resume(result) }
             runCatching {
-                // androidx.core 的兼容实现：API 30+ 用 requestCurrentLocation，低版本退回单次 update
+                // 现代定位 API：requestCurrentLocation 直接取当前位置
                 LocationManagerCompat.getCurrentLocation(manager, provider, signal, executor, consumer)
             }.onFailure {
                 android.util.Log.w(TAG, "requestCurrentLocation failed", it)

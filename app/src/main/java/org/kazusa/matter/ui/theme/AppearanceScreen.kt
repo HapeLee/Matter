@@ -1,6 +1,5 @@
 package org.kazusa.matter.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -197,8 +196,7 @@ fun AppearanceScreen(
                 )
 
                 // Android 12+ Monet 取色
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    SwitchSettingItem(
+                SwitchSettingItem(
                         title = "系统壁纸动态取色 (Monet)",
                         description = "提取当前系统桌面壁纸的主色调并全应用适配（开启时优先于自定义色彩）",
                         checked = themeState.dynamicColor,
@@ -208,7 +206,6 @@ fun AppearanceScreen(
                             }
                         }
                     )
-                }
             }
 
             // 2. Kolor 调色板与色彩引擎分组
@@ -219,7 +216,7 @@ fun AppearanceScreen(
 
                 SettingItem(
                     title = "调色板样式",
-                    description = if (themeState.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                    description = if (themeState.dynamicColor)
                         "跟随系统 Monet"
                     else
                         currentStyleName,
@@ -270,7 +267,7 @@ fun AppearanceScreen(
 
                 SettingItem(
                     title = "主题色彩",
-                    description = if (themeState.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                    description = if (themeState.dynamicColor)
                         "系统壁纸 Monet 动态色彩"
                     else
                         "种子色 $seedColorLabel",

@@ -14,11 +14,13 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.RectangleShape
+import org.kazusa.matter.ui.media.morph.LocalImageMorphState
 import org.kazusa.matter.ui.navigation.LocalSharedElementTarget
 import org.kazusa.matter.ui.navigation.weiboCardSharedBounds
 import org.kazusa.matter.ui.navigation.weiboPostAvatarSharedElement
 import org.kazusa.matter.ui.navigation.weiboPostContentSharedBounds
 import org.kazusa.matter.ui.navigation.weiboPostNameSharedElement
+import org.kazusa.matter.ui.navigation.weiboRetweetContentSharedBounds
 import org.kazusa.matter.ui.navigation.weiboPostSubtitleSharedElement
 import org.kazusa.matter.ui.navigation.weiboVideoSharedBounds
 import org.kazusa.matter.ui.navigation.formatAvatarSharedKey
@@ -389,6 +391,7 @@ fun PostDetailScreen(
                                 onVideoClick = onVideoClick,
                                 onMentionClick = onMentionClick,
                                 onTopicClick = onTopicClick,
+                                onPostClick = onPostClick,
                                 modifier = Modifier
                                     .weiboCardSharedBounds(
                                         key = detailSharedKey,
@@ -563,9 +566,13 @@ private fun PostDetailBody(
     onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit,
     onMentionClick: (String) -> Unit = {},
     onTopicClick: (String) -> Unit = {},
+    /** 点击正文内的嵌套原微博：进入原微博正文（与信息流卡片内的转发区块行为一致）。 */
+    onPostClick: (WeiboStatusDto) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val sharedElementTarget = LocalSharedElementTarget.current
+    // 大图形变进行中时不再接受跳转，避免两层动画叠加
+    val morphState = LocalImageMorphState.current
     // 正文页图片形变的来源标识：与信息流卡片区分，避免同一条微博在两处互相抢动画
     val imageOwnerKey = remember(post.idStr, post.mid, post.id) {
         "detail_${post.getCardSharedKey()}"
@@ -743,10 +750,32 @@ private fun PostDetailBody(
 
         // 嵌套原微博：全宽背景变色沉浸呈现
         post.retweetedStatus?.let { retweet ->
+            val retweetSectionKey = remember(retweet.idStr, retweet.mid, retweet.id) {
+                retweet.getRetweetSectionSharedKey()
+            }
+            // 正文页里的转发区块也可能是下一次形变的来源（正文 → 原微博正文）。
+            // 此时本区块自己就是共享容器；否则它只是外层正文容器的内容，随外层一起形变。
+            val isSectionNavSource = sharedElementTarget?.isContainerSelected(retweetSectionKey) == true
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+                    // 与信息流卡片的转发区块使用同一个 key：点击本区块进入原微博正文时，
+                    // 这段区块直接形变成目标正文的容器，与「卡片 → 正文」走同一条路径。
+                    .weiboCardSharedBounds(key = retweetSectionKey, shape = RectangleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .clickable {
+                        if (morphState?.isPresent != true) {
+                            // ownerKey 记成当前正文容器：从这条链路继续返回信息流时，
+                            // 转发区块仍能精确落回「承载它的那张卡片」，而不是整页硬切
+                            sharedElementTarget?.selectPost(
+                                cardKey = retweetSectionKey,
+                                ownerKey = containerSharedKey
+                            )
+                            // 目标页首帧即可渲染，避免转圈打断共享元素的测量
+                            PostDetailCache.put(retweet)
+                            onPostClick(retweet)
+                        }
+                    }
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 val authorName = retweet.user?.screenName ?: "原微博"
@@ -782,7 +811,15 @@ private fun PostDetailBody(
                         text = fullAnnotated,
                         inlineContent = bodyFormatted.inlineContent,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        // 与信息流卡片里的转发正文共用同一套共享元素身份：
+                        // 本区块自己是来源时对齐目标正文的主正文，外层正文是来源时作为「转发内容」跟着走。
+                        // 两端都固定排版再交叉淡化，飞行期间字号 / 折行不变，不会逐帧重新折行。
+                        modifier = Modifier.weiboRetweetContentSharedBounds(
+                            hostContainerKey = containerSharedKey,
+                            sectionContainerKey = retweetSectionKey,
+                            sharingSection = isSectionNavSource
+                        )
                     )
                 }
 
@@ -795,8 +832,10 @@ private fun PostDetailBody(
                     ImageGrid(
                         images = retweetImages,
                         ownerKey = "detail_retweet_${retweet.getCardSharedKey()}",
-                        sharedContainerKey = containerSharedKey,
-                        sharedImagePart = "retweet_image",
+                        // 本区块是形变来源时，图片要落到目标正文的主图宫格（key/part 与正文主图一致）；
+                        // 否则保持「外层正文容器内的转发图」身份，供卡片 → 正文这条路径收尾。
+                        sharedContainerKey = if (isSectionNavSource) retweetSectionKey else containerSharedKey,
+                        sharedImagePart = if (isSectionNavSource) "image" else "retweet_image",
                         livePhotoMap = retweet.livePhotoVideoMap,
                         onImageClick = onGridImageClick
                     )

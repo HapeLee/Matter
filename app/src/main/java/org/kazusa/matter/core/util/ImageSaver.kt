@@ -2,9 +2,7 @@ package org.kazusa.matter.core.util
 
 import android.content.ContentValues
 import android.content.Context
-import android.media.MediaScannerConnection
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
@@ -23,8 +21,7 @@ import java.net.URL
 /**
  * 把微博图片保存到系统相册。
  *
- * - Android 10+ 走 MediaStore 沙箱写入，无需任何存储权限；
- * - Android 9 及以下写入公共 `Pictures/Matter` 目录，需要 `WRITE_EXTERNAL_STORAGE` 运行时权限；
+ * - 走 MediaStore 沙箱写入，无需任何存储权限（minSdk 31 已不再需要 WRITE_EXTERNAL_STORAGE）；
  * - 直接流式转存原始字节，不做二次压缩，保证保存下来的是真正的原图。
  */
 object ImageSaver {
@@ -45,11 +42,7 @@ object ImageSaver {
             val mimeType = buildMimeType(fileName)
             val resolver = context.contentResolver
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                saveViaMediaStore(context, resolver, url, fileName, mimeType)
-            } else {
-                saveViaLegacyFile(context, url, fileName, mimeType)
-            }
+            saveViaMediaStore(context, resolver, url, fileName, mimeType)
         }
     }
 
@@ -77,7 +70,7 @@ object ImageSaver {
 
                     val videoLength = tempVideo.length()
 
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    run {
                         val pendingUri: Uri = resolver.insert(
                             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                             ContentValues().apply {
@@ -110,34 +103,6 @@ object ImageSaver {
                             runCatching { resolver.delete(pendingUri, null, null) }
                             throw t
                         }
-                    } else {
-                        check(Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED) { "外部存储不可用" }
-                        val albumDir = File(
-                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                            ALBUM_DIR
-                        )
-                        if (!albumDir.exists() && !albumDir.mkdirs()) {
-                            error("无法创建相册目录")
-                        }
-                        val target = File(albumDir, fileName)
-                        try {
-                            FileOutputStream(target).use { output ->
-                                FileInputStream(tempImage).use { imgIn ->
-                                    FileInputStream(tempVideo).use { vidIn ->
-                                        MotionPhotoComposer.compose(imgIn, vidIn, videoLength, output)
-                                    }
-                                }
-                            }
-                        } catch (t: Throwable) {
-                            runCatching { target.delete() }
-                            throw t
-                        }
-                        MediaScannerConnection.scanFile(
-                            context,
-                            arrayOf(target.absolutePath),
-                            arrayOf(mimeType),
-                            null
-                        )
                     }
                     fileName
                 } finally {
@@ -184,37 +149,6 @@ object ImageSaver {
             runCatching { resolver.delete(pendingUri, null, null) }
             throw t
         }
-        return fileName
-    }
-
-    @Suppress("DEPRECATION")
-    private fun saveViaLegacyFile(
-        context: Context,
-        url: String,
-        fileName: String,
-        mimeType: String
-    ): String {
-        check(Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED) { "外部存储不可用" }
-        val albumDir = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-            ALBUM_DIR
-        )
-        if (!albumDir.exists() && !albumDir.mkdirs()) {
-            error("无法创建相册目录")
-        }
-        val target = File(albumDir, fileName)
-        try {
-            FileOutputStream(target).use { output -> downloadTo(url, output) }
-        } catch (t: Throwable) {
-            runCatching { target.delete() }
-            throw t
-        }
-        MediaScannerConnection.scanFile(
-            context,
-            arrayOf(target.absolutePath),
-            arrayOf(mimeType),
-            null
-        )
         return fileName
     }
 
