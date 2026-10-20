@@ -169,7 +169,7 @@ val appVersionCode = providers.gradleProperty("matterVersionCode").orNull?.trim(
 
 本地可验证的部分：`prepare` 的脚本已用 Git Bash 在临时克隆中跑过正式版、预发布（`beta.1`/`beta.2` → `beta.3`）、非法 `VERSION_SUFFIX`、重复键与前导零五类场景，结果符合预期。
 
-2026-10-21 首次实跑（`publish: false`）通过：产物 `Matter-1.0.0-10.apk`，`versionCode=10` 与提交数一致，`apksigner verify` 显示 V2 签名证书 `CN=Matter`，SHA-256 `17ccf357…`。首次实跑暴露并修复了两个问题：
+2026-10-21 首次实跑（`publish: false`）通过：产物 `Matter-1.0.0-10.apk`，`versionCode=10` 与提交数一致，`apksigner verify` 显示 V2 签名证书 `CN=Matter`，SHA-256 `17ccf357…`。随后改为使用发布者已有的 keystore（`E:\my-release-key.jks`，别名 `key0`），复跑产出 `Matter-1.0.0-11.apk`，签名证书 SHA-256 变为 `ddc9ebf7…`，与 `keytool -list -v` 输出一致。首次实跑暴露并修复了两个问题：
 
 - 仓库里的 `gradlew` 是被裁剪过的脚本，缺少 `APP_HOME` 计算，导致 `CLASSPATH=/gradle/wrapper/gradle-wrapper.jar` 在 Linux runner 上找不到主类。已用 `./gradlew wrapper --gradle-version 9.8.1` 重新生成。
 - `gh secret set` 经 PowerShell 管道写入时带入了换行，`base64 -d` 报 `invalid input`。工作流已加 `tr -d '\r\n\t '` 容错，secret 也改为不带换行重新写入。
