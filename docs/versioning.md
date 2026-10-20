@@ -42,6 +42,7 @@
 - 入口 workflow 带 `if: github.actor == 'HapeLee' && github.ref == 'refs/heads/main'`，其他分支或其他人触发不会发布。
 - 构建逻辑在被调用的 `auto-release.yml` 中；`publish` 默认 `false`，普通手动运行只产出构建产物，不创建 Release。
 - 提交前必须先改 `version.properties`：修复走 `1.0.1`，新增功能走 `1.1.0`，重大调整或兼容性变化走 `2.0.0`。这是面向应用的项目约定，不声称应用 UI 是 SemVer 中定义的公共 API。
+- 发布成功后若配置了 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`，同一条流水线会把发布说明与 APK 推送到指定频道；未配置则跳过。
 - tag 已存在时发布会直接失败并提示升版本，不会静默覆盖同版本发布。
 
 ### 预发布

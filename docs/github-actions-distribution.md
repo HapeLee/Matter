@@ -158,7 +158,8 @@ val appVersionCode = providers.gradleProperty("matterVersionCode").orNull?.trim(
 | --- | --- |
 | `.github/workflows/verify.yml` | `push` / `pull_request` / 手动：`:app:testDebugUnitTest` + `:app:assembleDebug`，上传测试报告，权限只读 |
 | `.github/workflows/release.yml` | 正式版唯一入口：`workflow_dispatch`，`if: github.actor == 'HapeLee' && ref == 'refs/heads/main'`，以 `publish: true` 调用下者 |
-| `.github/workflows/auto-release.yml` | 可复用流程：`prepare`（算版本）→ `build`（签名、单测、构建、断言 APK 元数据、上传产物）→ `create_release`（tag + `gh release create`） |
+| `.github/workflows/auto-release.yml` | 可复用流程：`prepare`（算版本）→ `build`（签名、单测、构建、断言 APK 元数据、上传产物）→ `create_release`（tag + `gh release create` + Telegram 推送） |
+| `.github/scripts/notify-telegram.sh` | 发布说明与 APK 的 Telegram 推送，未配置 secrets 时静默跳过 |
 
 与 §5 草案的差异（实际实现已调整）：
 
@@ -189,8 +190,27 @@ val appVersionCode = providers.gradleProperty("matterVersionCode").orNull?.trim(
 - 首次发布前确认签名指纹，不要先用 debug 密钥发一版再换——那会成为两个不同应用。
 - 当前无 native 依赖，**不要照抄 ABI splits**：拆包只有在体积明显受 native 库影响时才值得，否则徒增产物管理与"装错包"风险。真要拆，`isUniversalApk = true` 保底 + `-PenableAbiSplits` 开关（参考项目的做法）。
 - AAB 只能用于 Google Play；自建分发只能给 APK。
-- 渠道：GitHub Releases（首选，与 tag/源码对应，国内直连可能受限）→ 对象存储镜像 → 内测平台 → Telegram/群组推送（参考项目已实现，Matter 可后续再加）。
+- 渠道：GitHub Releases（已实现，与 tag/源码对应）→ Telegram（已实现，见下）→ 对象存储镜像 / 内测平台（未实现）。
 - 参考项目的 `update-manifests` 孤儿分支值得记一笔：应用内检查更新只需读取一个静态 JSON，不依赖 GitHub API 配额。Matter 目前没有自动更新功能，**暂不实现**，但可以把清单结构留作后续扩展点。
+
+### Telegram 分发
+
+`create_release` 在 GitHub 发布成功后调用 `.github/scripts/notify-telegram.sh`：先发一条纯文本发布说明（GitHub 的 Markdown 标题会被剥成纯文本，避免 Bot API 解析失败），再用 `sendDocument` 上传 APK。
+
+需要两个额外 secret（未配置时该步骤只打印 notice 并跳过，不影响已完成的 GitHub 发布）：
+
+| Secret | 内容 |
+| --- | --- |
+| `TELEGRAM_BOT_TOKEN` | `@BotFather` 创建的 bot token |
+| `TELEGRAM_CHAT_ID` | 目标频道/群的 id（`-100…` 形式） |
+
+限制与注意：
+
+- Bot API 云端 `sendDocument` 单文件上限 **50 MB**，超过时脚本改为发送 Release 下载链接。当前 APK 约 9 MB。
+- 消息长度上限 4096，caption 上限 1024，脚本按字符截断。
+- 推送只发生在 `publish: true` 的正式发布流程；普通构建不会打扰频道。
+- **仓库为 private 时 Release 链接对非协作者无效**，此时 Telegram 里的下载链接只有你自己能打开；要么把仓库转为 public，要么只依赖频道内的 APK 附件。
+- 脚本用 `curl` + `jq`（runner 预装）调用 Bot API，不引入第三方 action；失败会以 `::error::` 报出，但不回滚已完成的 GitHub Release。
 
 ## 九、风险与未验证项
 
