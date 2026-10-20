@@ -107,6 +107,13 @@ android {
             )
         }
     }
+    // minSdk 28+ 时 AGP 默认把 classes.dex 不压缩存储（安装更快），代价是 APK 体积接近翻倍。
+    // 本项目靠自己分发 APK（GitHub Release / Telegram），下载体积优先，因此改回压缩存储。
+    packaging {
+        dex {
+            useLegacyPackaging = true
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21

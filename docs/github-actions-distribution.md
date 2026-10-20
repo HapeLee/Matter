@@ -188,7 +188,9 @@ val appVersionCode = providers.gradleProperty("matterVersionCode").orNull?.trim(
 
 - **密钥必须异地备份**。keystore 丢失意味着同 `applicationId` 再也无法发布升级包，用户只能卸载重装；这比 CI 配置重要得多。
 - 首次发布前确认签名指纹，不要先用 debug 密钥发一版再换——那会成为两个不同应用。
-- 当前无 native 依赖，**不要照抄 ABI splits**：拆包只有在体积明显受 native 库影响时才值得，否则徒增产物管理与"装错包"风险。真要拆，`isUniversalApk = true` 保底 + `-PenableAbiSplits` 开关（参考项目的做法）。
+- 当前无 native 依赖，**不要照抄 ABI splits**：拆包只有在体积明显受 native 库影响时才值得，否则徒增产物管理与"装错包"风险。真要拆，`isUniversalApk = true` 保底 + `-PenableAbiSplits` 开关（参考项目的做法）。实测 `lib/` 只有 72 KB（4 个 ABI × 2 个 `.so`），按 ABI 拆分最多省 35 KB。
+- **APK 体积构成**（v1.0.0 实测）：`classes.dex` 占 92%，`resources.arsc` 0.38 MB，`res/` 0.15 MB，`lib/` 0.07 MB。R8（`isMinifyEnabled` / `isShrinkResources`）始终生效，dex 为 12,090 类 / 57,931 方法。
+- **dex 压缩**：`minSdk >= 28` 时 AGP 默认把 `classes.dex` 不压缩存储（安装更快），APK 因此接近翻倍（9.0 MB）。本项目自己分发 APK，下载体积优先，`app/build.gradle.kts` 里设置了 `packaging { dex { useLegacyPackaging = true } }`，同一个包降到 4.6 MB。代价是安装时多一次解压，运行期无影响。
 - AAB 只能用于 Google Play；自建分发只能给 APK。
 - 渠道：GitHub Releases（已实现，与 tag/源码对应）→ Telegram（已实现，见下）→ 对象存储镜像 / 内测平台（未实现）。
 - 参考项目的 `update-manifests` 孤儿分支值得记一笔：应用内检查更新只需读取一个静态 JSON，不依赖 GitHub API 配额。Matter 目前没有自动更新功能，**暂不实现**，但可以把清单结构留作后续扩展点。
