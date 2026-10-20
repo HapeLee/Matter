@@ -125,7 +125,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ -n "$KEYSTORE_BASE64" ]] || { echo "::error::ANDROID_KEYSTORE_BASE64 is not set"; exit 1; }
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          # secret 里可能混入换行（编辑器/管道写入），base64 -d 遇到 \r 会直接报 invalid input
+          echo "$KEYSTORE_BASE64" | tr -d '\r\n\t ' | base64 -d > "$RUNNER_TEMP/release.jks"
+          [[ -s "$RUNNER_TEMP/release.jks" ]] || { echo "::error::decoded keystore is empty"; exit 1; }
           {
             echo ""
             echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks"
