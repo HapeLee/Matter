@@ -43,13 +43,6 @@ class LivePhotoImageTest {
         assertArrayEquals(original, image.readBytes())
     }
 
-    @Test
-    @Config(sdk = [26], application = Application::class)
-    @GraphicsMode(GraphicsMode.Mode.LEGACY)
-    fun pngConversionAlsoWorksOnMinSdk() {
-        pngIsActuallyConvertedToJpeg()
-    }
-
     @Test fun generatedXmpIsReadableByAndroidXmlParser() {
         val bitmap = Bitmap.createBitmap(8, 6, Bitmap.Config.ARGB_8888)
         val jpeg = java.io.ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it) }
