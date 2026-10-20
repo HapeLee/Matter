@@ -1,12 +1,7 @@
 package org.kazusa.matter.ui.media.morph
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.PredictiveBackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -241,7 +236,6 @@ fun ImageMorphOverlay(
         var originalDisabled by remember { mutableStateOf(false) }
         var originalLoadFailed by remember { mutableStateOf(false) }
         var toastMessage by remember { mutableStateOf<String?>(null) }
-        var urlAwaitingStoragePermission by remember { mutableStateOf<String?>(null) }
 
         // 探测当前页与前后相邻页的清晰度档位及文件体积
         LaunchedEffect(pagerState.currentPage, urls) {
@@ -297,29 +291,10 @@ fun ImageMorphOverlay(
             }
         }
 
-        val storagePermissionLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.RequestPermission()
-        ) { granted ->
-            val pending = urlAwaitingStoragePermission
-            urlAwaitingStoragePermission = null
-            when {
-                granted && pending != null -> startSave(pending)
-                !granted -> toastMessage = "未授予存储权限，无法保存图片"
-            }
-        }
-
-        // Android 10+ 走 MediaStore 沙箱无需权限；Android 9 及以下需要动态申请写入权限。
-        // 保存进相册始终转存原图档位，不做二次压缩。
+        // 保存进相册走 MediaStore 沙箱，无需任何存储权限（minSdk 31 已不再需要 WRITE_EXTERNAL_STORAGE）。
+        // 始终转存原图档位，不做二次压缩。
         val requestSave: (String) -> Unit = { imageUrl ->
-            val needsPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-                    context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
-                    PackageManager.PERMISSION_GRANTED
-            if (needsPermission) {
-                urlAwaitingStoragePermission = imageUrl
-                storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            } else {
-                startSave(imageUrl)
-            }
+            startSave(imageUrl)
         }
 
         // 当前页清晰度与尺寸判定

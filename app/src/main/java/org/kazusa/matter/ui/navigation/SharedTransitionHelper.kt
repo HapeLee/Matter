@@ -223,6 +223,16 @@ const val POST_PART_SUBTITLE = "subtitle"
 const val POST_PART_CONTENT = "content"
 
 /**
+ * 「嵌套转发正文」的命名空间后缀。
+ *
+ * 同一段转发正文在两次转场里身份不同，key 必须跟着换：
+ * - 转发区块自己就是来源（转发区块 → 原微博正文）：它就是目标正文的主正文，用 [POST_PART_CONTENT]；
+ * - 外层容器才是来源（卡片 → 正文）：它只是外层容器里的「转发内容」，必须单独占一个命名空间，
+ *   否则会与宿主容器自己的主正文撞 key，同一个组合里出现两份相同 key 的共享元素。
+ */
+const val POST_PART_RETWEET_CONTENT = "retweet_content"
+
+/**
  * 「卡片 → 正文」时，卡片内部元素（头像 / 昵称 / 正文）的共享元素 key。
  *
  * 以容器 key（post_card_<id> 或 retweet_card_<id>）为前缀派生：
@@ -328,10 +338,11 @@ fun Modifier.weiboPostSubtitleSharedElement(
 @Composable
 fun Modifier.weiboPostContentSharedBounds(
     containerKey: String,
-    ownerKey: String? = null
+    ownerKey: String? = null,
+    part: String = POST_PART_CONTENT
 ): Modifier = postPartSharedBounds(
     containerKey = containerKey,
-    part = POST_PART_CONTENT,
+    part = part,
     ownerKey = ownerKey,
     resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(
         contentScale = ContentScale.None,
@@ -340,6 +351,33 @@ fun Modifier.weiboPostContentSharedBounds(
     clipShape = RectangleShape,
     exitFade = PostContentExitFade,
     enterFade = PostContentEnterFade
+)
+
+/**
+ * 嵌套转发区块里的正文共享元素。
+ *
+ * 转发正文在卡片与正文页两端都是 bodyMedium，只有「@作者:」前缀与容器宽度不同。
+ * 和主正文一样提升成共享元素后，飞行期间字号与折行都固定不变、只随容器连续移动，
+ * 不会出现「外框在形变、文字在里面逐帧重新折行」的观感；
+ * 两端排版差异由 [PostContentEnterFade] / [PostContentExitFade] 的短促交叉淡化交接。
+ *
+ * @param hostContainerKey 承载该转发区块的外层容器 key（卡片 key 或正文容器 key）
+ * @param sectionContainerKey 转发区块自身的 key
+ * @param sharingSection 本次形变是否由「转发区块自己」发起
+ * @param ownerKey 仅 [sharingSection] 为 true 时需要：锁定唯一一张宿主卡片，
+ *                 避免多条微博转发同一条时多张卡片一起动画
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun Modifier.weiboRetweetContentSharedBounds(
+    hostContainerKey: String,
+    sectionContainerKey: String,
+    sharingSection: Boolean,
+    ownerKey: String? = null
+): Modifier = weiboPostContentSharedBounds(
+    containerKey = if (sharingSection) sectionContainerKey else hostContainerKey,
+    ownerKey = ownerKey,
+    part = if (sharingSection) POST_PART_CONTENT else POST_PART_RETWEET_CONTENT
 )
 
 /** 卡片与正文中的配图逐张匹配；命名空间区分主微博和嵌套转发的图片。 */

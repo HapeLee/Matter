@@ -1,6 +1,5 @@
 package org.kazusa.matter.ui.settings
 
-import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +41,7 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import kotlinx.coroutines.launch
+import org.kazusa.matter.BuildConfig
 import org.kazusa.matter.core.datastore.ImageQualityMode
 import org.kazusa.matter.core.datastore.MediaPreferenceState
 import org.kazusa.matter.core.datastore.MediaPreferences
@@ -106,7 +106,7 @@ fun SettingsScreen(
             SettingGroup(title = "外观与个性化") {
                 SettingItem(
                     title = "主题与调色板",
-                    description = if (themeState.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                    description = if (themeState.dynamicColor)
                         "系统壁纸 Monet 动态色彩"
                     else
                         "种子色 ${themeState.seedColor.toHexString()} · ${themeState.paletteStyle.displayName()} 风格",
@@ -166,7 +166,7 @@ fun SettingsScreen(
                 )
                 SettingItem(
                     title = "应用版本",
-                    description = "v1.0.0 (Compose M3)"
+                    description = "v${BuildConfig.VERSION_NAME} (构建 ${BuildConfig.VERSION_CODE})"
                 )
                 SettingItem(
                     title = "架构与依赖",

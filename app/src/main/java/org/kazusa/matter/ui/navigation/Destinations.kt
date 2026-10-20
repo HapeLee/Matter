@@ -80,6 +80,17 @@ sealed interface Screen : NavKey {
     @Serializable
     data object MyFollowers : Screen
 
+    /** 消息（私信会话列表） */
+    @Serializable
+    data object Messages : Screen
+
+    /** 与某个人的私信记录 */
+    @Serializable
+    data class Chat(
+        val peerUid: String,
+        val peerName: String = ""
+    ) : Screen
+
     @Serializable
     data class SearchResult(
         val query: String,

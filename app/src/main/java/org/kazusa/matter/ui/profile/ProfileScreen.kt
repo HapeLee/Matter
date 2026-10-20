@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Bookmark
@@ -76,6 +77,7 @@ fun ProfileScreen(
     onNavigateToMyPosts: () -> Unit = {},
     onNavigateToFollowing: () -> Unit = {},
     onNavigateToFollowers: () -> Unit = {},
+    onNavigateToMessages: () -> Unit = {},
     onLogout: () -> Unit,
     backdrop: LayerBackdrop? = null,
     bottomBarPadding: Dp = 0.dp,
@@ -238,6 +240,21 @@ fun ProfileScreen(
                             onClick = if (!isGuest) onNavigateToFollowers else null
                         )
                     }
+                }
+            }
+
+            // 消息入口：私信会话列表（数据来自网页版私信接口）
+            MatterCard(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    ProfileMenuRow(
+                        icon = Icons.Default.Email,
+                        title = "消息",
+                        subtitle = "私信、@我、评论与赞",
+                        onClick = onNavigateToMessages
+                    )
                 }
             }
 

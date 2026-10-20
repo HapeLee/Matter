@@ -2,23 +2,18 @@ package org.kazusa.matter.core.util
 
 import android.content.ContentValues
 import android.content.Context
-import android.media.MediaScannerConnection
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.FileOutputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
 /**
  * 将微博视频保存至系统媒体库（相册/视频库）：
- * - Android 10+ (API 29+) 走 MediaStore 沙箱写入，保存至 Movies/Matter 目录，免申请权限；
- * - Android 9 及以下写入公共 Movies/Matter 目录，依赖 WRITE_EXTERNAL_STORAGE 权限；
+ * - 走 MediaStore 沙箱写入，保存至 Movies/Matter 目录，免申请任何存储权限；
  * - 边下边写，流式写入避免视频占用 JVM 堆内存导致 OOM；
  * - 携带微博防盗链 Referer 请求头，确保 CDN 正常响应。
  */
@@ -45,11 +40,7 @@ object VideoSaver {
             val mimeType = "video/mp4"
             val resolver = context.contentResolver
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                saveViaMediaStore(resolver, url, fileName, mimeType)
-            } else {
-                saveViaLegacyFile(context, url, fileName, mimeType)
-            }
+            saveViaMediaStore(resolver, url, fileName, mimeType)
         }
     }
 
@@ -87,37 +78,6 @@ object VideoSaver {
             runCatching { resolver.delete(pendingUri, null, null) }
             throw t
         }
-        return fileName
-    }
-
-    @Suppress("DEPRECATION")
-    private fun saveViaLegacyFile(
-        context: Context,
-        url: String,
-        fileName: String,
-        mimeType: String
-    ): String {
-        check(Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED) { "外部存储不可用" }
-        val moviesDir = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
-            ALBUM_DIR
-        )
-        if (!moviesDir.exists() && !moviesDir.mkdirs()) {
-            error("无法创建视频目录")
-        }
-        val target = File(moviesDir, fileName)
-        try {
-            FileOutputStream(target).use { output -> downloadTo(url, output) }
-        } catch (t: Throwable) {
-            runCatching { target.delete() }
-            throw t
-        }
-        MediaScannerConnection.scanFile(
-            context,
-            arrayOf(target.absolutePath),
-            arrayOf(mimeType),
-            null
-        )
         return fileName
     }
 

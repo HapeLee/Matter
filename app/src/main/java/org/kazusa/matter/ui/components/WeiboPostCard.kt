@@ -71,6 +71,7 @@ import org.kazusa.matter.ui.navigation.weiboCardSharedBounds
 import org.kazusa.matter.ui.navigation.weiboPostAvatarSharedElement
 import org.kazusa.matter.ui.navigation.weiboPostContentSharedBounds
 import org.kazusa.matter.ui.navigation.weiboPostNameSharedElement
+import org.kazusa.matter.ui.navigation.weiboRetweetContentSharedBounds
 import org.kazusa.matter.ui.navigation.weiboPostSubtitleSharedElement
 import org.kazusa.matter.ui.navigation.weiboVideoSharedBounds
 import org.kazusa.matter.ui.navigation.formatVideoSharedKey
@@ -518,7 +519,13 @@ private fun RetweetCard(
             }
         }
 
-        // 转发区块正文：与「正文页主正文」共享元素对齐，
+        // 打开宿主微博时（卡片 → 正文），本区块的文字 / 图片都只是「宿主卡片里的转发内容」；
+        // 打开原微博时（转发区块 → 正文），它们就是目标正文的主正文 / 主图。
+        // 两种身份必须使用不同的共享元素 key，否则会和宿主自己的主内容撞 key。
+        val sharingHost = sharedElementTarget?.isContainerSelected(hostSharedKey) == true
+
+        // 转发区块正文：与正文 / 主正文走同一套「固定排版 + 交叉淡化」处理，
+        // 避免容器形变期间文字逐帧重新折行；
         // ownerKey 锁定宿主卡片，避免多条微博转发同一条时多张卡片一起动画
         SelectionContainer {
             Text(
@@ -526,9 +533,11 @@ private fun RetweetCard(
                 inlineContent = bodyFormatted.inlineContent,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weiboPostContentSharedBounds(
-                    containerKey = retweetSectionKey,
-                    ownerKey = hostSharedKey
+                modifier = Modifier.weiboRetweetContentSharedBounds(
+                    hostContainerKey = hostSharedKey,
+                    sectionContainerKey = retweetSectionKey,
+                    sharingSection = !sharingHost,
+                    ownerKey = if (sharingHost) null else hostSharedKey
                 )
             )
         }
@@ -536,7 +545,6 @@ private fun RetweetCard(
         val retweetImages = retweet.allLargeImageUrls
         if (retweetImages.isNotEmpty()) {
             // 打开宿主微博时匹配正文内的转发图片；打开原微博时匹配正文主图。
-            val sharingHost = sharedElementTarget?.isContainerSelected(hostSharedKey) == true
             Spacer(modifier = Modifier.height(8.dp))
             val onGridImageClick = remember(retweetImages, onImageClick) {
                 { index: Int -> onImageClick(retweetImages, index) }
