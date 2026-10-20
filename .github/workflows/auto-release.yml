@@ -1,0 +1,252 @@
+name: Auto Build
+
+# 可复用的构建流程：手动触发的默认行为只出构建产物，
+# 只有被 release.yml 以 publish=true 调用时才创建 Tag 与 GitHub Release。
+# 日常 push / PR 的校验在 verify.yml，不占用这里的构建时间。
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 创建 Tag 与 GitHub Release
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      publish:
+        description: 创建 Tag 与 GitHub Release
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: distribution
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.ver.outputs.name }}
+      code: ${{ steps.ver.outputs.code }}
+      is_release: ${{ steps.ver.outputs.is_release }}
+      previous_tag: ${{ steps.ver.outputs.previous_tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # 提交数就是 versionCode，浅克隆会让它变成 1
+          fetch-depth: 0
+
+      - name: Compute version
+        id: ver
+        run: |
+          set -euo pipefail
+          FILE=version.properties
+          read_prop() {
+            local count
+            count=$(grep -c "^$1[[:space:]]*=" "$FILE" || true)
+            if [[ "$count" != "1" ]]; then
+              # 必须写到 stderr：函数在命令替换中调用，stdout 会被变量吞掉
+              echo "::error::$FILE must contain exactly one $1" >&2
+              return 1
+            fi
+            sed -n "s/^$1[[:space:]]*=[[:space:]]*//p" "$FILE" | tr -d '[:space:]'
+          }
+
+          MAJOR=$(read_prop VERSION_MAJOR)
+          MINOR=$(read_prop VERSION_MINOR)
+          PATCH=$(read_prop VERSION_PATCH)
+          SUFFIX=$(read_prop VERSION_SUFFIX)
+          for part in "$MAJOR" "$MINOR" "$PATCH"; do
+            [[ "$part" =~ ^(0|[1-9][0-9]*)$ ]] || { echo "::error::invalid version segment '$part'"; exit 1; }
+          done
+          [[ "$SUFFIX" == "0" || "$SUFFIX" == "1" ]] || { echo "::error::VERSION_SUFFIX must be 0 or 1"; exit 1; }
+
+          BASE="$MAJOR.$MINOR.$PATCH"
+          CODE=$(git rev-list --count HEAD)
+          echo "commit count (versionCode): $CODE"
+
+          if [[ "$SUFFIX" == "0" ]]; then
+            NAME="$BASE"
+            IS_RELEASE=true
+          else
+            # 预发布序号由已有 tag 递增，tag 是唯一的状态记录
+            LAST=$(git tag --list "v$BASE-beta.*" --sort=-v:refname | head -n 1)
+            if [[ "$LAST" =~ -beta\.([0-9]+)$ ]]; then
+              BUILD=$((BASH_REMATCH[1] + 1))
+            else
+              BUILD=1
+            fi
+            NAME="$BASE-beta.$BUILD"
+            IS_RELEASE=false
+          fi
+
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          echo "versionName: $NAME, release: $IS_RELEASE, previous tag: ${PREVIOUS_TAG:-none}"
+
+          {
+            echo "name=$NAME"
+            echo "code=$CODE"
+            echo "is_release=$IS_RELEASE"
+            echo "previous_tag=$PREVIOUS_TAG"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # 仓库在 Windows 上提交，gradlew 可能没有可执行位
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      # aliyun 镜像面向国内开发机，在 runner 上会 502；
+      # Gradle 一旦判定某个仓库失败就会整体停用它，所以这里直接移除，保留 google() / mavenCentral()。
+      - name: Remove Aliyun mirrors
+        run: sed -i '/maven.aliyun.com/d' settings.gradle.kts
+
+      - name: Decode signing material
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          [[ -n "$KEYSTORE_BASE64" ]] || { echo "::error::ANDROID_KEYSTORE_BASE64 is not set"; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          {
+            echo ""
+            echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks"
+            echo "RELEASE_STORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            echo "RELEASE_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}"
+            echo "RELEASE_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}"
+          } >> gradle.properties
+
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest --console=plain
+
+      - name: Build release APK
+        env:
+          VERSION_NAME: ${{ needs.prepare.outputs.name }}
+          VERSION_CODE: ${{ needs.prepare.outputs.code }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease \
+            "-PmatterVersionName=$VERSION_NAME" \
+            "-PmatterVersionCode=$VERSION_CODE" \
+            --console=plain
+
+      - name: Collect and verify artifacts
+        env:
+          VERSION_NAME: ${{ needs.prepare.outputs.name }}
+          VERSION_CODE: ${{ needs.prepare.outputs.code }}
+        run: |
+          set -euo pipefail
+          mapfile -t APKS < <(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk')
+          [[ "${#APKS[@]}" -eq 1 ]] || { echo "::error::expected exactly one release APK, found ${#APKS[@]}"; exit 1; }
+          APK="${APKS[0]}"
+          case "$APK" in
+            *unsigned*) echo "::error::release APK is unsigned; signing properties were not applied"; exit 1 ;;
+          esac
+
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          "$BUILD_TOOLS/apksigner" verify --print-certs "$APK"
+          BADGING=$("$BUILD_TOOLS/aapt2" dump badging "$APK")
+          echo "$BADGING" | head -n 1
+          echo "$BADGING" | grep -q "versionCode='$VERSION_CODE'" \
+            || { echo "::error::APK versionCode does not match the reserved number $VERSION_CODE"; exit 1; }
+          echo "$BADGING" | grep -q "versionName='$VERSION_NAME'" \
+            || { echo "::error::APK versionName does not match $VERSION_NAME"; exit 1; }
+
+          mkdir -p dist
+          OUT="dist/Matter-$VERSION_NAME-$VERSION_CODE.apk"
+          cp "$APK" "$OUT"
+          sha256sum "$OUT" > dist/SHA256SUMS.txt
+          cp app/build/outputs/mapping/release/mapping.txt dist/mapping.txt 2>/dev/null || true
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: matter-release
+          if-no-files-found: error
+          path: dist/*
+
+  create_release:
+    needs: [ prepare, build ]
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: matter-release
+          path: dist
+
+      - name: Check tag is unused
+        env:
+          TAG: v${{ needs.prepare.outputs.name }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG already exists. Bump VERSION_MAJOR/MINOR/PATCH in version.properties first."
+            exit 1
+          fi
+
+      - name: Build release notes
+        id: notes
+        env:
+          VERSION_NAME: ${{ needs.prepare.outputs.name }}
+          VERSION_CODE: ${{ needs.prepare.outputs.code }}
+          IS_RELEASE: ${{ needs.prepare.outputs.is_release }}
+          PREVIOUS_TAG: ${{ needs.prepare.outputs.previous_tag }}
+        run: |
+          set -euo pipefail
+          {
+            if [[ "$IS_RELEASE" != "true" ]]; then
+              echo "> 预发布版本，可能不稳定。"
+              echo ""
+            fi
+            echo "构建号（versionCode）：\`$VERSION_CODE\`"
+            echo ""
+            echo "### 更新内容"
+            echo ""
+            if [[ -n "$PREVIOUS_TAG" ]] && git rev-parse -q --verify "refs/tags/$PREVIOUS_TAG" >/dev/null; then
+              git log "$PREVIOUS_TAG"..HEAD --no-merges --pretty='* %s (%h)'
+            else
+              git log --no-merges --pretty='* %s (%h)' -n 30
+            fi
+          } > notes.md
+          cat notes.md
+
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_NAME: ${{ needs.prepare.outputs.name }}
+          VERSION_CODE: ${{ needs.prepare.outputs.code }}
+          IS_RELEASE: ${{ needs.prepare.outputs.is_release }}
+        run: |
+          set -euo pipefail
+          ARGS=(
+            --title "Matter $VERSION_NAME (build $VERSION_CODE)"
+            --notes-file notes.md
+            --target "$GITHUB_SHA"
+          )
+          if [[ "$IS_RELEASE" != "true" ]]; then
+            ARGS+=(--prerelease)
+          fi
+          gh release create "v$VERSION_NAME" dist/* "${ARGS[@]}"
