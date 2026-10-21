@@ -50,7 +50,7 @@ class PostDetailViewModelTest {
 
     private fun viewModel(
         postId: String,
-        likeRepository: LikeRepository = LikeRepository { _, isLike -> ApiResult.Success(isLike) },
+        likeRepository: LikeRepository = LikeRepository { _, isLike, _ -> ApiResult.Success(isLike) },
         source: FakeSource = FakeSource()
     ) = keep(
         PostDetailViewModel(
@@ -126,7 +126,7 @@ class PostDetailViewModelTest {
     @Test
     fun likeFailureRollsBackSharedStateAndReachesTheUi() = runTest {
         val messages = mutableListOf<String>()
-        val repository = LikeRepository { _, _ -> ApiResult.Error(message = "点赞失败") }
+        val repository = LikeRepository { _, _, _ -> ApiResult.Error(message = "点赞失败") }
         val vm = viewModel(postId = "detail-like", likeRepository = repository)
 
         vm.load()
@@ -203,7 +203,7 @@ class PostDetailViewModelTest {
 
     @Test
     fun likeStateIsSharedWithTheFeedInsteadOfCopiedIntoThePage() = runTest {
-        val repository = LikeRepository { _, isLike -> ApiResult.Success(isLike) }
+        val repository = LikeRepository { _, isLike, _ -> ApiResult.Success(isLike) }
         val vm = viewModel(postId = "detail-like-shared", likeRepository = repository)
 
         vm.load()

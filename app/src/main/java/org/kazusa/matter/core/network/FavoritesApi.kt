@@ -14,7 +14,10 @@ import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.model.UserPostsPage
 
 /** 与移动网页端保持一致，复用 Matter 的 m.weibo.cn Cookie 会话。 */
-internal class FavoritesApi(private val client: HttpClient) {
+internal class FavoritesApi(
+    private val client: HttpClient,
+    private val writeSession: WeiboWriteSession
+) {
     suspend fun getFavorites(cookie: String, page: Int): ApiResult<UserPostsPage> = request {
         val response = client.get("https://m.weibo.cn/api/container/getIndex") {
             header("Cookie", cookie)
@@ -36,42 +39,47 @@ internal class FavoritesApi(private val client: HttpClient) {
     }
 
     suspend fun setFavorite(cookie: String, id: String, favorite: Boolean): ApiResult<Unit> = request {
-        // 每次写入前获取新的 st 和 Cookie，不复用登录时保存的过期 token。
-        val cookies = linkedMapOf<String, String>()
-        cookie.split(';').forEach { part ->
-            val name = part.substringBefore('=').trim()
-            if (name.isNotEmpty() && '=' in part) cookies[name] = part.substringAfter('=').trim()
-        }
-        val bootstrap = client.get("https://m.weibo.cn/api/config") {
-            header("Cookie", cookie)
-            header("Referer", "https://m.weibo.cn/")
-        }
-        val config = readResponse(bootstrap)["data"]?.jsonObject
-        if (config?.get("login")?.jsonPrimitive?.booleanOrNull != true) {
-            throw FavoritesException(401, "登录已失效，请重新登录后收藏")
-        }
-        bootstrap.headers.getAll("Set-Cookie").orEmpty().forEach { value ->
-            val pair = value.substringBefore(';')
-            if ('=' in pair) cookies[pair.substringBefore('=').trim()] = pair.substringAfter('=').trim()
-        }
-        val token = config["st"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
-            ?: throw FavoritesException(401, "无法获取收藏凭据，请重新登录后重试")
         val path = if (favorite) "createfav" else "destroyfav"
-        val response = client.submitForm(
-            url = "https://m.weibo.cn/api/statuses/$path",
-            formParameters = parameters {
-                append("id", id)
-                append("st", token)
+        // 与点赞、关注共用凭据缓存、串行提交和频控冷却：微博按账号对写操作限流，
+        // 各写各的会让一次频控把三个入口全部拖进冷却。
+        writeSession.execute(
+            cookie = cookie,
+            action = if (favorite) "收藏" else "取消收藏"
+        ) { credentials ->
+            val response = client.submitForm(
+                url = "https://m.weibo.cn/api/statuses/$path",
+                formParameters = parameters {
+                    append("id", id)
+                    append("st", credentials.token)
+                }
+            ) {
+                header("Cookie", credentials.cookieHeader)
+                header("X-XSRF-TOKEN", credentials.token)
+                header("Origin", "https://m.weibo.cn")
+                header("Referer", "https://m.weibo.cn/")
+                header("X-Requested-With", "XMLHttpRequest")
             }
-        ) {
-            header("Cookie", cookies.entries.joinToString("; ") { "${it.key}=${it.value}" })
-            header("X-XSRF-TOKEN", token)
-            header("Origin", "https://m.weibo.cn")
-            header("Referer", "https://m.weibo.cn/")
-        }
-        val body = readResponse(response)
-        if (body["ok"]?.jsonPrimitive?.content != "1") {
-            throw FavoritesException(null, body.errorMessage("收藏操作失败，请重试"))
+            if (response.status.value == WeiboWriteErrors.CODE_RATE_LIMITED) {
+                writeSession.reportRateLimited()
+                throw FavoritesException(
+                    WeiboWriteErrors.CODE_RATE_LIMITED,
+                    WeiboWriteErrors.RATE_LIMITED_MESSAGE
+                )
+            }
+            val body = readResponse(response)
+            if (body["ok"]?.jsonPrimitive?.content != "1") {
+                val message = body.errorMessage("收藏操作失败，请重试")
+                if (WeiboWriteErrors.isRateLimited(message)) {
+                    writeSession.reportRateLimited()
+                    throw FavoritesException(
+                        WeiboWriteErrors.CODE_RATE_LIMITED,
+                        WeiboWriteErrors.RATE_LIMITED_MESSAGE
+                    )
+                }
+                // 多为 st 失效：丢掉缓存凭据，下次重新获取
+                writeSession.invalidate()
+                throw FavoritesException(null, message)
+            }
         }
     }
 
@@ -97,6 +105,9 @@ internal class FavoritesApi(private val client: HttpClient) {
 
     private suspend fun <T> request(block: suspend () -> T): ApiResult<T> = try {
         ApiResult.Success(block())
+    } catch (e: WriteGateException) {
+        // 本地频控冷却中或凭据不可用：保留错误码，便于上层提示而不是当成网络失败
+        ApiResult.Error(e.code, e.message.orEmpty())
     } catch (e: CancellationException) {
         throw e
     } catch (e: FavoritesException) {

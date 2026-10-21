@@ -22,7 +22,7 @@ class LikedPostsApiTest {
             ]}}""")
         })
         try {
-            val page = (FavoritesApi(client).getLikedPosts("SUB=test", 2) as ApiResult.Success).data
+            val page = (WeiboApiService(client).getLikedPosts("SUB=test", 2) as ApiResult.Success).data
             assertEquals(listOf(123L, 124L), page.posts.map { it.id })
             assertFalse(page.posts.first().isFavorited)
             assertTrue(page.posts.last().isFavorited)
@@ -35,7 +35,7 @@ class LikedPostsApiTest {
         for (data in listOf("""{"page":1000,"statuses":null}""", """{"page":1000}""", """{"page":1000,"statuses":[]}""")) {
             val client = HttpClient(MockEngine { respond("""{"ok":1,"data":$data}""") })
             try {
-                val page = (FavoritesApi(client).getLikedPosts("SUB=test", 999) as ApiResult.Success).data
+                val page = (WeiboApiService(client).getLikedPosts("SUB=test", 999) as ApiResult.Success).data
                 assertTrue(page.posts.isEmpty())
                 assertNull(page.nextPage)
             } finally { client.close() }
@@ -54,7 +54,7 @@ class LikedPostsApiTest {
             "<html>login required</html>"
         )) {
             val client = HttpClient(MockEngine { respond(response) })
-            try { assertTrue(FavoritesApi(client).getLikedPosts("SUB=test", 1) is ApiResult.Error) }
+            try { assertTrue(WeiboApiService(client).getLikedPosts("SUB=test", 1) is ApiResult.Error) }
             finally { client.close() }
         }
     }

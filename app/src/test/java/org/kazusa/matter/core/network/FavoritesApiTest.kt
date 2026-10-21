@@ -30,7 +30,7 @@ class FavoritesApiTest {
             ]}}""")
         })
         try {
-            val result = FavoritesApi(client).getFavorites("SUB=test", 2) as ApiResult.Success
+            val result = WeiboApiService(client).getFavorites("SUB=test", 2) as ApiResult.Success
             assertEquals(listOf(123L, 124L), result.data.posts.map { it.id })
             assertTrue(result.data.posts.all { it.isFavorited })
             assertEquals(3, result.data.nextPage)
@@ -48,7 +48,7 @@ class FavoritesApiTest {
         )) {
             val client = HttpClient(MockEngine { respond(response) })
             try {
-                val result = FavoritesApi(client).getFavorites("SUB=test", 1)
+                val result = WeiboApiService(client).getFavorites("SUB=test", 1)
                 assertEquals(success, result is ApiResult.Success)
                 if (result is ApiResult.Success) assertNull(result.data.nextPage)
             } finally { client.close() }
@@ -79,7 +79,7 @@ class FavoritesApiTest {
                 }
             })
             try {
-                assertTrue(FavoritesApi(client).setFavorite("SUB=test; XSRF-TOKEN=stale-token", "123", favorite) is ApiResult.Success)
+                assertTrue(WeiboApiService(client).setFavorite("SUB=test; XSRF-TOKEN=stale-token", "123", favorite) is ApiResult.Success)
                 assertEquals(2, requests)
             } finally { client.close() }
         }
@@ -144,7 +144,7 @@ class FavoritesApiTest {
     @Test(expected = CancellationException::class)
     fun cancellationIsNotReportedAsANetworkFailure() = runBlocking {
         val client = HttpClient(MockEngine { throw CancellationException("cancelled") })
-        try { FavoritesApi(client).getFavorites("SUB=test", 1); Unit } finally { client.close() }
+        try { WeiboApiService(client).getFavorites("SUB=test", 1); Unit } finally { client.close() }
     }
 
     @Test

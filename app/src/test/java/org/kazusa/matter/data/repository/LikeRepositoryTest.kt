@@ -24,7 +24,7 @@ class LikeRepositoryTest {
 
     @Test
     fun successfulToggleKeepsOptimisticStateAndClearsPending() = runTest {
-        val repository = LikeRepository { _, isLike -> ApiResult.Success(isLike) }
+        val repository = LikeRepository { _, isLike, _ -> ApiResult.Success(isLike) }
         assertNull(repository.togglePost(post))
 
         val state = repository.postState(post)
@@ -35,7 +35,7 @@ class LikeRepositoryTest {
 
     @Test
     fun failedToggleRollsBackAndReturnsMessage() = runTest {
-        val repository = LikeRepository { _, _ -> ApiResult.Error(message = "网络断开") }
+        val repository = LikeRepository { _, _, _ -> ApiResult.Error(message = "网络断开") }
         assertEquals("网络断开", repository.togglePost(post))
 
         val state = repository.postState(post)
@@ -46,7 +46,7 @@ class LikeRepositoryTest {
 
     @Test
     fun cancelledRequestClearsPendingInsteadOfLeavingTheButtonStuck() = runTest {
-        val repository = LikeRepository { _, _ ->
+        val repository = LikeRepository { _, _, _ ->
             delay(1_000)
             ApiResult.Success(true)
         }
@@ -66,7 +66,9 @@ class LikeRepositoryTest {
     @Test
     fun commentToggleUsesItsOwnStateSpace() = runTest {
         val requested = mutableListOf<Pair<String, Boolean>>()
-        val repository = LikeRepository { id, isLike ->
+        val referers = mutableListOf<String?>()
+        val repository = LikeRepository { id, isLike, refererPostId ->
+            referers += refererPostId
             requested += id to isLike
             ApiResult.Success(isLike)
         }
@@ -74,6 +76,8 @@ class LikeRepositoryTest {
         assertNull(repository.toggleComment(comment))
 
         assertEquals(listOf("7" to true), requested)
+        // 没传所属微博时不编一个假 Referer，交给接口层用评论 id 兜底
+        assertEquals(listOf<String?>(null), referers)
         val state = repository.commentState(comment)
         assertTrue(state.liked)
         assertEquals(3, state.count)
@@ -82,9 +86,38 @@ class LikeRepositoryTest {
     }
 
     @Test
+    fun commentTogglePassesOwningPostIdAsReferer() = runTest {
+        val referers = mutableListOf<String?>()
+        val repository = LikeRepository { _, isLike, refererPostId ->
+            referers += refererPostId
+            ApiResult.Success(isLike)
+        }
+
+        assertNull(repository.toggleComment(comment, postId = "5000000000000001"))
+
+        // 评论点赞的 Referer 必须指向所属微博，用评论 id 拼出的 detail 链接并不存在
+        assertEquals(listOf<String?>("5000000000000001"), referers)
+    }
+
+    @Test
+    fun rateLimitedFailureIsReportedWithTheMessageFromTheClient() = runTest {
+        val repository = LikeRepository { _, _, _ ->
+            ApiResult.Error(code = 429, message = "操作频繁，请稍后再试")
+        }
+
+        assertEquals("操作频繁，请稍后再试", repository.togglePost(post))
+
+        // 频控失败同样要回滚并释放 pending，否则用户会以为按钮卡死
+        val state = repository.postState(post)
+        assertFalse(state.liked)
+        assertFalse(state.pending)
+        assertEquals(3, state.count)
+    }
+
+    @Test
     fun accountSwitchDiscardsLateSuccessFromThePreviousSession() = runTest {
         var calls = 0
-        val repository = LikeRepository { _, isLike ->
+        val repository = LikeRepository { _, isLike, _ ->
             calls += 1
             if (calls == 1) {
                 delay(1_000)
@@ -116,7 +149,7 @@ class LikeRepositoryTest {
     @Test
     fun rollbackAfterAccountSwitchDoesNotRestorePreviousSessionState() = runTest {
         val likedByPreviousAccount = WeiboStatusDto(id = 2, isLiked = true, attitudesCount = "5")
-        val repository = LikeRepository { _, _ ->
+        val repository = LikeRepository { _, _, _ ->
             delay(1_000)
             ApiResult.Success(true)
         }
@@ -137,7 +170,7 @@ class LikeRepositoryTest {
     @Test
     fun pendingRequestCannotBeToggledTwice() = runTest {
         var calls = 0
-        val repository = LikeRepository { _, _ ->
+        val repository = LikeRepository { _, _, _ ->
             calls += 1
             delay(1_000)
             ApiResult.Success(true)
