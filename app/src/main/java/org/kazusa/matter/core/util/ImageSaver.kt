@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.kazusa.matter.core.network.WeiboRequestHeaders
 import org.kazusa.matter.core.media.livephoto.MotionPhotoComposer
 import org.kazusa.matter.core.media.livephoto.LivePhotoImage
 import org.kazusa.matter.core.media.livephoto.MotionPhotoParser
@@ -157,9 +158,9 @@ object ImageSaver {
             instanceFollowRedirects = true
             connectTimeout = 15_000
             readTimeout = 30_000
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13; Mobile)")
+            setRequestProperty("User-Agent", WeiboRequestHeaders.USER_AGENT)
             // 微博图片 CDN 对空 Referer 的请求偶尔会返回 403
-            setRequestProperty("Referer", "https://weibo.com/")
+            setRequestProperty("Referer", WeiboRequestHeaders.CDN_REFERER)
         }
         try {
             val code = connection.responseCode

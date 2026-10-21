@@ -50,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import org.kazusa.matter.core.network.WeiboRequestHeaders
 import org.kazusa.matter.ui.components.ImmersiveTopBar
 import org.kazusa.matter.ui.components.MatterCard
 import org.kazusa.matter.ui.components.TopBarTitleText
@@ -154,7 +155,9 @@ fun LoginScreen(
                                             settings.javaScriptEnabled = true
                                             settings.domStorageEnabled = true
                                             settings.databaseEnabled = true
-                                            settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                                            // 与后续 API / CDN 请求保持一致：登录时拿到的会话
+                                            // 与之后请求的 UA 不同，会被判成换了客户端
+                                            settings.userAgentString = WeiboRequestHeaders.USER_AGENT
 
                                             val cookieManager = CookieManager.getInstance()
                                             cookieManager.setAcceptCookie(true)

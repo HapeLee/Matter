@@ -11,8 +11,8 @@ import org.kazusa.matter.core.network.WeiboImageClient
  * 全应用唯一的 Coil [ImageLoader] 配置入口。
  *
  * 集中在一处而不是散在调用点，是因为两件事实在「每个 loader 各自配置」时必然走偏：
- * 1. 微博图片 CDN 带防盗链，请求缺 `Referer` 会直接 403（见 [WeiboImageClient]），
- *    任何一个 loader 漏配，用户看到的就是「有些图莫名加载失败」；
+ * 1. 微博图片 CDN 带防盗链，请求缺 `Referer` 或只带 OkHttp 默认 UA 都会 403
+ *    （见 [WeiboImageClient]），任何一个 loader 漏配，用户看到的就是「有些图莫名加载失败」；
  * 2. 内存 / 磁盘缓存按 ImageLoader 实例隔离，配置不一致会出现同一张图在两个 loader 之间
  *    重复下载、共享元素飞行动画起始帧拿不到已解码位图。
  *
@@ -34,7 +34,7 @@ object MatterImageLoader {
     fun create(context: PlatformContext): ImageLoader {
         return ImageLoader.Builder(context)
             .components {
-                // 图片请求统一走带 Referer 的 OkHttp 客户端，避免微博 CDN 403
+                // 图片请求统一走带 Referer / 浏览器 UA 且会对偶发 403 重试的 OkHttp 客户端
                 add(OkHttpNetworkFetcherFactory(callFactory = { WeiboImageClient.client }))
                 // 动图解码：系统 ImageDecoder 保留原有帧时序
                 add(AnimatedImageDecoder.Factory())

@@ -7,6 +7,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.kazusa.matter.core.network.WeiboRequestHeaders
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -86,9 +87,9 @@ object VideoSaver {
             instanceFollowRedirects = true
             connectTimeout = 20_000
             readTimeout = 60_000
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile)")
+            setRequestProperty("User-Agent", WeiboRequestHeaders.USER_AGENT)
             // 微博 CDN 防盗链支持
-            setRequestProperty("Referer", "https://weibo.com/")
+            setRequestProperty("Referer", WeiboRequestHeaders.CDN_REFERER)
         }
         try {
             val code = connection.responseCode
