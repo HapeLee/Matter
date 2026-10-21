@@ -108,7 +108,7 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       # 仓库在 Windows 上提交，gradlew 可能没有可执行位
       - name: Make gradlew executable
@@ -180,7 +180,7 @@ jobs:
           cp app/build/outputs/mapping/release/mapping.txt dist/mapping.txt 2>/dev/null || true
           ls -l dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: matter-release
           if-no-files-found: error
@@ -195,7 +195,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: matter-release
           path: dist

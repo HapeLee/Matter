@@ -29,7 +29,7 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       # aliyun 镜像在 runner 上会 502，且 Gradle 一旦判定某个仓库失败就会整体停用它
       - name: Remove Aliyun mirrors
@@ -42,7 +42,7 @@ jobs:
 
       - name: Upload unit test reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: verify-unit-test-reports
           if-no-files-found: warn
