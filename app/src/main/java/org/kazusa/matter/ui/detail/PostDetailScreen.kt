@@ -1,5 +1,6 @@
 package org.kazusa.matter.ui.detail
 
+import org.kazusa.matter.data.model.StatusMediaItem
 import org.kazusa.matter.data.model.VideoStreamInfo
 import android.content.Intent
 import androidx.compose.material3.SnackbarDuration
@@ -22,9 +23,7 @@ import org.kazusa.matter.ui.navigation.weiboPostContentSharedBounds
 import org.kazusa.matter.ui.navigation.weiboPostNameSharedElement
 import org.kazusa.matter.ui.navigation.weiboRetweetContentSharedBounds
 import org.kazusa.matter.ui.navigation.weiboPostSubtitleSharedElement
-import org.kazusa.matter.ui.navigation.weiboVideoSharedBounds
 import org.kazusa.matter.ui.navigation.formatAvatarSharedKey
-import org.kazusa.matter.ui.navigation.formatVideoSharedKey
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -55,7 +54,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -109,7 +107,8 @@ import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.components.AuthorBadgeTag
 import org.kazusa.matter.ui.components.BloggerSuffixTag
 import org.kazusa.matter.ui.components.EmptyMessage
-import org.kazusa.matter.ui.components.ImageGrid
+import org.kazusa.matter.ui.components.StatusMediaGrid
+import org.kazusa.matter.ui.components.videoTitleFallback
 import org.kazusa.matter.data.repository.LikeState
 import org.kazusa.matter.ui.components.LocalLikeRepository
 import org.kazusa.matter.ui.components.LocalPostLikeStates
@@ -689,68 +688,20 @@ private fun PostDetailBody(
                 )
             }
 
-            // 配图列表 (高清大图，支持 picUrls、picIds、originalPic 与 bmiddlePic 多种返回结构)
-            val imageUrls = post.allLargeImageUrls
-            if (imageUrls.isNotEmpty()) {
+            // 媒体区：图片与视频按服务端下发的先后顺序混排在同一宫格里
+            val mediaItems = post.mediaItems
+            if (mediaItems.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(12.dp))
-                val onGridImageClick = remember(imageUrls, onImageClick) {
-                    { index: Int -> onImageClick(imageUrls, index) }
-                }
-                ImageGrid(
-                    images = imageUrls,
+                StatusMediaGrid(
+                    items = mediaItems,
                     ownerKey = imageOwnerKey,
                     sharedContainerKey = containerSharedKey,
                     livePhotoMap = post.livePhotoVideoMap,
-                    onImageClick = onGridImageClick
+                    singleVideoHeight = 200.dp,
+                    videoTitleFallback = post.videoTitleFallback(),
+                    onImageClick = onImageClick,
+                    onVideoClick = onVideoClick
                 )
-            }
-
-            // 视频卡片
-            val mediaInfo = post.pageInfo?.mediaInfo
-            val videoUrl = mediaInfo?.bestVideoUrl
-            val streams = mediaInfo?.availableStreams.orEmpty()
-            if (videoUrl != null) {
-                Spacer(modifier = Modifier.height(12.dp))
-                val videoCover = post.pageInfo.pagePic ?: ""
-                val videoTitle = post.pageInfo.pageTitle ?: WeiboTextFormatter.formatHtmlText(post.textRaw ?: post.text).take(20)
-                val videoMid = post.idStr ?: post.mid ?: post.id?.toString() ?: ""
-                val videoSharedKey = remember(videoMid, videoUrl) { formatVideoSharedKey(videoMid, videoUrl) }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .weiboVideoSharedBounds(key = videoSharedKey, shape = RoundedCornerShape(8.dp))
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.Black)
-                        .clickable {
-                            sharedElementTarget?.selectVideo(videoSharedKey)
-                            onVideoClick(videoUrl, videoTitle, streams, videoCover, videoMid)
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (videoCover.isNotBlank()) {
-                        AsyncImage(
-                            model = videoCover,
-                            contentDescription = "视频封面",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.6f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "播放视频",
-                            tint = Color.White,
-                            modifier = Modifier.size(34.dp)
-                        )
-                    }
-                }
             }
         }
 
@@ -829,21 +780,22 @@ private fun PostDetailBody(
                     )
                 }
 
-                val retweetImages = retweet.allLargeImageUrls
-                if (retweetImages.isNotEmpty()) {
+                // 转发微博的媒体区：与主微博同一套混排宫格（图片 + 视频）
+                val retweetMediaItems = retweet.mediaItems
+                if (retweetMediaItems.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    val onGridImageClick = remember(retweetImages, onImageClick) {
-                        { index: Int -> onImageClick(retweetImages, index) }
-                    }
-                    ImageGrid(
-                        images = retweetImages,
+                    StatusMediaGrid(
+                        items = retweetMediaItems,
                         ownerKey = "detail_retweet_${retweet.getCardSharedKey()}",
                         // 本区块是形变来源时，图片要落到目标正文的主图宫格（key/part 与正文主图一致）；
                         // 否则保持「外层正文容器内的转发图」身份，供卡片 → 正文这条路径收尾。
                         sharedContainerKey = if (isSectionNavSource) retweetSectionKey else containerSharedKey,
                         sharedImagePart = if (isSectionNavSource) "image" else "retweet_image",
                         livePhotoMap = retweet.livePhotoVideoMap,
-                        onImageClick = onGridImageClick
+                        singleVideoHeight = 170.dp,
+                        videoTitleFallback = retweet.videoTitleFallback(),
+                        onImageClick = onImageClick,
+                        onVideoClick = onVideoClick
                     )
                 }
             }
@@ -1427,10 +1379,10 @@ internal fun CommentRow(
             val commentImages = comment.imageUrls
             if (commentImages.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(12.dp))
-                ImageGrid(
-                    images = commentImages,
+                StatusMediaGrid(
+                    items = remember(commentImages) { commentImages.map { StatusMediaItem.Picture(it) } },
                     ownerKey = remember(comment.listKey) { "comment_${comment.listKey}" },
-                    onImageClick = { index -> onImageClick(commentImages, index) }
+                    onImageClick = onImageClick
                 )
             }
         }

@@ -4,23 +4,19 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Repeat
@@ -28,7 +24,6 @@ import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Surface
@@ -45,7 +40,6 @@ import org.kazusa.matter.data.model.VideoStreamInfo
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -73,8 +67,6 @@ import org.kazusa.matter.ui.navigation.weiboPostContentSharedBounds
 import org.kazusa.matter.ui.navigation.weiboPostNameSharedElement
 import org.kazusa.matter.ui.navigation.weiboRetweetContentSharedBounds
 import org.kazusa.matter.ui.navigation.weiboPostSubtitleSharedElement
-import org.kazusa.matter.ui.navigation.weiboVideoSharedBounds
-import org.kazusa.matter.ui.navigation.formatVideoSharedKey
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 
@@ -333,68 +325,20 @@ private fun PostCardContent(
                 )
             }
 
-            // 配图列表 (高清大图，支持 picUrls、picIds、originalPic 与 bmiddlePic 多种返回结构)
-            val imageUrls = post.allLargeImageUrls
-            if (imageUrls.isNotEmpty()) {
+            // 媒体区：图片与视频按服务端下发的先后顺序混排在同一宫格里
+            val mediaItems = post.mediaItems
+            if (mediaItems.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(10.dp))
-                val onGridImageClick = remember(imageUrls, onImageClick) {
-                    { index: Int -> onImageClick(imageUrls, index) }
-                }
-                ImageGrid(
-                    images = imageUrls,
+                StatusMediaGrid(
+                    items = mediaItems,
                     ownerKey = sharedOwnerKey,
                     sharedContainerKey = sharedOwnerKey,
                     livePhotoMap = post.livePhotoVideoMap,
-                    onImageClick = onGridImageClick
+                    singleVideoHeight = 190.dp,
+                    videoTitleFallback = post.videoTitleFallback(),
+                    onImageClick = onImageClick,
+                    onVideoClick = onVideoClick
                 )
-            }
-
-            // 视频媒体卡片
-            val mediaInfo = post.pageInfo?.mediaInfo
-            val videoUrl = mediaInfo?.bestVideoUrl
-            val streams = mediaInfo?.availableStreams.orEmpty()
-            if (videoUrl != null) {
-                Spacer(modifier = Modifier.height(10.dp))
-                val videoCover = post.pageInfo.pagePic ?: ""
-                val videoTitle = post.pageInfo.pageTitle ?: WeiboTextFormatter.formatHtmlText(post.textRaw ?: post.text).take(20)
-                val videoMid = post.idStr ?: post.mid ?: post.id?.toString()
-                val videoSharedKey = remember(videoMid, videoUrl) { formatVideoSharedKey(videoMid, videoUrl) }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(190.dp)
-                        .weiboVideoSharedBounds(key = videoSharedKey, shape = RoundedCornerShape(8.dp))
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.Black)
-                        .clickable {
-                            sharedElementTarget?.selectVideo(videoSharedKey)
-                            onVideoClick(videoUrl, videoTitle, streams, videoCover, videoMid ?: "")
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (videoCover.isNotBlank()) {
-                        AsyncImage(
-                            model = videoCover,
-                            contentDescription = "视频封面",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.6f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "播放视频",
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-                }
             }
         }
 
@@ -542,15 +486,13 @@ private fun RetweetCard(
             )
         }
 
-        val retweetImages = retweet.allLargeImageUrls
-        if (retweetImages.isNotEmpty()) {
+        // 转发微博的媒体区：与主微博同一套混排宫格，图片与视频共用一条顺序
+        val retweetMediaItems = retweet.mediaItems
+        if (retweetMediaItems.isNotEmpty()) {
             // 打开宿主微博时匹配正文内的转发图片；打开原微博时匹配正文主图。
             Spacer(modifier = Modifier.height(8.dp))
-            val onGridImageClick = remember(retweetImages, onImageClick) {
-                { index: Int -> onImageClick(retweetImages, index) }
-            }
-            ImageGrid(
-                images = retweetImages,
+            StatusMediaGrid(
+                items = retweetMediaItems,
                 // 与原微博卡片的图片宫格区分，避免两张卡片互相让位/抢收拢目标
                 ownerKey = "retweet_$hostSharedKey",
                 sharedContainerKey = if (sharingHost) {
@@ -569,55 +511,11 @@ private fun RetweetCard(
                     "image"
                 },
                 livePhotoMap = retweet.livePhotoVideoMap,
-                onImageClick = onGridImageClick
+                singleVideoHeight = 170.dp,
+                videoTitleFallback = retweet.videoTitleFallback(),
+                onImageClick = onImageClick,
+                onVideoClick = onVideoClick
             )
-        }
-
-        val mediaInfo = retweet.pageInfo?.mediaInfo
-        val videoUrl = mediaInfo?.bestVideoUrl
-        val streams = mediaInfo?.availableStreams.orEmpty()
-        if (videoUrl != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            val videoCover = retweet.pageInfo.pagePic ?: ""
-            val videoTitle = retweet.pageInfo.pageTitle ?: WeiboTextFormatter.formatHtmlText(retweet.textRaw ?: retweet.text).take(20)
-            val videoMid = retweet.idStr ?: retweet.mid ?: retweet.id?.toString()
-            val videoSharedKey = remember(videoMid, videoUrl) { formatVideoSharedKey(videoMid, videoUrl) }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(170.dp)
-                    .weiboVideoSharedBounds(key = videoSharedKey, shape = RoundedCornerShape(8.dp))
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.Black)
-                    .clickable {
-                        sharedElementTarget?.selectVideo(videoSharedKey)
-                        onVideoClick(videoUrl, videoTitle, streams, videoCover, videoMid ?: "")
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                if (videoCover.isNotBlank()) {
-                    AsyncImage(
-                        model = videoCover,
-                        contentDescription = "视频封面",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .size(46.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.6f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "播放",
-                        tint = Color.White,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            }
         }
     }
 }
