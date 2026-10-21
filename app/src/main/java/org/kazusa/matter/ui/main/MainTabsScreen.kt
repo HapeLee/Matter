@@ -23,6 +23,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -54,6 +55,7 @@ import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.group.GroupViewModel
 import org.kazusa.matter.ui.hotfeed.HotFeedScreen
 import org.kazusa.matter.ui.hotfeed.HotFeedViewModel
+import org.kazusa.matter.ui.navigation.LocalSharedTransitionSourceActive
 import org.kazusa.matter.ui.profile.ProfileScreen
 import org.kazusa.matter.ui.search.HotSearchBoardViewModel
 import org.kazusa.matter.ui.search.HotSearchScreen
@@ -258,99 +260,106 @@ fun MainTabsScreen(
                     .nestedScroll(bottomBarScrollConnection)
                     .then(if (bottomBarBackdrop != null) Modifier.layerBackdrop(bottomBarBackdrop) else Modifier)
             ) { page ->
-                when (page) {
-                    0 -> {
-                        TimelineScreen(
-                            viewModel = timelineViewModel,
-                            groupViewModel = groupViewModel,
-                            onUserClick = onUserClick,
-                            onPostClick = onPostClick,
-                            onCommentClick = onCommentClick,
-                            onImageClick = onImageClick,
-                            onVideoClick = onVideoClick,
-                            onMentionClick = onMentionClick,
-                            onTopicClick = onTopicClick,
-                            onSearchClick = onOpenSearch,
-                            onLogout = onLogout,
-                            onNavigateToGroups = onNavigateToGroups,
-                            listState = timelineListState,
-                            backdrop = timelineBackdrop,
-                            bottomBarPadding = bottomBarPadding,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    1 -> {
-                        // 热搜 ↔ 热门切换：两个页面都自带列表状态，可以安全地同时组合，做真正的交叉淡化
-                        AnimatedContent(
-                            targetState = discoverMode,
-                            transitionSpec = {
-                                fadeIn(animationSpec = tween(240)) togetherWith
-                                    fadeOut(animationSpec = tween(160))
-                            },
-                            label = "DiscoverMode",
-                            modifier = Modifier.fillMaxSize()
-                        ) { mode ->
-                            when (mode) {
-                                DiscoverMode.HOT -> {
-                                    HotFeedScreen(
-                                        viewModel = hotFeedViewModel,
-                                        onUserClick = onUserClick,
-                                        onPostClick = onPostClick,
-                                        onCommentClick = onCommentClick,
-                                        onImageClick = onImageClick,
-                                        onVideoClick = onVideoClick,
-                                        onMentionClick = onMentionClick,
-                                        onTopicClick = onTopicClick,
-                                        // 过渡期间只有当前模式参与顶栏模糊采样，避免两层同时写入同一张 backdrop
-                                        backdrop = searchBackdrop.takeIf { mode == discoverMode },
-                                        bottomBarPadding = bottomBarPadding,
-                                        isActive = mode == discoverMode,
-                                        onActiveListStateChanged = { state ->
-                                            if (discoverListState.value !== state) {
-                                                discoverListState.value = state
-                                            }
-                                        },
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                }
+                // 相邻分页会被预组合（beyondViewportPageCount = 1）：只有当前可见页参与
+                // 共享元素注册，否则同一条微博在「动态」「热门」各注册一份相同 key，
+                // 形变可能从屏幕外那张卡片起飞
+                CompositionLocalProvider(
+                    LocalSharedTransitionSourceActive provides (pagerState.currentPage == page)
+                ) {
+                    when (page) {
+                        0 -> {
+                            TimelineScreen(
+                                viewModel = timelineViewModel,
+                                groupViewModel = groupViewModel,
+                                onUserClick = onUserClick,
+                                onPostClick = onPostClick,
+                                onCommentClick = onCommentClick,
+                                onImageClick = onImageClick,
+                                onVideoClick = onVideoClick,
+                                onMentionClick = onMentionClick,
+                                onTopicClick = onTopicClick,
+                                onSearchClick = onOpenSearch,
+                                onLogout = onLogout,
+                                onNavigateToGroups = onNavigateToGroups,
+                                listState = timelineListState,
+                                backdrop = timelineBackdrop,
+                                bottomBarPadding = bottomBarPadding,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        1 -> {
+                            // 热搜 ↔ 热门切换：两个页面都自带列表状态，可以安全地同时组合，做真正的交叉淡化
+                            AnimatedContent(
+                                targetState = discoverMode,
+                                transitionSpec = {
+                                    fadeIn(animationSpec = tween(240)) togetherWith
+                                        fadeOut(animationSpec = tween(160))
+                                },
+                                label = "DiscoverMode",
+                                modifier = Modifier.fillMaxSize()
+                            ) { mode ->
+                                when (mode) {
+                                    DiscoverMode.HOT -> {
+                                        HotFeedScreen(
+                                            viewModel = hotFeedViewModel,
+                                            onUserClick = onUserClick,
+                                            onPostClick = onPostClick,
+                                            onCommentClick = onCommentClick,
+                                            onImageClick = onImageClick,
+                                            onVideoClick = onVideoClick,
+                                            onMentionClick = onMentionClick,
+                                            onTopicClick = onTopicClick,
+                                            // 过渡期间只有当前模式参与顶栏模糊采样，避免两层同时写入同一张 backdrop
+                                            backdrop = searchBackdrop.takeIf { mode == discoverMode },
+                                            bottomBarPadding = bottomBarPadding,
+                                            isActive = mode == discoverMode,
+                                            onActiveListStateChanged = { state ->
+                                                if (discoverListState.value !== state) {
+                                                    discoverListState.value = state
+                                                }
+                                            },
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
 
-                                DiscoverMode.HOT_SEARCH -> {
-                                    HotSearchScreen(
-                                        hotSearchViewModel = hotSearchViewModel,
-                                        onSearchSubmit = onSearchSubmit,
-                                        backdrop = searchBackdrop.takeIf { mode == discoverMode },
-                                        bottomBarPadding = bottomBarPadding,
-                                        isActive = mode == discoverMode,
-                                        onActiveListStateChanged = { state ->
-                                            if (discoverListState.value !== state) {
-                                                discoverListState.value = state
-                                            }
-                                        },
-                                        modifier = Modifier.fillMaxSize()
-                                    )
+                                    DiscoverMode.HOT_SEARCH -> {
+                                        HotSearchScreen(
+                                            hotSearchViewModel = hotSearchViewModel,
+                                            onSearchSubmit = onSearchSubmit,
+                                            backdrop = searchBackdrop.takeIf { mode == discoverMode },
+                                            bottomBarPadding = bottomBarPadding,
+                                            isActive = mode == discoverMode,
+                                            onActiveListStateChanged = { state ->
+                                                if (discoverListState.value !== state) {
+                                                    discoverListState.value = state
+                                                }
+                                            },
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
-                    2 -> {
-                        ProfileScreen(
-                            authPreferences = authPreferences,
-                            authRepository = authRepository,
-                            themePreferences = themePreferences,
-                            onNavigateToGroups = onNavigateToGroups,
-                            onNavigateToSettings = onNavigateToSettings,
-                            onNavigateToAppearance = onNavigateToAppearance,
-                            onNavigateToHistory = onNavigateToHistory,
-                            onNavigateToSavedPosts = onNavigateToSavedPosts,
-                            onNavigateToMyPosts = onNavigateToMyPosts,
-                            onNavigateToFollowing = onNavigateToFollowing,
-                            onNavigateToFollowers = onNavigateToFollowers,
-                            onNavigateToMessages = onNavigateToMessages,
-                            onLogout = onLogout,
-                            backdrop = profileBackdrop,
-                            bottomBarPadding = bottomBarPadding,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        2 -> {
+                            ProfileScreen(
+                                authPreferences = authPreferences,
+                                authRepository = authRepository,
+                                themePreferences = themePreferences,
+                                onNavigateToGroups = onNavigateToGroups,
+                                onNavigateToSettings = onNavigateToSettings,
+                                onNavigateToAppearance = onNavigateToAppearance,
+                                onNavigateToHistory = onNavigateToHistory,
+                                onNavigateToSavedPosts = onNavigateToSavedPosts,
+                                onNavigateToMyPosts = onNavigateToMyPosts,
+                                onNavigateToFollowing = onNavigateToFollowing,
+                                onNavigateToFollowers = onNavigateToFollowers,
+                                onNavigateToMessages = onNavigateToMessages,
+                                onLogout = onLogout,
+                                backdrop = profileBackdrop,
+                                bottomBarPadding = bottomBarPadding,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                     }
                 }
             }
