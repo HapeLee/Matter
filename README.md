@@ -24,7 +24,7 @@ app/src/main/java/org/kazusa/matter/
 │   ├── model/             # Kotlinx Serialization 数据模型契约
 │   └── repository/        # 仓库层 (Auth, Timeline, Group, History, Favorites)
 ├── ui/
-│   ├── components/        # 基础可复用组件 (PostCard, ImageGrid, CommonTopBar 等)
+│   ├── components/        # 基础可复用组件 (PostCard, StatusMediaGrid, CommonTopBar 等)
 │   ├── group/             # 关注分组列表页与 ViewModel
 │   ├── history/           # 浏览/搜索历史页与 ViewModel
 │   ├── login/             # 多方式登录页与 ViewModel

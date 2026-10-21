@@ -100,6 +100,7 @@ import org.kazusa.matter.ui.components.ImmersiveTopBar
 import org.kazusa.matter.ui.components.MatterCard
 import org.kazusa.matter.ui.components.MatterChip
 import org.kazusa.matter.ui.components.MatterMediaBadge
+import org.kazusa.matter.ui.components.formatVideoDurationLabel
 import org.kazusa.matter.ui.components.MatterTag
 import org.kazusa.matter.ui.components.TopBarActionButton
 import org.kazusa.matter.ui.components.TopBarTitleCapsule
@@ -1810,7 +1811,7 @@ private fun VideoGridCard(
     val pageInfo = post.pageInfo
     val mediaInfo = pageInfo?.mediaInfo
     val cover = pageInfo?.pagePic
-    val duration = formatVideoDuration(mediaInfo?.duration)
+    val duration = formatVideoDurationLabel(mediaInfo?.duration)
     val title = mediaInfo?.videoTitle?.trim()?.ifBlank { null }
         ?: mediaInfo?.kolTitle?.trim()?.ifBlank { null }
         ?: pageInfo?.pageTitle?.trim()?.ifBlank { null }
@@ -1868,18 +1869,6 @@ private fun VideoGridCard(
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 8.dp)
         )
-    }
-}
-
-private fun formatVideoDuration(seconds: Int?): String? {
-    if (seconds == null || seconds <= 0) return null
-    val hours = seconds / 3600
-    val minutes = (seconds % 3600) / 60
-    val remainSeconds = seconds % 60
-    return if (hours > 0) {
-        "$hours:${minutes.toString().padStart(2, '0')}:${remainSeconds.toString().padStart(2, '0')}"
-    } else {
-        "$minutes:${remainSeconds.toString().padStart(2, '0')}"
     }
 }
 

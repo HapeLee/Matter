@@ -48,6 +48,8 @@ data class WeiboStatusDto(
     @SerialName("original_pic") val originalPic: String? = null,
     @SerialName("thumbnail_pic") val thumbnailPic: String? = null,
     @SerialName("page_info") val pageInfo: WeiboPageInfoDto? = null,
+    /** 图文混排媒体（图片与视频共用一条有序列表），见 [mediaItems] */
+    @SerialName("mix_media_info") val mixMediaInfo: WeiboMixMediaInfoDto? = null,
     @SerialName("region_name") val regionName: String? = null,
     @SerialName("status_title") val statusTitle: String? = null,
     @Serializable(with = WeiboTitleTextSerializer::class) val title: String? = null,
@@ -127,6 +129,82 @@ data class WeiboStatusDto(
         }
         map
     }
+
+    /**
+     * 媒体区按服务端顺序混排的媒体单元（图片 / 视频）。
+     *
+     * 顺序来源优先级：
+     * 1. `mix_media_info.items[]`：图文混排微博的真实顺序（视频可能夹在图片中间）；
+     * 2. 仅图片（`pic_urls` / `pic_ids` / 单图字段）；
+     * 3. 服务端没有下发 `mix_media_info`、但同时有配图与 `page_info` 视频时，
+     *    把视频并入同一列表末尾，仍然走同一个宫格，不再单独占一行。
+     *
+     * 结果会被缓存，保证 [StatusMediaItem] 列表引用稳定（下游宫格用 `remember` 缓存插槽信息）。
+     */
+    val mediaItems: List<StatusMediaItem> by lazy {
+        val hostMid = idStr ?: mid ?: id?.toString() ?: ""
+        val mixed = mixMediaInfo?.items.orEmpty()
+            .mapNotNull { it.toStatusMediaItem(hostMid) }
+        if (mixed.isNotEmpty()) return@lazy mixed
+
+        val pictures = allLargeImageUrls.map { StatusMediaItem.Picture(it) }
+        val pageVideo = pageInfo?.toStatusVideo(hostMid)
+        when {
+            pageVideo == null -> pictures
+            pictures.isEmpty() -> listOf(pageVideo)
+            else -> pictures + pageVideo
+        }
+    }
+}
+
+/** `mix_media_info` 里的单个媒体条目，`type == "pic"` 时 [data] 为图片，`"video"` 时为封面 + 播放信息 */
+private fun WeiboMixMediaItemDto.toStatusMediaItem(hostMid: String): StatusMediaItem? =
+    when (type?.lowercase()) {
+        "pic" -> {
+            val picId = data?.picId?.takeIf { it.isNotBlank() } ?: id?.takeIf { it.isNotBlank() }
+            val rawUrl = data?.large?.url
+                ?: data?.bmiddle?.url
+                ?: data?.original?.url
+                ?: picId?.let { weiboImageUrlFromId(it, WeiboImageSize.LARGE) }
+            rawUrl
+                ?.let { it.withWeiboImageSize(WeiboImageSize.LARGE) ?: it }
+                ?.takeIf { it.isNotBlank() }
+                ?.let { StatusMediaItem.Picture(it) }
+        }
+        "video" -> data?.toStatusVideo(hostMid)
+        else -> null
+    }
+
+/** 图文混排视频条目（`MblogCardInfo` 结构）→ 统一媒体单元 */
+private fun WeiboMixMediaDataDto.toStatusVideo(hostMid: String): StatusMediaItem.Video? {
+    val info = mediaInfo ?: return null
+    val videoUrl = info.bestVideoUrl ?: return null
+    return StatusMediaItem.Video(
+        previewUrl = pagePic.orEmpty(),
+        videoUrl = videoUrl,
+        streams = info.availableStreams,
+        title = pageTitle?.takeIf { it.isNotBlank() }
+            ?: info.videoTitle?.takeIf { it.isNotBlank() }
+            ?: info.kolTitle?.takeIf { it.isNotBlank() },
+        mid = hostMid,
+        durationSeconds = duration?.takeIf { it > 0 } ?: info.duration?.takeIf { it > 0 }
+    )
+}
+
+/** 传统 `page_info` 视频卡片 → 统一媒体单元 */
+private fun WeiboPageInfoDto.toStatusVideo(hostMid: String): StatusMediaItem.Video? {
+    val info = mediaInfo ?: return null
+    val videoUrl = info.bestVideoUrl ?: return null
+    return StatusMediaItem.Video(
+        previewUrl = pagePic.orEmpty(),
+        videoUrl = videoUrl,
+        streams = info.availableStreams,
+        title = pageTitle?.takeIf { it.isNotBlank() }
+            ?: info.videoTitle?.takeIf { it.isNotBlank() }
+            ?: info.kolTitle?.takeIf { it.isNotBlank() },
+        mid = hostMid,
+        durationSeconds = info.duration?.takeIf { it > 0 }
+    )
 }
 
 /**
@@ -189,6 +267,55 @@ data class WeiboPageInfoDto(
     @SerialName("page_title") val pageTitle: String? = null,
     @Serializable(with = WeiboPagePicSerializer::class) @SerialName("page_pic") val pagePic: String? = null,
     @SerialName("media_info") val mediaInfo: WeiboMediaInfoDto? = null
+)
+
+/**
+ * 图文混排媒体信息（`mix_media_info`）。
+ *
+ * 微博客户端对「视频 + 图片」混排的微博，会把两类媒体按发布顺序放进同一个列表；
+ * 旧字段（`pic_ids` / `page_info`）只描述各自类型的媒体，无法还原这个顺序。
+ */
+@Immutable
+@Serializable
+data class WeiboMixMediaInfoDto(
+    @Serializable(with = FlexibleIntSerializer::class)
+    @SerialName("selected_index") val selectedIndex: Int? = null,
+    val items: List<WeiboMixMediaItemDto> = emptyList()
+)
+
+/** 单个混排条目：[type] 为 `pic` / `video`，[data] 为对应类型的媒体数据 */
+@Immutable
+@Serializable
+data class WeiboMixMediaItemDto(
+    val id: String? = null,
+    val type: String? = null,
+    val scheme: String? = null,
+    val data: WeiboMixMediaDataDto? = null
+)
+
+/**
+ * 混排条目数据：`pic` 使用 `PicInfo` 结构（与 `pic_infos` 内的值同构），
+ * `video` 使用 `MblogCardInfo` 结构（封面 + `media_info`）。
+ */
+@Immutable
+@Serializable
+data class WeiboMixMediaDataDto(
+    // ---- 图片 ----
+    @SerialName("pic_id") val picId: String? = null,
+    val thumbnail: WeiboPicDetailDto? = null,
+    val bmiddle: WeiboPicDetailDto? = null,
+    val large: WeiboPicDetailDto? = null,
+    val original: WeiboPicDetailDto? = null,
+    val type: String? = null,
+    val video: String? = null,
+    @SerialName("video_url") val videoUrl: String? = null,
+    // ---- 视频 ----
+    @Serializable(with = WeiboPagePicSerializer::class) @SerialName("page_pic") val pagePic: String? = null,
+    @SerialName("page_title") val pageTitle: String? = null,
+    @Serializable(with = FlexibleIntSerializer::class) @SerialName("page_pic_width") val pagePicWidth: Int? = null,
+    @Serializable(with = FlexibleIntSerializer::class) @SerialName("page_pic_height") val pagePicHeight: Int? = null,
+    @SerialName("media_info") val mediaInfo: WeiboMediaInfoDto? = null,
+    @Serializable(with = FlexibleIntSerializer::class) val duration: Int? = null
 )
 
 @Serializable
