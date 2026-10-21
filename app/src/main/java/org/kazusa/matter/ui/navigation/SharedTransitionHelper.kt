@@ -34,6 +34,23 @@ val LocalSharedTransitionScope = compositionLocalOf<SharedTransitionScope?> { nu
 val LocalNavAnimatedVisibilityScope = compositionLocalOf<AnimatedVisibilityScope?> { null }
 
 /**
+ * 当前组合是否作为转场的「来源」参与共享元素注册。
+ *
+ * 「动态」与「热门」是同一个 `HorizontalPager` 的相邻页，为了滑动时不留白，
+ * `beyondViewportPageCount = 1` 让两页**同时处于组合中**。同一条微博同时出现在两页时，
+ * 两张卡片会各自注册一份完全相同的 key（`post_card_<id>`，头像则是
+ * `user_avatar_<uid>`，视频是 `video_container_<mid>`）。
+ *
+ * Compose 的共享元素要求同一 key 在组合内只有一个来源节点：多份注册时它只能挑一个，
+ * 而被挑中的很可能是另一页那张卡片——它的坐标在屏幕外，于是表现为
+ * 「动画从侧边飞入 / 一进正文就跳变 / 收拢时飞向看不见的位置」。
+ *
+ * 因此分页容器按「当前页」给出该标记，只有可见页的节点参与注册；
+ * 正文、主页、搜索等非分页场景默认 `true`，行为不变。
+ */
+val LocalSharedTransitionSourceActive = compositionLocalOf { true }
+
+/**
  * 共享元素「触发源」选择器：
  *
  * 同一张页面里往往存在多个可以复用同一 key 的节点（例如同一博主的多条微博卡片、
@@ -273,6 +290,7 @@ private fun Modifier.postPartSharedBounds(
 ): Modifier {
     val partKey = formatPostPartSharedKey(containerKey, part)
     if (partKey.isBlank()) return this
+    if (!LocalSharedTransitionSourceActive.current) return this
     val target = LocalSharedElementTarget.current
     if (target != null && !target.isContainerSelected(containerKey, ownerKey)) return this
     val sharedScope = LocalSharedTransitionScope.current
@@ -391,6 +409,7 @@ fun Modifier.weiboPostImageSharedElement(
     part: String = "image"
 ): Modifier {
     if (containerKey.isBlank()) return this
+    if (!LocalSharedTransitionSourceActive.current) return this
     val target = LocalSharedElementTarget.current
     if (target != null && !target.isContainerSelected(containerKey, ownerKey)) return this
     val sharedScope = LocalSharedTransitionScope.current
@@ -430,6 +449,7 @@ fun formatVideoSharedKey(mid: String?, videoUrl: String): String {
 @Composable
 fun Modifier.weiboSharedElement(key: String): Modifier {
     if (key.isBlank()) return this
+    if (!LocalSharedTransitionSourceActive.current) return this
     val sharedScope = LocalSharedTransitionScope.current
     val animScope = LocalNavAnimatedVisibilityScope.current
     return if (sharedScope != null && animScope != null) {
@@ -460,6 +480,9 @@ fun Modifier.weiboCardSharedBounds(
     zIndexInOverlay: Float = 1f
 ): Modifier {
     if (key.isBlank()) return this
+    // 相邻分页（动态 / 热门）会同时组合：只有可见页的那份才注册，否则同一条微博的两张卡片
+    // 会向同一个 key 注册两份来源，形变可能从屏幕外那张卡片起飞。
+    if (!LocalSharedTransitionSourceActive.current) return this
     // 只有本次导航真正被点击的卡片才参与形变，
     // 避免进入博主主页等场景时同 key 的多张卡片一起乱飞。
     val target = LocalSharedElementTarget.current
@@ -498,6 +521,7 @@ fun Modifier.weiboVideoSharedBounds(
     zIndexInOverlay: Float = 2f
 ): Modifier {
     if (key.isBlank()) return this
+    if (!LocalSharedTransitionSourceActive.current) return this
     val target = LocalSharedElementTarget.current
     if (target != null && !target.isContainerSelected(key)) return this
     val sharedScope = LocalSharedTransitionScope.current
@@ -535,6 +559,7 @@ fun Modifier.weiboAvatarSharedElement(
     ownerKey: String? = null
 ): Modifier {
     if (key.isBlank()) return this
+    if (!LocalSharedTransitionSourceActive.current) return this
     val target = LocalSharedElementTarget.current
     if (target != null && !target.isAvatarSelected(key, ownerKey)) return this
     val sharedScope = LocalSharedTransitionScope.current
@@ -566,6 +591,7 @@ fun Modifier.weiboAvatarBadgeSharedElement(
     ownerKey: String? = null
 ): Modifier {
     if (avatarKey.isBlank()) return this
+    if (!LocalSharedTransitionSourceActive.current) return this
     val target = LocalSharedElementTarget.current
     if (target != null && !target.isAvatarSelected(avatarKey, ownerKey)) return this
     val sharedScope = LocalSharedTransitionScope.current
