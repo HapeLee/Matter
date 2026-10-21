@@ -79,6 +79,8 @@ internal fun CommentThread(
     depth: Int = 0,
     /** 当前微博开启了「博主精选评论」：此时楼中楼接口往往直接回「暂无数据」。 */
     approvalCommentsOnly: Boolean = false,
+    /** 评论所属微博 id：点赞写操作的 Referer 需要它。 */
+    postId: String? = null,
     modifier: Modifier = Modifier
 ) {
     val state = repliesProvider(comment)
@@ -111,7 +113,7 @@ internal fun CommentThread(
         val repository = likeRepository ?: return
         if (likeState.pending) return
         actionScope.launch {
-            val message = repository.toggleComment(comment) ?: return@launch
+            val message = repository.toggleComment(comment, postId) ?: return@launch
             showMessage(message)
         }
     }
@@ -173,7 +175,8 @@ internal fun CommentThread(
                             onTopicClick = onTopicClick,
                             onImageClick = onImageClick,
                             depth = depth + 1,
-                            approvalCommentsOnly = approvalCommentsOnly
+                            approvalCommentsOnly = approvalCommentsOnly,
+                            postId = postId
                         )
                     }
                 }

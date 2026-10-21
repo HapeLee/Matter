@@ -34,10 +34,11 @@ data class LikeState(
  * - 协程被取消（页面整体销毁、切换账号）时同样回滚，保证 pending 不会卡死按钮。
  */
 class LikeRepository internal constructor(
-    private val setAttitude: suspend (id: String, isLike: Boolean) -> ApiResult<Boolean>
+    /** [refererPostId]：评论点赞时所属微博 id，用于拼出合法的 Referer；微博点赞为 null。 */
+    private val setAttitude: suspend (id: String, isLike: Boolean, refererPostId: String?) -> ApiResult<Boolean>
 ) {
-    constructor(apiService: WeiboApiService) : this({ id, isLike ->
-        apiService.setAttitude(id, isLike)
+    constructor(apiService: WeiboApiService) : this({ id, isLike, refererPostId ->
+        apiService.setAttitude(id, isLike, refererPostId = refererPostId)
     })
 
     private val _postStates = MutableStateFlow<Map<String, LikeState>>(emptyMap())
@@ -106,7 +107,7 @@ class LikeRepository internal constructor(
         val optimistic = LikeState(newLiked, nextCount(base.count, newLiked), pending = true)
         _postStates.update { it + (key to optimistic) }
         return try {
-            when (val result = setAttitude(key, newLiked)) {
+            when (val result = setAttitude(key, newLiked, null)) {
                 is ApiResult.Success -> {
                     if (session == sessionGeneration) {
                         _postStates.update { it + (key to optimistic.copy(pending = false)) }
@@ -132,8 +133,13 @@ class LikeRepository internal constructor(
         }
     }
 
-    /** 切换评论点赞；语义与 [togglePost] 一致。 */
-    suspend fun toggleComment(comment: WeiboCommentDto): String? {
+    /**
+     * 切换评论点赞；语义与 [togglePost] 一致。
+     *
+     * [postId] 是评论所属微博的 id：写操作需要合法的 Referer，用评论 id 拼出来的
+     * `detail/<评论id>` 并不存在，容易被微博判为异常请求。
+     */
+    suspend fun toggleComment(comment: WeiboCommentDto, postId: String? = null): String? {
         val id = comment.id ?: return "这条评论暂不支持点赞"
         val current = commentState(comment)
         if (current.pending) return null
@@ -143,7 +149,7 @@ class LikeRepository internal constructor(
         val optimistic = LikeState(newLiked, nextCount(base.count, newLiked), pending = true)
         _commentStates.update { it + (id to optimistic) }
         return try {
-            when (val result = setAttitude(id.toString(), newLiked)) {
+            when (val result = setAttitude(id.toString(), newLiked, postId)) {
                 is ApiResult.Success -> {
                     if (session == sessionGeneration) {
                         _commentStates.update { it + (id to optimistic.copy(pending = false)) }

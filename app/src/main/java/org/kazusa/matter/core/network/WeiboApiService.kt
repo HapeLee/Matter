@@ -43,6 +43,7 @@ import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.parameters
@@ -70,7 +71,13 @@ class WeiboApiService(
     private val authPreferences: AuthPreferences? = null
 ) {
 
-    private val favoritesApi = FavoritesApi(client)
+    /**
+     * 写操作（点赞 / 收藏 / 关注）共用：缓存 `st`、串行提交、识别频控并冷却。
+     * 三者共用同一个实例，是因为微博的写操作限流按账号计，分开做会各自把冷却期撑大。
+     */
+    private val writeSession = WeiboWriteSession(::fetchWriteCredentials)
+
+    private val favoritesApi = FavoritesApi(client, writeSession)
 
     suspend fun getFavorites(cookie: String, page: Int = 1): ApiResult<UserPostsPage> =
         favoritesApi.getFavorites(cookie, page)
@@ -1524,72 +1531,162 @@ class WeiboApiService(
     suspend fun setAttitude(
         id: String,
         isLike: Boolean,
-        cookie: String = ""
+        cookie: String = "",
+        /** 评论点赞时传所属微博 id，用于拼出合法的 Referer；微博点赞留空。 */
+        refererPostId: String? = null
     ): ApiResult<Boolean> {
         return try {
             val effectiveCookie = getEffectiveCookie(cookie)
             if (effectiveCookie.isBlank()) {
                 return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
             }
-            val cookies = linkedMapOf<String, String>()
-            effectiveCookie.split(';').forEach { part ->
-                val name = part.substringBefore('=').trim()
-                if (name.isNotEmpty() && '=' in part) cookies[name] = part.substringAfter('=').trim()
-            }
-            val bootstrap = client.get("https://m.weibo.cn/api/config") {
-                header("Cookie", effectiveCookie)
-                header("Referer", "https://m.weibo.cn/")
-            }
-            val rawConfig = bootstrap.bodyAsText()
-            val configElement = KtorClientFactory.jsonConfig.parseToJsonElement(rawConfig).jsonObject
-            val configData = configElement["data"]?.jsonObject
-            if (configData?.get("login")?.jsonPrimitive?.booleanOrNull != true) {
-                return ApiResult.Error(code = 401, message = "登录已失效，请重新登录后点赞")
-            }
-            bootstrap.headers.getAll("Set-Cookie").orEmpty().forEach { value ->
-                val pair = value.substringBefore(';')
-                if ('=' in pair) cookies[pair.substringBefore('=').trim()] = pair.substringAfter('=').trim()
-            }
-            val token = configData["st"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
-                ?: return ApiResult.Error(code = 401, message = "无法获取点赞凭据，请重新登录")
-
             val path = if (isLike) "create" else "destroy"
-            val response = client.submitForm(
-                url = "https://m.weibo.cn/api/attitudes/$path",
-                formParameters = parameters {
-                    append("id", id)
-                    append("attitude", "heart")
-                    append("st", token)
+            // 用评论 id 拼出来的 detail 链接并不存在，微博会据此判为异常请求，
+            // 所以评论点赞必须带上所属微博 id
+            val refererId = refererPostId?.takeIf { it.isNotBlank() } ?: id
+            writeSession.execute(
+                cookie = effectiveCookie,
+                action = if (isLike) "点赞" else "取消点赞"
+            ) { credentials ->
+                val response = client.submitForm(
+                    url = "https://m.weibo.cn/api/attitudes/$path",
+                    formParameters = parameters {
+                        append("id", id)
+                        append("attitude", "heart")
+                        append("st", credentials.token)
+                    }
+                ) {
+                    header("Cookie", credentials.cookieHeader)
+                    header("X-XSRF-TOKEN", credentials.token)
+                    header("Origin", "https://m.weibo.cn")
+                    header("Referer", "https://m.weibo.cn/detail/$refererId")
+                    header("MWeibo-Pwa", "1")
+                    header("X-Requested-With", "XMLHttpRequest")
                 }
-            ) {
-                header("Cookie", cookies.entries.joinToString("; ") { "${it.key}=${it.value}" })
-                header("X-XSRF-TOKEN", token)
-                header("Origin", "https://m.weibo.cn")
-                header("Referer", "https://m.weibo.cn/detail/$id")
-                header("X-Requested-With", "XMLHttpRequest")
+                readWriteResponse(
+                    response = response,
+                    failureMessage = if (isLike) "点赞失败" else "取消点赞失败",
+                    success = isLike
+                )
             }
-            if (response.status == HttpStatusCode.OK) {
-                val respText = response.bodyAsText()
-                val respJson = KtorClientFactory.jsonConfig.parseToJsonElement(respText).jsonObject
-                val ok = respJson["ok"]?.jsonPrimitive?.intOrNull
-                    ?: (if (respJson["ok"]?.jsonPrimitive?.content == "1") 1 else 0)
-                if (ok == 1) {
-                    ApiResult.Success(isLike)
-                } else {
-                    val msg = respJson["msg"]?.jsonPrimitive?.contentOrNull
-                        ?: respJson["message"]?.jsonPrimitive?.contentOrNull
-                        ?: (if (isLike) "点赞失败" else "取消点赞失败")
-                    ApiResult.Error(message = msg)
-                }
-            } else {
-                ApiResult.Error(code = response.status.value, message = "HTTP ${response.status}")
-            }
+        } catch (e: WriteGateException) {
+            ApiResult.Error(code = e.code, message = e.message.orEmpty())
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             android.util.Log.e("WeiboApi", "setAttitude failed", e)
             ApiResult.Error(message = e.localizedMessage ?: "点赞操作异常", throwable = e)
         }
+    }
+
+    /**
+     * 解析写操作（点赞 / 关注）的响应。
+     *
+     * - HTTP 429 与「操作频繁」类文案统一转成 429 并进入本地冷却：这类失败如果按普通错误
+     *   透传，用户会不断重试，服务端的冷却期只会被越拖越长；
+     * - 其它 `ok != 1` 多为 `st` 失效，丢弃缓存凭据让下次重新获取，但**不自动重发**，
+     *   避免把一次写入变成两次。
+     */
+    private suspend fun <T : Any> readWriteResponse(
+        response: HttpResponse,
+        failureMessage: String,
+        success: T
+    ): ApiResult<T> {
+        if (response.status == HttpStatusCode.TooManyRequests) {
+            writeSession.reportRateLimited()
+            return ApiResult.Error(
+                code = WeiboWriteErrors.CODE_RATE_LIMITED,
+                message = WeiboWriteErrors.RATE_LIMITED_MESSAGE
+            )
+        }
+        if (response.status != HttpStatusCode.OK) {
+            return ApiResult.Error(code = response.status.value, message = "HTTP ${response.status}")
+        }
+        val respJson = KtorClientFactory.jsonConfig
+            .parseToJsonElement(response.bodyAsText())
+            .jsonObject
+        val ok = respJson["ok"]?.jsonPrimitive?.intOrNull
+            ?: (if (respJson["ok"]?.jsonPrimitive?.content == "1") 1 else 0)
+        if (ok == 1) return ApiResult.Success(success)
+
+        val msg = respJson["msg"]?.jsonPrimitive?.contentOrNull
+            ?: respJson["message"]?.jsonPrimitive?.contentOrNull
+            ?: failureMessage
+        if (WeiboWriteErrors.isRateLimited(msg)) {
+            writeSession.reportRateLimited()
+            return ApiResult.Error(
+                code = WeiboWriteErrors.CODE_RATE_LIMITED,
+                message = WeiboWriteErrors.RATE_LIMITED_MESSAGE
+            )
+        }
+        writeSession.invalidate()
+        return ApiResult.Error(message = msg)
+    }
+
+    /** 解析 `Cookie` 头为有序键值表，供写操作合并 `Set-Cookie` 使用。 */
+    private fun parseCookieHeader(header: String): LinkedHashMap<String, String> {
+        val cookies = linkedMapOf<String, String>()
+        header.split(';').forEach { part ->
+            val name = part.substringBefore('=').trim()
+            if (name.isNotEmpty() && '=' in part) cookies[name] = part.substringAfter('=').trim()
+        }
+        return cookies
+    }
+
+    /**
+     * 取写操作凭据（`st` + 配套 Cookie）。
+     *
+     * `st` 与下发它的 Cookie 必须成对使用，因此由 [WeiboWriteSession] 一起缓存：
+     * 原先每次点赞都要先打一次 `/api/config`，写路径请求量翻倍，是最容易触发
+     * 「操作频繁」的地方。
+     */
+    private suspend fun fetchWriteCredentials(
+        cookie: String,
+        action: String
+    ): WeiboWriteCredentials {
+        val cookies = parseCookieHeader(cookie)
+        val bootstrap = client.get("https://m.weibo.cn/api/config") {
+            header("Cookie", cookie)
+            header("Referer", "https://m.weibo.cn/")
+        }
+        if (bootstrap.status == HttpStatusCode.TooManyRequests) {
+            throw WriteGateException(
+                WeiboWriteErrors.CODE_RATE_LIMITED,
+                WeiboWriteErrors.RATE_LIMITED_MESSAGE
+            )
+        }
+        if (bootstrap.status != HttpStatusCode.OK) {
+            throw WriteGateException(
+                bootstrap.status.value,
+                "获取${action}凭据失败：HTTP ${bootstrap.status.value}"
+            )
+        }
+        val configElement = KtorClientFactory.jsonConfig
+            .parseToJsonElement(bootstrap.bodyAsText())
+            .jsonObject
+        val configData = configElement["data"]?.jsonObject
+        if (configData?.get("login")?.jsonPrimitive?.booleanOrNull != true) {
+            // /api/config 自身被限流时同样返回 ok=0 + 频控文案，
+            // 不能误报成「登录已失效」，否则用户会去重新登录而不是等待
+            if (WeiboWriteErrors.isRateLimited(configElement["msg"]?.jsonPrimitive?.contentOrNull)) {
+                throw WriteGateException(
+                    WeiboWriteErrors.CODE_RATE_LIMITED,
+                    WeiboWriteErrors.RATE_LIMITED_MESSAGE
+                )
+            }
+            throw WriteGateException(401, "登录已失效，请重新登录后$action")
+        }
+        bootstrap.headers.getAll("Set-Cookie").orEmpty().forEach { value ->
+            val pair = value.substringBefore(';')
+            if ('=' in pair) cookies[pair.substringBefore('=').trim()] = pair.substringAfter('=').trim()
+        }
+        val token = configData["st"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: throw WriteGateException(401, "无法获取${action}凭据，请重新登录")
+        return WeiboWriteCredentials(
+            sourceCookie = cookie,
+            cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" },
+            token = token
+        )
     }
 
 
@@ -1604,8 +1701,9 @@ class WeiboApiService(
     /**
      * 关注 / 取关共用实现。
      *
-     * 移动端写操作需要 `st` 令牌（由 `/api/config` 下发）并同步 Set-Cookie，
-     * 与 [setAttitude] 的处理方式保持一致。
+     * 移动端写操作需要 `st` 令牌（由 `/api/config` 下发）并同步 Set-Cookie；
+     * 与 [setAttitude] 共用同一个 [WeiboWriteSession]，因此凭据缓存、串行提交和
+     * 频控冷却对三者一致。
      */
     private suspend fun updateFollowState(
         uid: String,
@@ -1621,61 +1719,32 @@ class WeiboApiService(
             if (effectiveCookie.isBlank()) {
                 return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
             }
-
-            val cookies = linkedMapOf<String, String>()
-            effectiveCookie.split(';').forEach { part ->
-                val name = part.substringBefore('=').trim()
-                if (name.isNotEmpty() && '=' in part) cookies[name] = part.substringAfter('=').trim()
-            }
-
-            val bootstrap = client.get("https://m.weibo.cn/api/config") {
-                header("Cookie", effectiveCookie)
-                header("Referer", "https://m.weibo.cn/u/$targetUid")
-            }
-            val configData = KtorClientFactory.jsonConfig
-                .parseToJsonElement(bootstrap.bodyAsText())
-                .jsonObject["data"]?.jsonObject
-            if (configData?.get("login")?.jsonPrimitive?.booleanOrNull != true) {
-                return ApiResult.Error(code = 401, message = "登录已失效，请重新登录后重试")
-            }
-            bootstrap.headers.getAll("Set-Cookie").orEmpty().forEach { value ->
-                val pair = value.substringBefore(';')
-                if ('=' in pair) cookies[pair.substringBefore('=').trim()] = pair.substringAfter('=').trim()
-            }
-            val token = configData["st"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
-                ?: return ApiResult.Error(code = 401, message = "无法获取操作凭据，请重新登录")
-
             val path = if (follow) "create" else "destroy"
-            val response = client.submitForm(
-                url = "https://m.weibo.cn/api/friendships/$path",
-                formParameters = parameters {
-                    append("uid", targetUid)
-                    append("st", token)
+            writeSession.execute(
+                cookie = effectiveCookie,
+                action = if (follow) "关注" else "取消关注"
+            ) { credentials ->
+                val response = client.submitForm(
+                    url = "https://m.weibo.cn/api/friendships/$path",
+                    formParameters = parameters {
+                        append("uid", targetUid)
+                        append("st", credentials.token)
+                    }
+                ) {
+                    header("Cookie", credentials.cookieHeader)
+                    header("X-XSRF-TOKEN", credentials.token)
+                    header("Origin", "https://m.weibo.cn")
+                    header("Referer", "https://m.weibo.cn/u/$targetUid")
+                    header("X-Requested-With", "XMLHttpRequest")
                 }
-            ) {
-                header("Cookie", cookies.entries.joinToString("; ") { "${it.key}=${it.value}" })
-                header("X-XSRF-TOKEN", token)
-                header("Origin", "https://m.weibo.cn")
-                header("Referer", "https://m.weibo.cn/u/$targetUid")
-                header("X-Requested-With", "XMLHttpRequest")
+                readWriteResponse(
+                    response = response,
+                    failureMessage = if (follow) "关注失败" else "取消关注失败",
+                    success = Unit
+                )
             }
-
-            if (response.status != HttpStatusCode.OK) {
-                return ApiResult.Error(code = response.status.value, message = "HTTP ${response.status}")
-            }
-            val respJson = KtorClientFactory.jsonConfig
-                .parseToJsonElement(response.bodyAsText())
-                .jsonObject
-            val ok = respJson["ok"]?.jsonPrimitive?.intOrNull
-                ?: (if (respJson["ok"]?.jsonPrimitive?.content == "1") 1 else 0)
-            if (ok == 1) {
-                ApiResult.Success(Unit)
-            } else {
-                val msg = respJson["msg"]?.jsonPrimitive?.contentOrNull
-                    ?: respJson["message"]?.jsonPrimitive?.contentOrNull
-                    ?: (if (follow) "关注失败" else "取消关注失败")
-                ApiResult.Error(message = msg)
-            }
+        } catch (e: WriteGateException) {
+            ApiResult.Error(code = e.code, message = e.message.orEmpty())
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

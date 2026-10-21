@@ -462,6 +462,11 @@ fun PostDetailScreen(
                                     }
                                     val postAuthorId = post?.user?.id
                                     val postAuthorName = post?.user?.screenName
+                                    // 评论点赞的 Referer 要用所属微博 id，不能拿评论 id 凑
+                                    val commentLikeRefererId = post?.idStr?.takeIf { it.isNotBlank() }
+                                        ?: post?.mid?.takeIf { it.isNotBlank() }
+                                        ?: post?.id?.toString()
+                                        ?: postId
                                     items(
                                         comments,
                                         key = { it.listKey },
@@ -485,6 +490,7 @@ fun PostDetailScreen(
                                                 onTopicClick = onTopicClick,
                                                 onImageClick = onImageClick,
                                                 approvalCommentsOnly = commentsApprovalOnly,
+                                                postId = commentLikeRefererId,
                                                 modifier = Modifier.contentFade(contentFade)
                                             )
                                         }
