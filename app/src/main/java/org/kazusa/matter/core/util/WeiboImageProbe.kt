@@ -2,6 +2,7 @@ package org.kazusa.matter.core.util
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.kazusa.matter.core.network.WeiboRequestHeaders
 import org.kazusa.matter.data.model.WeiboImageSize
 import org.kazusa.matter.data.model.isWeiboCdnImage
 import org.kazusa.matter.data.model.withWeiboImageSize
@@ -142,8 +143,8 @@ object WeiboImageProbe {
                 instanceFollowRedirects = true
                 connectTimeout = 3000
                 readTimeout = 3000
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13; Mobile)")
-                setRequestProperty("Referer", "https://weibo.com/")
+                setRequestProperty("User-Agent", WeiboRequestHeaders.USER_AGENT)
+                setRequestProperty("Referer", WeiboRequestHeaders.CDN_REFERER)
             }
             try {
                 val code = connection.responseCode
