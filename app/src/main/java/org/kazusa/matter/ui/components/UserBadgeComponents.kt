@@ -1,11 +1,13 @@
 package org.kazusa.matter.ui.components
 
+import androidx.compose.foundation.shape.CircleShape
+
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material.icons.filled.Verified
@@ -70,7 +72,7 @@ fun WeiboUserDto?.getVerifyType(): WeiboVerifyType {
  * 采用 M3 标准 Verified 徽标图标，完美对齐昵称文本基线。
  *
  * [backgroundColor] 非空时会在图标背后铺一层实心圆形垫底。
- * Verified 徽标本身是「花瓣形/六角螺丝」的不规则轮廓，直接用 `border(CircleShape)`
+ * Verified 徽标本身是「花瓣形/六角螺丝」的不规则轮廓，直接用圆形边框描一圈
  * 只画一圈描边，圆与花瓣之间的空隙会透出头像或封面；改用实心垫底后，
  * 徽标边缘到圆形轮廓之间是完整的底色，不再漏背景。
  */

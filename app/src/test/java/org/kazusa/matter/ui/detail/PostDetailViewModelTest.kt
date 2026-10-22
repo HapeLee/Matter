@@ -219,6 +219,115 @@ class PostDetailViewModelTest {
         assertEquals(1, state.count)
     }
 
+    @Test
+    fun replyIsPrependedAndClosesTheComposer() = runTest {
+        val messages = mutableListOf<String>()
+        val vm = viewModel(
+            postId = "detail-reply-success",
+            source = FakeSource(
+                createCommentResponse = { _, text ->
+                    ApiResult.Success(WeiboCommentDto(id = 777, text = text))
+                }
+            )
+        )
+
+        vm.load()
+        advanceUntilIdle()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            vm.messages.collect { messages += it }
+        }
+
+        vm.openReplyComposer()
+        vm.updateReplyDraft("  回复内容  ")
+        vm.submitReply()
+        advanceUntilIdle()
+
+        // 新回复立刻出现在评论区首位，输入条收起、草稿清空
+        assertEquals(listOf(777L), vm.uiState.value.comments.map { it.id })
+        assertEquals("回复内容", vm.uiState.value.comments.single().text)
+        assertEquals("", vm.replyState.value.draft)
+        assertFalse(vm.replyState.value.isOpen)
+        assertFalse(vm.replyState.value.isSending)
+        assertEquals(listOf("回复成功"), messages)
+    }
+
+    @Test
+    fun replyFailureKeepsTheDraftForRetry() = runTest {
+        val messages = mutableListOf<String>()
+        val vm = viewModel(
+            postId = "detail-reply-failure",
+            source = FakeSource(
+                createCommentResponse = { _, _ -> ApiResult.Error(message = "操作频繁，请稍后再试") }
+            )
+        )
+
+        vm.load()
+        advanceUntilIdle()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            vm.messages.collect { messages += it }
+        }
+
+        vm.openReplyComposer()
+        vm.updateReplyDraft("回复内容")
+        vm.submitReply()
+        advanceUntilIdle()
+
+        // 失败不能清空草稿或收起输入条，否则用户得重新打一遍
+        assertEquals("回复内容", vm.replyState.value.draft)
+        assertTrue(vm.replyState.value.isOpen)
+        assertFalse(vm.replyState.value.isSending)
+        assertEquals(listOf("操作频繁，请稍后再试"), messages)
+    }
+
+    @Test
+    fun blankReplyIsNotSubmitted() = runTest {
+        var calls = 0
+        val vm = viewModel(
+            postId = "detail-reply-blank",
+            source = FakeSource(
+                createCommentResponse = { _, _ ->
+                    calls += 1
+                    ApiResult.Success(null)
+                }
+            )
+        )
+
+        vm.load()
+        advanceUntilIdle()
+        vm.openReplyComposer()
+        vm.updateReplyDraft("   ")
+        vm.submitReply()
+        advanceUntilIdle()
+
+        assertEquals(0, calls)
+        assertTrue(vm.replyState.value.isOpen)
+    }
+
+    @Test
+    fun replyDoesNotSubmitTwiceWhileInFlight() = runTest {
+        var calls = 0
+        val vm = viewModel(
+            postId = "detail-reply-inflight",
+            source = FakeSource(
+                createCommentResponse = { _, text ->
+                    calls += 1
+                    delay(1_000)
+                    ApiResult.Success(WeiboCommentDto(id = 888, text = text))
+                }
+            )
+        )
+
+        vm.load()
+        advanceUntilIdle()
+        vm.updateReplyDraft("连点两次")
+        vm.submitReply()
+        vm.submitReply()
+        advanceUntilIdle()
+
+        assertEquals(1, calls)
+        assertEquals(listOf(888L), vm.uiState.value.comments.map { it.id })
+    }
+
     private class FakeSource(
         private val postResponse: suspend (String) -> ApiResult<WeiboStatusDto> = {
             ApiResult.Success(WeiboStatusDto(id = 9, attitudesCount = "0"))
@@ -230,7 +339,9 @@ class PostDetailViewModelTest {
         private val attitudesResponse: suspend (String, Int) -> ApiResult<AttitudesDataDto> =
             { _, _ -> ApiResult.Success(AttitudesDataDto()) },
         private val repliesResponse: suspend (String, Long, Long, Int) -> ApiResult<CommentsDataDto> =
-            { _, _, _, _ -> ApiResult.Success(CommentsDataDto()) }
+            { _, _, _, _ -> ApiResult.Success(CommentsDataDto()) },
+        private val createCommentResponse: suspend (String, String) -> ApiResult<WeiboCommentDto?> =
+            { _, _ -> ApiResult.Success(null) }
     ) : PostDetailDataSource {
         override suspend fun post(postId: String): ApiResult<WeiboStatusDto> = postResponse(postId)
 
@@ -249,5 +360,10 @@ class PostDetailViewModelTest {
             maxId: Long,
             maxIdType: Int
         ): ApiResult<CommentsDataDto> = repliesResponse(postId, commentId, maxId, maxIdType)
+
+        override suspend fun createComment(
+            postId: String,
+            text: String
+        ): ApiResult<WeiboCommentDto?> = createCommentResponse(postId, text)
     }
 }

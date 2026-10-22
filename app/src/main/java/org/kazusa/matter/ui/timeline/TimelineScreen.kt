@@ -1,5 +1,9 @@
 package org.kazusa.matter.ui.timeline
 
+import androidx.compose.foundation.shape.CircleShape
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
+
 import org.kazusa.matter.data.model.VideoStreamInfo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,8 +30,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import org.kazusa.matter.ui.components.LocalSnackbarHostState
 import org.kazusa.matter.ui.components.MatterSnackbar
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material.icons.Icons
@@ -416,7 +418,7 @@ fun TimelineScreen(
                                     .fillMaxWidth()
                                     .background(
                                         MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
-                                        RoundedCornerShape(8.dp)
+                                        smoothRoundedCorner(8.dp)
                                     )
                                     .padding(12.dp)
                             )

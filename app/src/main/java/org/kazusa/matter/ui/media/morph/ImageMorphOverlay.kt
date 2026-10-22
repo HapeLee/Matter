@@ -1,5 +1,9 @@
 package org.kazusa.matter.ui.media.morph
 
+import androidx.compose.foundation.shape.CircleShape
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
+
 import android.widget.Toast
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.background
@@ -26,8 +30,6 @@ import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.pager.HorizontalPager
 import org.kazusa.matter.ui.media.livephoto.LivePhotoPlayerView
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
@@ -384,7 +386,7 @@ fun ImageMorphOverlay(
                         .wrapContentSize(align = Alignment.TopStart, unbounded = true)
                         .offset { IntOffset(left, top) }
                         .requiredSize(width = widthDp, height = heightDp)
-                        .clip(RoundedCornerShape(cornerRadiusDp))
+                        .clip(smoothRoundedCorner(cornerRadiusDp))
                 ) {
                     AsyncImage(
                         model = stableRequest,

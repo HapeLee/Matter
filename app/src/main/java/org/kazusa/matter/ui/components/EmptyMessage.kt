@@ -1,5 +1,7 @@
 package org.kazusa.matter.ui.components
 
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -15,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -104,7 +105,7 @@ fun EmptyMessage(
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(smoothRoundedCorner(12.dp))
                         .clickable {
                             if (faces.isNotEmpty()) currentFace = faces.random()
                             onFaceClick?.invoke()

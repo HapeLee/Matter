@@ -1,5 +1,7 @@
 package org.kazusa.matter.ui.message
 
+import org.kazusa.matter.ui.theme.smoothUnevenRoundedCorner
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,7 +16,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -205,9 +206,9 @@ private fun MessageBubble(message: ChatMessage) {
     ) {
         Surface(
             shape = if (message.fromMe) {
-                RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomEnd = 16.dp, bottomStart = 16.dp)
+                smoothUnevenRoundedCorner(16.dp, 4.dp, 16.dp, 16.dp)
             } else {
-                RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp)
+                smoothUnevenRoundedCorner(4.dp, 16.dp, 16.dp, 16.dp)
             },
             color = if (message.fromMe) {
                 MaterialTheme.colorScheme.primaryContainer

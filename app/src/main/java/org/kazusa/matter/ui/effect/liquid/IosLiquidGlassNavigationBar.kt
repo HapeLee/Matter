@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -108,7 +107,8 @@ fun IosLiquidGlassNavigationBar(
 ) {
     val isBlurActive = rememberBlurEffectsEnabled() && backdrop != null
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
-    val pillShape = remember { CircleShape }
+    // 导航栏胶囊：连续曲率，与其它液态玻璃悬浮组件一致
+    val pillShape = rememberLiquidCapsuleShape()
     val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
     val accentColor = MaterialTheme.colorScheme.primary
     val tabContentColor = MaterialTheme.colorScheme.onSurfaceVariant

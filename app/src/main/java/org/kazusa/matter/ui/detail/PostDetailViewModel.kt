@@ -37,7 +37,13 @@ internal interface PostDetailDataSource {
     suspend fun reposts(postId: String, page: Int): ApiResult<RepostsDataDto>
     suspend fun attitudes(postId: String, page: Int): ApiResult<AttitudesDataDto>
     suspend fun replies(postId: String, commentId: Long, maxId: Long, maxIdType: Int): ApiResult<CommentsDataDto>
+
+    /** 回复微博；成功时尽量带回服务端新建的评论。 */
+    suspend fun createComment(postId: String, text: String): ApiResult<WeiboCommentDto?>
 }
+
+/** 单条回复的最大长度：与微博移动端一致，超出部分不再进入草稿。 */
+private const val MAX_REPLY_LENGTH = 2000
 
 private class ApiPostDetailDataSource(private val apiService: WeiboApiService) : PostDetailDataSource {
     override suspend fun post(postId: String): ApiResult<WeiboStatusDto> =
@@ -59,6 +65,9 @@ private class ApiPostDetailDataSource(private val apiService: WeiboApiService) :
         maxIdType: Int
     ): ApiResult<CommentsDataDto> =
         apiService.getCommentReplies(postId, commentId, maxId, maxIdType)
+
+    override suspend fun createComment(postId: String, text: String): ApiResult<WeiboCommentDto?> =
+        apiService.createComment(postId, text)
 }
 
 /**
@@ -110,6 +119,21 @@ internal data class PostDetailUiState(
 )
 
 /**
+ * 悬浮回复条的状态。
+ *
+ * 单独一条流而不是并进 [PostDetailUiState]：草稿每敲一个字都会变，若挂在页面状态上，
+ * 整个正文页（正文排版 + 列表）会跟着逐字重组，长正文 + 图片时打字会发涩。
+ * 只有回复组件自己收集这条流，输入时页面其余部分不参与重组。
+ */
+internal data class ReplyComposerState(
+    /** 输入条是否展开；收起时草稿保留，避免误触关闭丢内容。 */
+    val isOpen: Boolean = false,
+    val draft: String = "",
+    /** 回复请求在途：期间禁止重复提交。 */
+    val isSending: Boolean = false
+)
+
+/**
  * 微博正文页的业务状态。
  *
  * 正文 / 评论 / 转发 / 赞四个分区各自持有数据、加载标记与独立请求任务：
@@ -141,6 +165,11 @@ internal class PostDetailViewModel internal constructor(
 
     private val _uiState = MutableStateFlow(PostDetailUiState())
     val uiState: StateFlow<PostDetailUiState> = _uiState.asStateFlow()
+
+    private val _replyState = MutableStateFlow(ReplyComposerState())
+
+    /** 悬浮回复条状态；只有回复组件收集，逐字输入不会带动整页重组。 */
+    val replyState: StateFlow<ReplyComposerState> = _replyState.asStateFlow()
 
     private val _repliesStates = MutableStateFlow<Map<String, CommentRepliesState>>(emptyMap())
 
@@ -208,6 +237,71 @@ internal class PostDetailViewModel internal constructor(
         viewModelScope.launch {
             val message = likeRepository.togglePost(target) ?: return@launch
             messageChannel.trySend(message)
+        }
+    }
+
+    /** 展开悬浮回复条；上次未发送的草稿保留。 */
+    fun openReplyComposer() {
+        _replyState.update { it.copy(isOpen = true) }
+    }
+
+    /** 收起悬浮回复条；草稿不清空，避免误触关闭后丢内容。 */
+    fun dismissReplyComposer() {
+        _replyState.update { it.copy(isOpen = false) }
+    }
+
+    fun updateReplyDraft(text: String) {
+        _replyState.update { it.copy(draft = text.take(MAX_REPLY_LENGTH)) }
+    }
+
+    /**
+     * 提交回复。
+     *
+     * 只有成功才清空草稿并收起输入条；失败（未登录、频控、内容不合规）保留内容，
+     * 原因通过 [messages] 交给界面提示。服务端没带回新建评论时静默重拉一次首屏评论。
+     */
+    fun submitReply() {
+        val target = _uiState.value.post ?: return
+        val content = _replyState.value.draft.trim()
+        if (content.isEmpty() || _replyState.value.isSending) return
+        _replyState.update { it.copy(isSending = true) }
+        viewModelScope.launch {
+            try {
+                when (val res = dataSource.createComment(targetIdOf(target), content)) {
+                    is ApiResult.Success -> {
+                        val created = res.data
+                        _uiState.update { state ->
+                            val inserted = if (created != null &&
+                                state.comments.none { it.listKey == created.listKey }
+                            ) {
+                                listOf(created) + state.comments
+                            } else {
+                                state.comments
+                            }
+                            state.copy(comments = inserted, hasLoadedComments = true)
+                        }
+                        // 发送期间用户又改了内容：保留草稿与输入条，不要把新输入一起清掉
+                        _replyState.update { state ->
+                            if (state.draft.trim() != content) {
+                                state
+                            } else {
+                                state.copy(isOpen = false, draft = "")
+                            }
+                        }
+                        // 只回了 ok=1、没有评论对象：重拉一次让列表与线上一致
+                        if (created == null) loadComments()
+                        messageChannel.trySend("回复成功")
+                    }
+
+                    is ApiResult.Error -> messageChannel.trySend(
+                        res.message.ifBlank { "回复失败，请稍后重试" }
+                    )
+
+                    ApiResult.Loading -> Unit
+                }
+            } finally {
+                _replyState.update { it.copy(isSending = false) }
+            }
         }
     }
 

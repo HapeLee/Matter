@@ -1,5 +1,8 @@
 package org.kazusa.matter.ui.components
 
+import androidx.compose.foundation.shape.CircleShape
+
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
@@ -19,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +41,7 @@ import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.vibrancy
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassText
+import org.kazusa.matter.ui.effect.liquid.rememberLiquidCapsuleShape
 import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 
 /**
@@ -81,7 +84,8 @@ fun LiquidGlassTabRow(
     val isRuntimeShaderOk = rememberBlurEffectsEnabled()
     val isBlurActive = isRuntimeShaderOk && backdrop != null
 
-    val pillShape = remember { CircleShape }
+    // 整条胶囊与选中指示块都用连续曲率，避免圆弧与直边接缝处的折角
+    val pillShape = rememberLiquidCapsuleShape()
     val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
     val containerColor = if (isBlurActive) surfaceContainer.copy(alpha = 0.55f) else surfaceContainer
     val indicatorColor = MaterialTheme.colorScheme.secondaryContainer
