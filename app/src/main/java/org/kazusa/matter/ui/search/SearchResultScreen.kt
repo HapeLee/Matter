@@ -1,6 +1,7 @@
 package org.kazusa.matter.ui.search
 
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 
 import org.kazusa.matter.data.model.VideoStreamInfo
 import androidx.compose.foundation.background
@@ -574,7 +575,7 @@ private fun SearchHistoryPanel(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(smoothRoundedCorner(12.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .clickable { onKeywordClick(entry.keyword) }
                     .padding(start = 8.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically

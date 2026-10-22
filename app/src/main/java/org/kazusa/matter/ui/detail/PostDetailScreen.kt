@@ -1,7 +1,8 @@
 package org.kazusa.matter.ui.detail
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.shape.CircleShape
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
 
 
 import org.kazusa.matter.data.model.StatusMediaItem
@@ -1047,7 +1048,7 @@ private fun SkeletonBar(
         modifier = modifier
             .then(if (width != null) Modifier.width(width) else Modifier.fillMaxWidth(fraction))
             .height(height)
-            .clip(smoothRoundedCorner(height / 2))
+            .clip(RoundedCornerShape(height / 2))
             .background(color)
     )
 }

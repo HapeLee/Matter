@@ -1,6 +1,7 @@
 package org.kazusa.matter.ui.components
 
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -58,7 +59,7 @@ fun SettingGroup(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(smoothRoundedCorner(cornerRadius))
+                .clip(RoundedCornerShape(cornerRadius))
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -81,7 +82,7 @@ fun SettingCard(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = smoothRoundedCorner(cornerRadius),
+        shape = RoundedCornerShape(cornerRadius),
         color = containerColor
     ) {
         Column(modifier = Modifier.fillMaxWidth(), content = content)

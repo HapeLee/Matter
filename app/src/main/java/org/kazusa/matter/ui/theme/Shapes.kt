@@ -25,7 +25,7 @@ val MatterShapes = Shapes(
 )
 
 /**
- * **平滑圆角**（Kyant0 Shapes，G2 连续曲率、近似 G3）。
+ * **平滑圆角工厂**（Kyant0 Shapes，G2 连续曲率、近似 G3）。
  *
  * 普通 `CircleShape` / `RoundedCornerShape` 的圆角是「四分之一圆弧 + 直线」，圆弧与直边
  * 的接缝处曲率从 `1/r` 突变为 0，大圆角、大尺寸表面上能看出一圈轻微的「折角」；
@@ -34,12 +34,10 @@ val MatterShapes = Shapes(
  * 三个函数都是 [Shape]，用法与 `CircleShape` / `RoundedCornerShape` 完全一致，
  * 可直接给 `clip` / `background` / `border` / `Surface` / `Card` / `Button` 使用。
  *
- * **适用范围**（否则就是白交一份轮廓计算开销）：
- * - 卡片、面板、底部 sheet、聊天气泡、按钮这类 **≥ 10dp 圆角的面** 才用；
- * - 真正的**圆圈**（头像、圆点、圆形图标容器）继续用 `CircleShape` —— `Capsule` 在正方形上
- *   得到的是略偏 squircle 的形状，不是正圆；
- * - **≤ 8dp 的小元素**（角标、小标签、媒体圆角）继续用 `RoundedCornerShape`：
- *   这个尺寸下两种圆角肉眼无差别，但列表里每帧都要多算一次轮廓。
+ * **只用于液态玻璃组件**：`ui/effect/liquid` 下的玻璃按钮 / 胶囊 / 导航栏 / 形变菜单 /
+ * 分栏 / 悬浮栏 / 回复面板，统一从这里取，保证玻璃表面是连续曲率的 squircle。
+ * 普通 M3 组件（卡片、聊天气泡、列表项、图标按钮、头像、圆点、≤ 8dp 小角标）一律
+ * 继续用 `CircleShape` / `RoundedCornerShape`，既符合 Material 规范，也省下每帧的轮廓计算。
  */
 
 /** 全圆角胶囊 / 圆形。 */
@@ -73,9 +71,9 @@ object MatterShapeTokens {
     /** 图片、视频上的半透明角标：同上，且在列表里高频出现 */
     val mediaBadge: Shape = RoundedCornerShape(4.dp)
 
-    /** 全圆角胶囊：连续曲率胶囊（非正圆，两端是连续过渡的圆角） */
-    val pill: Shape = smoothCapsule()
+    /** 全圆角胶囊：M3 普通胶囊（非玻璃，走普通圆角） */
+    val pill: Shape = RoundedCornerShape(percent = 50)
 
-    /** 列表项卡片（略小于标准卡片） */
-    val listItem: Shape = smoothRoundedCorner(16.dp)
+    /** 列表项卡片（略小于标准卡片，M3 普通圆角） */
+    val listItem: Shape = RoundedCornerShape(16.dp)
 }

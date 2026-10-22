@@ -1,7 +1,8 @@
 package org.kazusa.matter.ui.group
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.shape.CircleShape
-import org.kazusa.matter.ui.theme.smoothUnevenRoundedCorner
 
 
 import androidx.compose.foundation.layout.Arrangement
@@ -63,7 +64,7 @@ fun FollowGroupBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
-        shape = smoothUnevenRoundedCorner(28.dp, 28.dp, 0.dp, 0.dp),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomEnd = 0.dp, bottomStart = 0.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = modifier
     ) {

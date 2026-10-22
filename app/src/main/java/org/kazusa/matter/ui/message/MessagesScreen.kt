@@ -1,7 +1,8 @@
 package org.kazusa.matter.ui.message
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.shape.CircleShape
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
 
 
 import androidx.activity.compose.BackHandler
@@ -543,7 +544,7 @@ private fun NoticeRow(
                 Spacer(modifier = Modifier.height(6.dp))
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = smoothRoundedCorner(8.dp),
+                    shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
@@ -597,7 +598,7 @@ private fun MessageAvatar(url: String, name: String) {
 @Composable
 private fun UnreadBadge(count: Int) {
     Surface(
-        shape = smoothRoundedCorner(9.dp),
+        shape = RoundedCornerShape(9.dp),
         color = MaterialTheme.colorScheme.error
     ) {
         Text(

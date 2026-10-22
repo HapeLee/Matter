@@ -1,7 +1,8 @@
 package org.kazusa.matter.ui.components
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.shape.CircleShape
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
 
 
 import androidx.compose.foundation.background
@@ -58,13 +59,13 @@ import org.kazusa.matter.ui.navigation.weiboPostImageSharedElement
 import org.kazusa.matter.ui.navigation.weiboVideoSharedBounds
 
 /** 单图的圆角（大图更接近微博客户端的 6dp） */
-private val SingleMediaShape = smoothRoundedCorner(6.dp)
+private val SingleMediaShape = RoundedCornerShape(6.dp)
 
 /** 宫格单元的圆角 */
-private val GridMediaShape = smoothRoundedCorner(4.dp)
+private val GridMediaShape = RoundedCornerShape(4.dp)
 
 /** 视频卡片（整行）的圆角 */
-private val VideoCardShape = smoothRoundedCorner(8.dp)
+private val VideoCardShape = RoundedCornerShape(8.dp)
 
 /**
  * 信息流媒体区实际请求的地址：降到缩略图档位（约 440px），原图仅在查看器按需加载。

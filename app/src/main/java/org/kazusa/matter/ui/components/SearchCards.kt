@@ -1,6 +1,7 @@
 package org.kazusa.matter.ui.components
 
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -243,7 +244,7 @@ fun SearchTopicCard(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(52.dp)
-                        .clip(smoothRoundedCorner(10.dp))
+                        .clip(RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                 )
                 Spacer(modifier = Modifier.width(10.dp))

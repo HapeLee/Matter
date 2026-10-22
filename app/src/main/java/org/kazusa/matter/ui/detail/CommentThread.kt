@@ -1,7 +1,8 @@
 ﻿package org.kazusa.matter.ui.detail
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.shape.CircleShape
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
 
 
 import android.widget.Toast
@@ -159,7 +160,7 @@ internal fun CommentThread(
                         end = if (isReply) 8.dp else 16.dp,
                         bottom = 12.dp
                     )
-                    .clip(smoothRoundedCorner(12.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainer)
                     .animateContentSize()
             ) {

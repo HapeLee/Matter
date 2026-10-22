@@ -1,7 +1,8 @@
 package org.kazusa.matter.ui.timeline
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.shape.CircleShape
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
 
 
 import org.kazusa.matter.data.model.VideoStreamInfo
@@ -418,7 +419,7 @@ fun TimelineScreen(
                                     .fillMaxWidth()
                                     .background(
                                         MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
-                                        smoothRoundedCorner(8.dp)
+                                        RoundedCornerShape(8.dp)
                                     )
                                     .padding(12.dp)
                             )

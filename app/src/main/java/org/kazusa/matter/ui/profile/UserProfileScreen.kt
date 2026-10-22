@@ -1,7 +1,8 @@
 package org.kazusa.matter.ui.profile
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.shape.CircleShape
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
 
 
 import androidx.activity.compose.BackHandler
@@ -540,7 +541,7 @@ fun UserProfileScreen(
                                         hasMore -> {
                                             OutlinedButton(
                                                 onClick = { viewModel.load(page = currentPage + 1) },
-                                                shape = smoothRoundedCorner(20.dp)
+                                                shape = RoundedCornerShape(20.dp)
                                             ) {
                                                 Text("加载更多动态")
                                             }
@@ -1422,7 +1423,7 @@ private fun BloggerDetailSheet(
                         Spacer(modifier = Modifier.height(12.dp))
                         OutlinedButton(
                             onClick = onRetry,
-                            shape = smoothRoundedCorner(20.dp)
+                            shape = RoundedCornerShape(20.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
@@ -1660,7 +1661,7 @@ private fun ProfileTabError(message: String, onRetry: () -> Unit) {
                 )
             }
             Spacer(modifier = Modifier.height(14.dp))
-            OutlinedButton(onClick = onRetry, shape = smoothRoundedCorner(20.dp)) {
+            OutlinedButton(onClick = onRetry, shape = RoundedCornerShape(20.dp)) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
                     contentDescription = null,
@@ -1707,7 +1708,7 @@ private fun ProfileLoadMore(
             hasMore -> {
                 OutlinedButton(
                     onClick = onLoadMore,
-                    shape = smoothRoundedCorner(20.dp)
+                    shape = RoundedCornerShape(20.dp)
                 ) {
                     Text("加载更多")
                 }
@@ -1791,7 +1792,7 @@ private fun AlbumPhotoCell(
     Box(
         modifier = modifier
             .aspectRatio(1f)
-            .clip(smoothRoundedCorner(6.dp))
+            .clip(RoundedCornerShape(6.dp))
             .clickable(onClick = onClick)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {

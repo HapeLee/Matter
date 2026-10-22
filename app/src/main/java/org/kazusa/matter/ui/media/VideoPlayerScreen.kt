@@ -1,7 +1,8 @@
 package org.kazusa.matter.ui.media
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.shape.CircleShape
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
 
 
 import android.app.Activity
@@ -393,7 +394,7 @@ fun VideoPlayerScreen(
                     Box {
                         Surface(
                             onClick = { showQualityMenu = true },
-                            shape = smoothRoundedCorner(16.dp),
+                            shape = RoundedCornerShape(16.dp),
                             color = Color.Black.copy(alpha = 0.54f),
                             contentColor = Color.White,
                             modifier = Modifier.height(36.dp)
