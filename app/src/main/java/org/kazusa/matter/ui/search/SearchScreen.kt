@@ -1,8 +1,8 @@
 package org.kazusa.matter.ui.search
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.shape.CircleShape
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
-import org.kazusa.matter.ui.theme.smoothUnevenRoundedCorner
 
 
 import androidx.compose.animation.AnimatedContent
@@ -197,7 +197,7 @@ fun HotSearchScreen(
 
 /** 榜单卡统一圆角：整个榜段 / 入口卡组各拼成一张大卡，条目之间用分隔线衔接。 */
 private val HotSearchCardRadius = 18.dp
-private val HotSearchCardShape = smoothRoundedCorner(18.dp)
+private val HotSearchCardShape = RoundedCornerShape(18.dp)
 
 /**
  * 微博实时热搜榜。
@@ -296,8 +296,8 @@ private fun LazyListScope.hotSearchItems(
             val isLast = index == section.items.lastIndex
             val shape = when {
                 isFirst && isLast -> HotSearchCardShape
-                isFirst -> smoothUnevenRoundedCorner(HotSearchCardRadius, HotSearchCardRadius, 0.dp, 0.dp)
-                isLast -> smoothUnevenRoundedCorner(0.dp, 0.dp, HotSearchCardRadius, HotSearchCardRadius)
+                isFirst -> RoundedCornerShape(topStart = HotSearchCardRadius, topEnd = HotSearchCardRadius, bottomEnd = 0.dp, bottomStart = 0.dp)
+                isLast -> RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp, bottomEnd = HotSearchCardRadius, bottomStart = HotSearchCardRadius)
                 else -> RectangleShape
             }
 
@@ -346,8 +346,8 @@ private fun LazyListScope.hotSearchItems(
             val isLast = index == board.entries.lastIndex
             val shape = when {
                 isFirst && isLast -> HotSearchCardShape
-                isFirst -> smoothUnevenRoundedCorner(HotSearchCardRadius, HotSearchCardRadius, 0.dp, 0.dp)
-                isLast -> smoothUnevenRoundedCorner(0.dp, 0.dp, HotSearchCardRadius, HotSearchCardRadius)
+                isFirst -> RoundedCornerShape(topStart = HotSearchCardRadius, topEnd = HotSearchCardRadius, bottomEnd = 0.dp, bottomStart = 0.dp)
+                isLast -> RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp, bottomEnd = HotSearchCardRadius, bottomStart = HotSearchCardRadius)
                 else -> RectangleShape
             }
 
@@ -643,7 +643,7 @@ private fun HotSearchRow(
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .height(15.dp)
-                    .clip(smoothRoundedCorner(3.dp))
+                    .clip(RoundedCornerShape(3.dp))
             )
         }
 

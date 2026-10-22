@@ -1,7 +1,8 @@
 package org.kazusa.matter.ui.media.morph
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.shape.CircleShape
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
 
 
 import android.widget.Toast
@@ -386,7 +387,7 @@ fun ImageMorphOverlay(
                         .wrapContentSize(align = Alignment.TopStart, unbounded = true)
                         .offset { IntOffset(left, top) }
                         .requiredSize(width = widthDp, height = heightDp)
-                        .clip(smoothRoundedCorner(cornerRadiusDp))
+                        .clip(RoundedCornerShape(cornerRadiusDp))
                 ) {
                     AsyncImage(
                         model = stableRequest,

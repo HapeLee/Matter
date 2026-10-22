@@ -1,5 +1,7 @@
 package org.kazusa.matter.ui.theme
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -291,7 +293,7 @@ fun AppearanceScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(44.dp)
-                                    .clip(smoothRoundedCorner(8.dp))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(MaterialTheme.colorScheme.primary),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -305,7 +307,7 @@ fun AppearanceScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(44.dp)
-                                    .clip(smoothRoundedCorner(8.dp))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(MaterialTheme.colorScheme.secondary),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -319,7 +321,7 @@ fun AppearanceScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(44.dp)
-                                    .clip(smoothRoundedCorner(8.dp))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(MaterialTheme.colorScheme.tertiary),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -340,21 +342,21 @@ fun AppearanceScreen(
                             Button(
                                 onClick = {},
                                 modifier = Modifier.weight(1f),
-                                shape = smoothRoundedCorner(10.dp)
+                                shape = RoundedCornerShape(10.dp)
                             ) {
                                 Text("主按钮")
                             }
                             FilledTonalButton(
                                 onClick = {},
                                 modifier = Modifier.weight(1f),
-                                shape = smoothRoundedCorner(10.dp)
+                                shape = RoundedCornerShape(10.dp)
                             ) {
                                 Text("强调按钮")
                             }
                             OutlinedButton(
                                 onClick = {},
                                 modifier = Modifier.weight(1f),
-                                shape = smoothRoundedCorner(10.dp)
+                                shape = RoundedCornerShape(10.dp)
                             ) {
                                 Text("轮廓按钮")
                             }

@@ -1,8 +1,8 @@
 package org.kazusa.matter.ui.theme
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.shape.CircleShape
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
-import org.kazusa.matter.ui.theme.smoothUnevenRoundedCorner
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -96,7 +96,7 @@ fun ThemePaletteBottomSheet(
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 6.dp,
-        shape = smoothUnevenRoundedCorner(28.dp, 28.dp, 0.dp, 0.dp)
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomEnd = 0.dp, bottomStart = 0.dp)
     ) {
         Column(
             modifier = Modifier
@@ -550,9 +550,9 @@ fun CustomColorPickerDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(64.dp)
-                        .clip(smoothRoundedCorner(12.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .background(currentColor)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, smoothRoundedCorner(12.dp)),
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -595,7 +595,7 @@ fun CustomColorPickerDialog(
                         { Text("请输入合法的 6 位 16 进制颜色，如 FF8200") }
                     } else null,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = smoothRoundedCorner(10.dp)
+                    shape = RoundedCornerShape(10.dp)
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))

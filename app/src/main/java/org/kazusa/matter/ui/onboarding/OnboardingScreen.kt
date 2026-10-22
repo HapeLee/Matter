@@ -1,7 +1,8 @@
 package org.kazusa.matter.ui.onboarding
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.shape.CircleShape
-import org.kazusa.matter.ui.theme.smoothRoundedCorner
 
 
 import androidx.compose.foundation.background
@@ -188,7 +189,7 @@ fun OnboardingScreen(
                         Box(
                             modifier = Modifier
                                 .size(if (isSelected) 28.dp else 8.dp, 8.dp)
-                                .clip(smoothRoundedCorner(4.dp))
+                                .clip(RoundedCornerShape(4.dp))
                                 .background(
                                     if (isSelected) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.surfaceVariant
@@ -208,7 +209,7 @@ fun OnboardingScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp),
-                        shape = smoothRoundedCorner(16.dp),
+                        shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Text(
