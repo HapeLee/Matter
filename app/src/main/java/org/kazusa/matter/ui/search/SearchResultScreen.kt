@@ -1,5 +1,7 @@
 package org.kazusa.matter.ui.search
 
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
 import org.kazusa.matter.data.model.VideoStreamInfo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -573,7 +574,7 @@ private fun SearchHistoryPanel(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(smoothRoundedCorner(12.dp))
                     .clickable { onKeywordClick(entry.keyword) }
                     .padding(start = 8.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically

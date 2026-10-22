@@ -1580,6 +1580,58 @@ class WeiboApiService(
     }
 
     /**
+     * 回复（评论）微博。
+     * 端点: POST https://m.weibo.cn/api/comments/create
+     *
+     * 移动端 PWA 提交的是 `mid` + `content` + `st`（mid 即详情链接里的微博 id）；
+     * 这里同时带上 `id`，兼容仍按 `id` 取目标微博的端。
+     *
+     * 与点赞 / 关注共用同一个 [WeiboWriteSession]：`st` 令牌、串行提交与频控冷却一致。
+     * 成功时尽量带回服务端新建的评论（`data` 为对象时可直接插入列表）；
+     * 部分响应只给 `ok=1`，此时返回 `null`，由调用方静默重拉评论。
+     */
+    suspend fun createComment(
+        id: String,
+        text: String,
+        cookie: String = ""
+    ): ApiResult<org.kazusa.matter.data.model.WeiboCommentDto?> {
+        val content = text.trim()
+        if (content.isEmpty()) return ApiResult.Error(message = "回复内容不能为空")
+        return try {
+            val effectiveCookie = getEffectiveCookie(cookie)
+            if (effectiveCookie.isBlank()) {
+                return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
+            }
+            writeSession.execute(cookie = effectiveCookie, action = "回复") { credentials ->
+                val response = client.submitForm(
+                    url = "https://m.weibo.cn/api/comments/create",
+                    formParameters = parameters {
+                        append("mid", id)
+                        append("id", id)
+                        append("content", content)
+                        append("st", credentials.token)
+                    }
+                ) {
+                    header("Cookie", credentials.cookieHeader)
+                    header("X-XSRF-TOKEN", credentials.token)
+                    header("Origin", "https://m.weibo.cn")
+                    header("Referer", "https://m.weibo.cn/detail/$id")
+                    header("MWeibo-Pwa", "1")
+                    header("X-Requested-With", "XMLHttpRequest")
+                }
+                readCreatedComment(response, failureMessage = "回复失败")
+            }
+        } catch (e: WriteGateException) {
+            ApiResult.Error(code = e.code, message = e.message.orEmpty())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.e("WeiboApi", "createComment failed", e)
+            ApiResult.Error(message = e.localizedMessage ?: "回复异常", throwable = e)
+        }
+    }
+
+    /**
      * 解析写操作（点赞 / 关注）的响应。
      *
      * - HTTP 429 与「操作频繁」类文案统一转成 429 并进入本地冷却：这类失败如果按普通错误
@@ -1592,6 +1644,38 @@ class WeiboApiService(
         failureMessage: String,
         success: T
     ): ApiResult<T> {
+        writeHttpError(response)?.let { return it }
+        val respJson = KtorClientFactory.jsonConfig
+            .parseToJsonElement(response.bodyAsText())
+            .jsonObject
+        if (writeOkFlag(respJson) == 1) return ApiResult.Success(success)
+        return writeJsonError(respJson, failureMessage)
+    }
+
+    /** 与 [readWriteResponse] 同一套失败处理，成功时带回 `data` 里新建的评论（可能缺省）。 */
+    private suspend fun readCreatedComment(
+        response: HttpResponse,
+        failureMessage: String
+    ): ApiResult<org.kazusa.matter.data.model.WeiboCommentDto?> {
+        writeHttpError(response)?.let { return it }
+        val respJson = KtorClientFactory.jsonConfig
+            .parseToJsonElement(response.bodyAsText())
+            .jsonObject
+        if (writeOkFlag(respJson) != 1) return writeJsonError(respJson, failureMessage)
+        val created = (respJson["data"] as? JsonObject)?.let { data ->
+            // 新建评论的字段与服务端列表不完全一致，解析失败只当作「没带回评论」，
+            // 不能把一次已经成功的写入报成失败；没有 id 的对象直接丢弃，
+            // 否则会在列表里插进一条点不开、也不属于任何人的空评论
+            runCatching {
+                KtorClientFactory.jsonConfig
+                    .decodeFromJsonElement<org.kazusa.matter.data.model.WeiboCommentDto>(data)
+            }.getOrNull()?.takeIf { it.id != null }
+        }
+        return ApiResult.Success(created)
+    }
+
+    /** 写响应的 HTTP 层失败：429 进入本地冷却，非 200 原样透传。 */
+    private fun writeHttpError(response: HttpResponse): ApiResult.Error? {
         if (response.status == HttpStatusCode.TooManyRequests) {
             writeSession.reportRateLimited()
             return ApiResult.Error(
@@ -1602,13 +1686,11 @@ class WeiboApiService(
         if (response.status != HttpStatusCode.OK) {
             return ApiResult.Error(code = response.status.value, message = "HTTP ${response.status}")
         }
-        val respJson = KtorClientFactory.jsonConfig
-            .parseToJsonElement(response.bodyAsText())
-            .jsonObject
-        val ok = respJson["ok"]?.jsonPrimitive?.intOrNull
-            ?: (if (respJson["ok"]?.jsonPrimitive?.content == "1") 1 else 0)
-        if (ok == 1) return ApiResult.Success(success)
+        return null
+    }
 
+    /** 写响应的业务失败（`ok != 1`）：频控进入冷却，其它视为 `st` 失效并丢弃缓存凭据。 */
+    private fun writeJsonError(respJson: JsonObject, failureMessage: String): ApiResult.Error {
         val msg = respJson["msg"]?.jsonPrimitive?.contentOrNull
             ?: respJson["message"]?.jsonPrimitive?.contentOrNull
             ?: failureMessage
@@ -1622,6 +1704,11 @@ class WeiboApiService(
         writeSession.invalidate()
         return ApiResult.Error(message = msg)
     }
+
+    /** `ok` 在不同端是数字或字符串，统一取整数。 */
+    private fun writeOkFlag(respJson: JsonObject): Int =
+        respJson["ok"]?.jsonPrimitive?.intOrNull
+            ?: (if (respJson["ok"]?.jsonPrimitive?.content == "1") 1 else 0)
 
     /** 解析 `Cookie` 头为有序键值表，供写操作合并 `Set-Cookie` 使用。 */
     private fun parseCookieHeader(header: String): LinkedHashMap<String, String> {

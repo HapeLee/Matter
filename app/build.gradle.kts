@@ -183,6 +183,8 @@ dependencies {
 
     // AndroidLiquidGlass (Kyant0 Backdrop)
     implementation(libs.backdrop)
+    // 平滑圆角（G2 连续曲率），液态玻璃统一使用
+    implementation(libs.shapes)
 
     // Reorderable Drag-and-drop List
     implementation(libs.reorderable)

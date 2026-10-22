@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -163,6 +162,8 @@ fun LiquidGlassIconButton(
     val isBlurSupported = rememberBlurEffectsEnabled()
     val blurActive = isBlurSupported && backdrop != null
     val spec = rememberLiquidGlassSurfaceSpec()
+    // 圆形按钮同样走 Continuous 胶囊：正方形上得到的是连续曲率的圆（略偏 squircle）
+    val shape = rememberLiquidCapsuleShape()
     val haptic = LocalHapticFeedback.current
 
     val interactionSource = remember { MutableInteractionSource() }
@@ -207,7 +208,7 @@ fun LiquidGlassIconButton(
                     .matchParentSize()
                     .drawBackdrop(
                         backdrop = backdrop,
-                        shape = { CircleShape },
+                        shape = { shape },
                         effects = {
                             padding = maxOf(padding, 20.dp.toPx())
                             if (amount > 0f) {
@@ -251,7 +252,7 @@ fun LiquidGlassIconButton(
         } else {
             // 退化表面与胶囊容器共用同一份颜色，保证无模糊能力时两种玻璃也不分家
             Surface(
-                shape = CircleShape,
+                shape = shape,
                 color = spec.fallbackSurfaceColor,
                 modifier = Modifier
                     .matchParentSize()
@@ -282,6 +283,8 @@ fun LiquidGlassCapsule(
     val isBlurSupported = rememberBlurEffectsEnabled()
     val blurActive = isBlurSupported && backdrop != null
     val spec = rememberLiquidGlassSurfaceSpec()
+    // 胶囊同样使用连续曲率，与圆形按钮、面板保持同一种「平滑」边缘
+    val shape = rememberLiquidCapsuleShape()
     // 更轻透的基础表面（与圆形按钮共用同一份退化色）
     val surfaceColor = spec.fallbackSurfaceColor
     val buttonHighlight = if (spec.isDark) buttonSpecularDark else buttonSpecularLight
@@ -332,7 +335,7 @@ fun LiquidGlassCapsule(
                     .matchParentSize()
                     .drawBackdrop(
                         backdrop = backdrop,
-                        shape = { CircleShape },
+                        shape = { shape },
                         effects = {
                             if (amount > 0f) {
                                 vibrancy()
@@ -368,7 +371,7 @@ fun LiquidGlassCapsule(
             )
         } else {
             Surface(
-                shape = CircleShape,
+                shape = shape,
                 color = surfaceColor,
                 modifier = Modifier
                     .matchParentSize()

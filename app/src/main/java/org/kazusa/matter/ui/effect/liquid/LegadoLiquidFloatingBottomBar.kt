@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -128,6 +127,9 @@ fun LegadoLiquidFloatingBottomBar(
     val onReselectedUpdated by rememberUpdatedState(onItemReselected)
 
     val offsetAnimation = remember { Animatable(0f) }
+
+    // 底栏外壳：连续曲率胶囊，与其它液态玻璃悬浮组件统一
+    val pillShape = rememberLiquidCapsuleShape()
 
     BoxWithConstraints(
         modifier = modifier.width(barWidth),
@@ -271,7 +273,7 @@ fun LegadoLiquidFloatingBottomBar(
                     if (isBlurEnabled) {
                         Modifier.drawBackdrop(
                             backdrop = backdrop,
-                            shape = { CircleShape },
+                            shape = { pillShape },
                             effects = {
                                 vibrancy()
                                 blur(8.dp.toPx())
@@ -307,14 +309,14 @@ fun LegadoLiquidFloatingBottomBar(
                     } else {
                         Modifier
                             .dropShadow(
-                                shape = CircleShape,
+                                shape = pillShape,
                                 shadow = Shadow(
                                     radius = 8.dp,
                                     color = Color.Black,
                                     alpha = if (isDark) 0.16f else 0.08f
                                 )
                             )
-                            .background(containerColor, CircleShape)
+                            .background(containerColor, pillShape)
                     }
                 )
                 .height(56.dp)

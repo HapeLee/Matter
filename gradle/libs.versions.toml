@@ -69,6 +69,8 @@ androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.re
 
 # AndroidLiquidGlass (Backdrop by Kyant0)
 backdrop = { group = "io.github.kyant0", name = "backdrop", version = "2.0.1" }
+# Kyant0 Shapes：G2 连续曲率的平滑圆角（backdrop 的 runtime 传递依赖，显式声明才能直接引用 API）
+shapes = { group = "io.github.kyant0", name = "shapes", version = "1.2.1" }
 
 # Room 3 (local database, KSP codegen) —— 浏览历史等本地数据
 androidx-room3-runtime = { group = "androidx.room3", name = "room3-runtime", version.ref = "room3" }

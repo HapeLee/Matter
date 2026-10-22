@@ -1,5 +1,9 @@
 package org.kazusa.matter.ui.media
 
+import androidx.compose.foundation.shape.CircleShape
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
+
 import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.pm.PackageManager
@@ -20,8 +24,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
@@ -391,7 +393,7 @@ fun VideoPlayerScreen(
                     Box {
                         Surface(
                             onClick = { showQualityMenu = true },
-                            shape = RoundedCornerShape(16.dp),
+                            shape = smoothRoundedCorner(16.dp),
                             color = Color.Black.copy(alpha = 0.54f),
                             contentColor = Color.White,
                             modifier = Modifier.height(36.dp)

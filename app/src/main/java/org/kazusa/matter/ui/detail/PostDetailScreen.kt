@@ -1,7 +1,12 @@
 package org.kazusa.matter.ui.detail
 
+import androidx.compose.foundation.shape.CircleShape
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
+
 import org.kazusa.matter.data.model.StatusMediaItem
 import org.kazusa.matter.data.model.VideoStreamInfo
+import android.content.Context
 import android.content.Intent
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -47,14 +52,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Repeat
@@ -123,12 +125,8 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
-import androidx.compose.material3.LocalContentColor
 import org.kazusa.matter.ui.components.ImmersiveTopBar
-import org.kazusa.matter.ui.components.FavoriteButton
 import org.kazusa.matter.ui.components.LocalSnackbarHostState
-import org.kazusa.matter.ui.components.TopBarActionButton
-import org.kazusa.matter.ui.components.TopBarTitleCapsule
 import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.components.TopBarTokens
 import org.kazusa.matter.ui.components.WeiboActionButton
@@ -241,6 +239,8 @@ fun PostDetailScreen(
     }
 
     CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
+        // 回复面板要盖住顶栏和底部悬浮栏，因此 Scaffold 外再套一层全屏 Box：面板始终在最上层
+        Box(modifier = modifier.fillMaxSize()) {
         Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             snackbarHost = {
@@ -273,39 +273,9 @@ fun PostDetailScreen(
                         onBackClick = onBackClick
                     )
                 },
-                actions = { scroll ->
-                    post?.let { FavoriteButton(it, scroll = scroll, backdrop = backdrop) }
-                    TopBarActionButton(
-                        imageVector = Icons.Default.Share,
-                        contentDescription = "分享当前微博链接",
-                        scroll = scroll,
-                        backdrop = backdrop,
-                        onClick = {
-                            val currentPost = post
-                            val postIdToUse = currentPost?.idStr ?: currentPost?.mid ?: currentPost?.id?.toString() ?: postId
-                            val userId = currentPost?.user?.id?.toString().orEmpty()
-                            val shareUrl = if (userId.isNotBlank()) {
-                                "https://weibo.com/$userId/$postIdToUse"
-                            } else {
-                                "https://m.weibo.cn/status/$postIdToUse"
-                            }
-                            val author = currentPost?.user?.screenName?.let { "@$it: " } ?: ""
-                            val snippet = (currentPost?.textRaw ?: currentPost?.text ?: "")
-                                .replace(Regex("<[^>]*>"), "")
-                                .trim()
-                                .take(80)
-                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                putExtra(Intent.EXTRA_TEXT, "$author$snippet\n$shareUrl")
-                                type = "text/plain"
-                            }
-                            val shareIntent = Intent.createChooser(sendIntent, "分享当前微博链接")
-                            context.startActivity(shareIntent)
-                        }
-                    )
-                }
             )
         },
-        modifier = modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize()
     ) { innerPadding ->
         PullToRefreshBox(
             isRefreshing = isRefreshing,
@@ -349,7 +319,8 @@ fun PostDetailScreen(
                             .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
                             .background(MaterialTheme.colorScheme.surface)
                             .animateContentSize(),
-                        contentPadding = PaddingValues(top = innerPadding.calculateTopPadding(), bottom = 16.dp)
+                        // 底部留出悬浮操作栏的高度，最后一条评论不会被挡住
+                        contentPadding = PaddingValues(top = innerPadding.calculateTopPadding(), bottom = 96.dp)
                     ) {
                         // 专为沉浸式阅读设计的正文排版（大头像、作者大号、正文更大间距）
                         item {
@@ -539,10 +510,61 @@ fun PostDetailScreen(
                     }
                 }
             }
+
+            // 底部悬浮操作栏：写评论 + 评论 / 赞 / 收藏 / 分享。
+            // 正文还没到手时（加载 / 失败）不出现，避免对着一屏占位提示操作。
+            if (post != null) {
+                PostDetailFloatingBar(
+                    post = post,
+                    isLiked = isLiked,
+                    backdrop = backdrop,
+                    onWriteComment = viewModel::openReplyComposer,
+                    onLikeClick = viewModel::toggleLike,
+                    onShareClick = { sharePost(context, post, postId) },
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                )
+            }
         }
     }
+
+        // 回复面板（底部 sheet）：盖住顶栏与悬浮操作栏，点遮罩 / 返回键收起
+        if (post != null) {
+            PostReplySheet(
+                replyState = viewModel.replyState,
+                placeholder = replyPlaceholderFor(post.user?.screenName),
+                onDismiss = viewModel::dismissReplyComposer,
+                onDraftChange = viewModel::updateReplyDraft,
+                onSend = viewModel::submitReply
+            )
+        }
+        }
 }
 }
+}
+
+/**
+ * 分享当前微博：系统分享面板，正文摘录 + 链接。
+ *
+ * 入口已从顶栏移到正文页底部悬浮操作栏，文案与链接拼装保持原样。
+ */
+private fun sharePost(context: Context, post: WeiboStatusDto, fallbackPostId: String) {
+    val postIdToUse = post.idStr ?: post.mid ?: post.id?.toString() ?: fallbackPostId
+    val userId = post.user?.id?.toString().orEmpty()
+    val shareUrl = if (userId.isNotBlank()) {
+        "https://weibo.com/$userId/$postIdToUse"
+    } else {
+        "https://m.weibo.cn/status/$postIdToUse"
+    }
+    val author = post.user?.screenName?.let { "@$it: " } ?: ""
+    val snippet = (post.textRaw?.takeIf { it.isNotBlank() } ?: post.text)
+        .replace(Regex("<[^>]*>"), "")
+        .trim()
+        .take(80)
+    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+        putExtra(Intent.EXTRA_TEXT, "$author$snippet\n$shareUrl")
+        type = "text/plain"
+    }
+    context.startActivity(Intent.createChooser(sendIntent, "分享当前微博链接"))
 }
 
 /**
@@ -1025,7 +1047,7 @@ private fun SkeletonBar(
         modifier = modifier
             .then(if (width != null) Modifier.width(width) else Modifier.fillMaxWidth(fraction))
             .height(height)
-            .clip(RoundedCornerShape(height / 2))
+            .clip(smoothRoundedCorner(height / 2))
             .background(color)
     )
 }

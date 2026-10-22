@@ -1,5 +1,9 @@
 package org.kazusa.matter.ui.profile
 
+import androidx.compose.foundation.shape.CircleShape
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
+
 import androidx.activity.compose.BackHandler
 import org.kazusa.matter.data.model.VideoStreamInfo
 import android.widget.Toast
@@ -42,8 +46,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -538,7 +540,7 @@ fun UserProfileScreen(
                                         hasMore -> {
                                             OutlinedButton(
                                                 onClick = { viewModel.load(page = currentPage + 1) },
-                                                shape = RoundedCornerShape(20.dp)
+                                                shape = smoothRoundedCorner(20.dp)
                                             ) {
                                                 Text("加载更多动态")
                                             }
@@ -1420,7 +1422,7 @@ private fun BloggerDetailSheet(
                         Spacer(modifier = Modifier.height(12.dp))
                         OutlinedButton(
                             onClick = onRetry,
-                            shape = RoundedCornerShape(20.dp)
+                            shape = smoothRoundedCorner(20.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
@@ -1658,7 +1660,7 @@ private fun ProfileTabError(message: String, onRetry: () -> Unit) {
                 )
             }
             Spacer(modifier = Modifier.height(14.dp))
-            OutlinedButton(onClick = onRetry, shape = RoundedCornerShape(20.dp)) {
+            OutlinedButton(onClick = onRetry, shape = smoothRoundedCorner(20.dp)) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
                     contentDescription = null,
@@ -1705,7 +1707,7 @@ private fun ProfileLoadMore(
             hasMore -> {
                 OutlinedButton(
                     onClick = onLoadMore,
-                    shape = RoundedCornerShape(20.dp)
+                    shape = smoothRoundedCorner(20.dp)
                 ) {
                     Text("加载更多")
                 }
@@ -1789,7 +1791,7 @@ private fun AlbumPhotoCell(
     Box(
         modifier = modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(smoothRoundedCorner(6.dp))
             .clickable(onClick = onClick)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {

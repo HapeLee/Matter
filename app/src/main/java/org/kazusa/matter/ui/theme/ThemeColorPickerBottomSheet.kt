@@ -1,5 +1,9 @@
 package org.kazusa.matter.ui.theme
 
+import androidx.compose.foundation.shape.CircleShape
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+import org.kazusa.matter.ui.theme.smoothUnevenRoundedCorner
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,8 +21,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -106,7 +108,7 @@ fun ThemeColorPickerBottomSheet(
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 6.dp,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+        shape = smoothUnevenRoundedCorner(28.dp, 28.dp, 0.dp, 0.dp)
     ) {
         Column(
             modifier = Modifier
@@ -219,9 +221,9 @@ fun ThemeColorPickerBottomSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(60.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(smoothRoundedCorner(12.dp))
                     .background(currentColor)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, smoothRoundedCorner(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -262,7 +264,7 @@ fun ThemeColorPickerBottomSheet(
                     { Text("请输入合法的 6 位 16 进制颜色，如 FF8200") }
                 } else null,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp)
+                shape = smoothRoundedCorner(10.dp)
             )
 
             // RGB 滑块
@@ -394,7 +396,7 @@ fun ThemeColorPickerBottomSheet(
                     onDismissRequest()
                 },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+                shape = smoothRoundedCorner(12.dp)
             ) {
                 Text(
                     text = "应用此色彩",

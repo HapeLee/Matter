@@ -1,5 +1,9 @@
 package org.kazusa.matter.ui.onboarding
 
+import androidx.compose.foundation.shape.CircleShape
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,8 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.outlined.DynamicFeed
@@ -186,7 +188,7 @@ fun OnboardingScreen(
                         Box(
                             modifier = Modifier
                                 .size(if (isSelected) 28.dp else 8.dp, 8.dp)
-                                .clip(RoundedCornerShape(4.dp))
+                                .clip(smoothRoundedCorner(4.dp))
                                 .background(
                                     if (isSelected) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.surfaceVariant
@@ -206,7 +208,7 @@ fun OnboardingScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = smoothRoundedCorner(16.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Text(

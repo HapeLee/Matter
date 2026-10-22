@@ -1,5 +1,7 @@
 package org.kazusa.matter.ui.settings
 
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -221,7 +222,7 @@ private fun LibraryDetailBottomSheet(
                             onDismissRequest()
                         },
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = smoothRoundedCorner(12.dp)
                     ) {
                         Text("项目主页")
                     }
@@ -230,7 +231,7 @@ private fun LibraryDetailBottomSheet(
                 OutlinedButton(
                     onClick = onDismissRequest,
                     modifier = if (websiteUrl != null) Modifier.weight(1f) else Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = smoothRoundedCorner(12.dp)
                 ) {
                     Text("关闭")
                 }

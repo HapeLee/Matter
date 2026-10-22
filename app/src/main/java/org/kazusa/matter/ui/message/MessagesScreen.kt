@@ -1,5 +1,9 @@
 package org.kazusa.matter.ui.message
 
+import androidx.compose.foundation.shape.CircleShape
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -22,8 +26,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material3.CircularProgressIndicator
@@ -541,7 +543,7 @@ private fun NoticeRow(
                 Spacer(modifier = Modifier.height(6.dp))
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(8.dp),
+                    shape = smoothRoundedCorner(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
@@ -595,7 +597,7 @@ private fun MessageAvatar(url: String, name: String) {
 @Composable
 private fun UnreadBadge(count: Int) {
     Surface(
-        shape = RoundedCornerShape(9.dp),
+        shape = smoothRoundedCorner(9.dp),
         color = MaterialTheme.colorScheme.error
     ) {
         Text(

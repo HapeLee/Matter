@@ -1,5 +1,9 @@
 ﻿package org.kazusa.matter.ui.detail
 
+import androidx.compose.foundation.shape.CircleShape
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
+
 import android.widget.Toast
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -10,8 +14,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
@@ -157,7 +159,7 @@ internal fun CommentThread(
                         end = if (isReply) 8.dp else 16.dp,
                         bottom = 12.dp
                     )
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(smoothRoundedCorner(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainer)
                     .animateContentSize()
             ) {

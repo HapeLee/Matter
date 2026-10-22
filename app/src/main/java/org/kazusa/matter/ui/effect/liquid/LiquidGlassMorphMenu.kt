@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -118,7 +117,7 @@ fun LiquidGlassMorphMenu(
     // 面板尺寸只在组合期算一次（条目数变了才变）
     val panelHeight = morphMenuPanelHeight(items.size)
 
-    val morphShape = RoundedCornerShape(MORPH_PANEL_CORNER)
+    val morphShape = rememberLiquidRoundedRectShape(MORPH_PANEL_CORNER)
 
     // 根盒子恒为「面板 + 上移距离」的尺寸，且不随形变进度变化：
     // 收起态的按钮与展开态的面板都被摆在这个盒子内部，于是它的 bounds 同时覆盖两者，
@@ -138,7 +137,8 @@ fun LiquidGlassMorphMenu(
                         .drawBackdrop(
                             backdrop = backdrop,
                             shape = {
-                                RoundedCornerShape(
+                                // 形变过程中半径逐帧变化，直接按当前值造形状（连续曲率）
+                                liquidRoundedRectShape(
                                     lerp(collapsedSize.value / 2f, MORPH_PANEL_CORNER.value,
                                         morphSizeEase(progress.value)).dp
                                 )
@@ -189,7 +189,7 @@ fun LiquidGlassMorphMenu(
                 modifier = Modifier
                     .matchParentSize()
                     .graphicsLayer {
-                        shape = RoundedCornerShape(
+                        shape = liquidRoundedRectShape(
                             lerp(collapsedSize.value / 2f, MORPH_PANEL_CORNER.value,
                                 morphSizeEase(progress.value)).dp
                         )

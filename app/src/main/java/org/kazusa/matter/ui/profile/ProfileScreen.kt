@@ -1,5 +1,9 @@
 package org.kazusa.matter.ui.profile
 
+import androidx.compose.foundation.shape.CircleShape
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,8 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
@@ -333,7 +335,7 @@ private fun ProfileMenuRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(smoothRoundedCorner(12.dp))
             .clickable { onClick() }
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -387,7 +389,7 @@ private fun ProfileStatItem(
             .then(
                 if (onClick != null) {
                     Modifier
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(smoothRoundedCorner(12.dp))
                         .clickable(onClick = onClick)
                 } else {
                     Modifier

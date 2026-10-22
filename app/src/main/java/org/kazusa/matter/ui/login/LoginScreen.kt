@@ -1,5 +1,7 @@
 package org.kazusa.matter.ui.login
 
+import org.kazusa.matter.ui.theme.smoothRoundedCorner
+
 import android.annotation.SuppressLint
 import android.webkit.CookieManager
 import android.webkit.WebView
@@ -16,7 +18,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
@@ -268,7 +269,7 @@ fun LoginScreen(
                                             },
                                             enabled = uiState !is LoginUiState.Loading,
                                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                            shape = RoundedCornerShape(12.dp),
+                                            shape = smoothRoundedCorner(12.dp),
                                             modifier = Modifier.weight(2.5f)
                                         ) {
                                             if (uiState is LoginUiState.Loading) {
@@ -347,7 +348,7 @@ fun LoginScreen(
                                 OutlinedButton(
                                     onClick = { viewModel.sendSmsCode(phoneInput) },
                                     enabled = phoneInput.length == 11 && countdown == 0 && uiState !is LoginUiState.Loading,
-                                    shape = RoundedCornerShape(8.dp),
+                                    shape = smoothRoundedCorner(8.dp),
                                     modifier = Modifier.height(54.dp)
                                 ) {
                                     Text(
@@ -382,7 +383,7 @@ fun LoginScreen(
                                 onClick = { viewModel.loginWithSms(phoneInput, codeInput) },
                                 enabled = phoneInput.length == 11 && codeInput.isNotBlank() && uiState !is LoginUiState.Loading,
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                shape = RoundedCornerShape(12.dp),
+                                shape = smoothRoundedCorner(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(50.dp)
@@ -468,7 +469,7 @@ fun LoginScreen(
                                 onClick = { viewModel.loginWithPassword(usernameInput, passwordInput) },
                                 enabled = usernameInput.isNotBlank() && passwordInput.isNotBlank() && uiState !is LoginUiState.Loading,
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                shape = RoundedCornerShape(12.dp),
+                                shape = smoothRoundedCorner(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(50.dp)
@@ -536,7 +537,7 @@ fun LoginScreen(
                                 onClick = { viewModel.loginWithCookie(cookieInput) },
                                 enabled = uiState !is LoginUiState.Loading,
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                shape = RoundedCornerShape(12.dp),
+                                shape = smoothRoundedCorner(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(50.dp)
