@@ -146,6 +146,29 @@ class WeiboApiService(
     }
 
     /**
+     * 登录功能专用凭据：显式传入非空则直接用，否则取当前登录会话；游客 / 未登录 /
+     * 凭据为空一律返回空串，**绝不回落游客凭据**——游客数据会掩盖真实登录态，
+     * 分组与写操作这类登录功能拿游客凭据只会换来难懂的服务端错误。
+     * 本地仍标记已登录却拿不到凭据时，先上报会话失效再返回空。
+     */
+    private suspend fun requireSessionCookie(passedCookie: String = ""): String {
+        if (passedCookie.isNotBlank()) return passedCookie
+        val session = try {
+            authPreferences?.sessionFlow?.firstOrNull()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        } ?: return ""
+        if (!session.isLoggedIn || session.uid == "guest") return ""
+        val header = session.cookieHeader
+        if (header.isBlank()) {
+            sessionExpiredBus.notifySessionExpired()
+        }
+        return header
+    }
+
+    /**
      * 向微博 passport 申请游客凭证 (visitor ticket -> SUB)
      */
     suspend fun fetchVisitorCookie(): String {
@@ -415,11 +438,14 @@ class WeiboApiService(
         page: Int = 1,
         maxId: Long? = null
     ): ApiResult<TimelineResponse> {
+        // 关注流是登录功能：没有登录凭据直接提示，不发游客请求
+        val sessionCookie = requireSessionCookie(cookie)
+        if (sessionCookie.isBlank()) {
+            return ApiResult.Error(code = 401, message = "请先登录微博账号")
+        }
         return try {
             val response = client.get("https://m.weibo.cn/feed/friends") {
-                if (cookie.isNotBlank()) {
-                    header("Cookie", cookie)
-                }
+                header("Cookie", sessionCookie)
                 header("Referer", "https://m.weibo.cn/")
                 header("MWeibo-Pwa", "1")
                 parameter("page", page)
@@ -462,7 +488,10 @@ class WeiboApiService(
         page: Int = 1,
         maxId: Long? = null
     ): ApiResult<TimelineResponse> {
-        val effectiveCookie = getEffectiveCookie(cookie)
+        val effectiveCookie = requireSessionCookie(cookie)
+        if (effectiveCookie.isBlank()) {
+            return ApiResult.Error(code = 401, message = "请先登录微博账号")
+        }
         return try {
             val response = client.get("https://m.weibo.cn/feed/group") {
                 if (effectiveCookie.isNotBlank()) {
@@ -511,7 +540,10 @@ class WeiboApiService(
      * 优先使用 weibo.com/ajax/feed/allGroups 获取具有真实数值 gid（包括特别关注、互相关注以及自定义分组）的完整列表
      */
     suspend fun getFollowGroups(cookie: String): ApiResult<List<WeiboGroupDto>> {
-        val effectiveCookie = getEffectiveCookie(cookie)
+        val effectiveCookie = requireSessionCookie(cookie)
+        if (effectiveCookie.isBlank()) {
+            return ApiResult.Error(code = 401, message = "请先登录微博账号")
+        }
         // 1. 尝试从 weibo.com/ajax/feed/allGroups 获取最新完整真实分组
         try {
             val response = client.get("https://weibo.com/ajax/feed/allGroups") {
@@ -623,7 +655,7 @@ class WeiboApiService(
         description: String = "",
         cookie: String = ""
     ): ApiResult<WeiboGroupDto> {
-        val effectiveCookie = getEffectiveCookie(cookie)
+        val effectiveCookie = requireSessionCookie(cookie)
         if (effectiveCookie.isBlank()) {
             return ApiResult.Error(code = 401, message = "未检测到有效登录状态，无法同步至微博")
         }
@@ -712,7 +744,7 @@ class WeiboApiService(
         name: String,
         cookie: String = ""
     ): ApiResult<Unit> {
-        val effectiveCookie = getEffectiveCookie(cookie)
+        val effectiveCookie = requireSessionCookie(cookie)
         if (effectiveCookie.isBlank()) {
             return ApiResult.Error(code = 401, message = "未检测到有效登录状态，无法同步至微博")
         }
@@ -770,7 +802,7 @@ class WeiboApiService(
         gid: String,
         cookie: String = ""
     ): ApiResult<Unit> {
-        val effectiveCookie = getEffectiveCookie(cookie)
+        val effectiveCookie = requireSessionCookie(cookie)
         if (effectiveCookie.isBlank()) {
             return ApiResult.Error(code = 401, message = "未检测到有效登录状态，无法同步至微博")
         }
@@ -825,7 +857,7 @@ class WeiboApiService(
         gids: List<String>,
         cookie: String = ""
     ): ApiResult<Unit> {
-        val effectiveCookie = getEffectiveCookie(cookie)
+        val effectiveCookie = requireSessionCookie(cookie)
         if (effectiveCookie.isBlank()) {
             return ApiResult.Success(Unit)
         }
@@ -1568,7 +1600,7 @@ class WeiboApiService(
         refererPostId: String? = null
     ): ApiResult<Boolean> {
         return try {
-            val effectiveCookie = getEffectiveCookie(cookie)
+            val effectiveCookie = requireSessionCookie(cookie)
             if (effectiveCookie.isBlank()) {
                 return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
             }
@@ -1635,7 +1667,7 @@ class WeiboApiService(
         val content = text.trim()
         if (content.isEmpty() && pictureId.isNullOrBlank()) return ApiResult.Error(message = "回复内容不能为空")
         return try {
-            val effectiveCookie = getEffectiveCookie(cookie)
+            val effectiveCookie = requireSessionCookie(cookie)
             if (effectiveCookie.isBlank()) {
                 return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
             }
@@ -1875,7 +1907,7 @@ class WeiboApiService(
             if (targetUid.isBlank() || targetUid == "guest") {
                 return ApiResult.Error(code = 401, message = "请先登录后再操作")
             }
-            val effectiveCookie = getEffectiveCookie(cookie)
+            val effectiveCookie = requireSessionCookie(cookie)
             if (effectiveCookie.isBlank()) {
                 return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
             }
