@@ -3,7 +3,6 @@ package org.kazusa.matter.core.network
 import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.core.session.SessionExpiredBus
 import org.kazusa.matter.data.model.GroupListResponse
-import org.kazusa.matter.data.model.PasswordLoginResponse
 import org.kazusa.matter.data.model.SearchResultItem
 import org.kazusa.matter.data.model.SearchResultKind
 import android.net.Uri
@@ -30,8 +29,6 @@ import org.kazusa.matter.data.model.parseUserProfileDetail
 import org.kazusa.matter.data.model.classifySearchCard
 import org.kazusa.matter.data.model.toSearchCardInfo
 import org.kazusa.matter.data.model.toSearchChipGroupOrNull
-import org.kazusa.matter.data.model.SmsCodeResponse
-import org.kazusa.matter.data.model.SmsLoginResponse
 import org.kazusa.matter.data.model.TimelineResponse
 import org.kazusa.matter.data.model.UserTimelineResult
 import org.kazusa.matter.data.model.FollowingListTab
@@ -263,185 +260,6 @@ class WeiboApiService(
         } catch (e: Exception) {
             android.util.Log.e("WeiboAuth", "verifyConfig error", e)
             ApiResult.Error(message = e.localizedMessage ?: "网络请求异常", throwable = e)
-        }
-    }
-
-    /**
-     * 发送手机短信验证码
-     * 端点: https://login.sina.com.cn/sso/v2/sms/send 与 passport 统一
-     */
-    suspend fun sendSmsCode(phone: String, countryCode: String = "86"): ApiResult<String> {
-        return try {
-            val response = client.submitForm(
-                url = "https://login.sina.com.cn/sso/v2/sms/send",
-                formParameters = parameters {
-                    append("entry", "wapsso")
-                    append("mobile", phone)
-                }
-            ) {
-                header("Referer", "https://login.sina.com.cn/sso/signin")
-                header("Origin", "https://login.sina.com.cn")
-            }
-            if (response.status == HttpStatusCode.OK) {
-                val rawText = response.bodyAsText()
-                if (rawText.contains("need mfa")) {
-                    ApiResult.Error(
-                        code = 403,
-                        message = "微博触发了安全人机验证(MFA)。请切换到「网页授权」标签页完成滑块/图形验证并一键登录。"
-                    )
-                } else {
-                    val body = response.body<SmsCodeResponse>()
-                    if (body.retcode == 20000000L || body.retcode == 0L) {
-                        ApiResult.Success(body.msg ?: "验证码已发送")
-                    } else {
-                        ApiResult.Error(
-                            code = body.retcode.toInt(),
-                            message = body.msg ?: "发送验证码失败"
-                        )
-                    }
-                }
-            } else if (response.status.value in 300..399) {
-                ApiResult.Error(
-                    code = response.status.value,
-                    message = "新浪安全验证重定向(HTTP ${response.status.value})，请使用「网页授权」完成人机验证登录"
-                )
-            } else {
-                ApiResult.Error(code = response.status.value, message = "HTTP ${response.status}")
-            }
-        } catch (e: Exception) {
-            ApiResult.Error(message = e.localizedMessage ?: "发送验证码异常", throwable = e)
-        }
-    }
-
-    /**
-     * 校验短信验证码并执行登录
-     * 端点: https://login.sina.com.cn/sso/v2/login
-     */
-    suspend fun loginWithSms(
-        phone: String,
-        smsCode: String,
-        countryCode: String = "86"
-    ): ApiResult<Pair<String, String>> {
-        return try {
-            val response = client.submitForm(
-                url = "https://login.sina.com.cn/sso/v2/login",
-                formParameters = parameters {
-                    append("entry", "wapsso")
-                    append("username", phone)
-                    append("scode", smsCode)
-                    append("gateway", "1")
-                }
-            ) {
-                header("Referer", "https://login.sina.com.cn/sso/signin")
-                header("Origin", "https://login.sina.com.cn")
-            }
-
-            // 提取响应中的 Set-Cookie (包含 SUB=...; SUBP=...)
-            val setCookieHeaders = response.headers.getAll("Set-Cookie").orEmpty()
-            val cookieMap = mutableMapOf<String, String>()
-            setCookieHeaders.forEach { header ->
-                val cookiePair = header.substringBefore(";").trim()
-                val eqIdx = cookiePair.indexOf("=")
-                if (eqIdx > 0) {
-                    val key = cookiePair.substring(0, eqIdx).trim()
-                    val value = cookiePair.substring(eqIdx + 1).trim()
-                    cookieMap[key] = value
-                }
-            }
-
-            val sub = cookieMap["SUB"].orEmpty()
-            val subp = cookieMap["SUBP"].orEmpty()
-            val combinedCookie = if (sub.isNotBlank()) {
-                "SUB=$sub; ${if (subp.isNotBlank()) "SUBP=$subp" else ""}".trim()
-            } else {
-                setCookieHeaders.joinToString("; ") { it.substringBefore(";") }
-            }
-
-            val rawText = response.bodyAsText()
-            if (rawText.contains("need mfa")) {
-                ApiResult.Error(
-                    code = 403,
-                    message = "检测到安全验证(MFA)，请切换到「网页授权」完成验证登录"
-                )
-            } else {
-                val body = response.body<SmsLoginResponse>()
-                if (body.retcode == 20000000L || body.retcode == 0L || combinedCookie.isNotBlank()) {
-                    val uid = body.data?.uid.orEmpty()
-                    ApiResult.Success(Pair(uid, combinedCookie))
-                } else {
-                    ApiResult.Error(
-                        code = body.retcode.toInt(),
-                        message = body.msg ?: "短信验证码错误或已失效"
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            ApiResult.Error(message = e.localizedMessage ?: "短信登录异常", throwable = e)
-        }
-    }
-
-    /**
-     * 账号密码登录
-     * 端点: https://login.sina.com.cn/sso/v2/login
-     */
-    suspend fun loginWithPassword(
-        username: String,
-        password: String
-    ): ApiResult<Pair<String, String>> {
-        return try {
-            val response = client.submitForm(
-                url = "https://login.sina.com.cn/sso/v2/login",
-                formParameters = parameters {
-                    append("entry", "wapsso")
-                    append("username", username)
-                    append("password", password)
-                    append("gateway", "1")
-                }
-            ) {
-                header("Referer", "https://login.sina.com.cn/sso/signin")
-                header("Origin", "https://login.sina.com.cn")
-            }
-
-            val setCookieHeaders = response.headers.getAll("Set-Cookie").orEmpty()
-            val cookieMap = mutableMapOf<String, String>()
-            setCookieHeaders.forEach { header ->
-                val cookiePair = header.substringBefore(";").trim()
-                val eqIdx = cookiePair.indexOf("=")
-                if (eqIdx > 0) {
-                    val key = cookiePair.substring(0, eqIdx).trim()
-                    val value = cookiePair.substring(eqIdx + 1).trim()
-                    cookieMap[key] = value
-                }
-            }
-
-            val sub = cookieMap["SUB"].orEmpty()
-            val subp = cookieMap["SUBP"].orEmpty()
-            val combinedCookie = if (sub.isNotBlank()) {
-                "SUB=$sub; ${if (subp.isNotBlank()) "SUBP=$subp" else ""}".trim()
-            } else {
-                setCookieHeaders.joinToString("; ") { it.substringBefore(";") }
-            }
-
-            val rawText = response.bodyAsText()
-            if (rawText.contains("need mfa")) {
-                ApiResult.Error(
-                    code = 403,
-                    message = "账号需要进行人机安全验证(MFA)。请切换到「网页授权」标签页完成验证并登录。"
-                )
-            } else {
-                val body = response.body<PasswordLoginResponse>()
-                if (body.retcode == 20000000L || body.retcode == 0L || combinedCookie.isNotBlank()) {
-                    val uid = body.data?.uid.orEmpty()
-                    ApiResult.Success(Pair(uid, combinedCookie))
-                } else {
-                    ApiResult.Error(
-                        code = body.retcode.toInt(),
-                        message = body.msg.takeIf { !it.isNullOrBlank() } ?: "登录失败，请检查账号密码"
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            ApiResult.Error(message = e.localizedMessage ?: "密码登录异常", throwable = e)
         }
     }
 

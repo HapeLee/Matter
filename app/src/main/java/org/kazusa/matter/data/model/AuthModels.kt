@@ -65,36 +65,3 @@ data class WeiboConfigData(
     val user: WeiboUserDto? = null
 )
 
-@Serializable
-data class SmsCodeResponse(
-    val retcode: Long = 0,
-    val msg: String? = null
-)
-
-@Serializable
-data class SmsLoginResponse(
-    val retcode: Long = 0,
-    val msg: String? = null,
-    val data: SmsLoginData? = null
-)
-
-@Serializable
-data class SmsLoginData(
-    val uid: String? = null,
-    @SerialName("crossdomain_url") val crossDomainUrl: String? = null
-)
-
-@Serializable
-data class PasswordLoginResponse(
-    val retcode: Long = 0,
-    val msg: String? = null,
-    val ticket: String? = null,
-    val data: PasswordLoginData? = null
-)
-
-@Serializable
-data class PasswordLoginData(
-    val uid: String? = null,
-    val crossdomainUrl: String? = null
-)
-

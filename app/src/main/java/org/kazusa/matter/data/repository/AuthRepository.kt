@@ -30,44 +30,6 @@ class AuthRepository(
         authPreferences.setOnboardingCompleted()
     }
 
-    suspend fun sendSmsCode(phone: String): ApiResult<String> {
-        return apiService.sendSmsCode(phone)
-    }
-
-    suspend fun loginWithSms(phone: String, smsCode: String): ApiResult<UserSession> {
-        return when (val result = apiService.loginWithSms(phone, smsCode)) {
-            is ApiResult.Success -> {
-                val (uid, cookie) = result.data
-                if (cookie.isNotBlank()) {
-                    loginWithCookie(cookie)
-                } else {
-                    val session = UserSession(uid = uid, isLoggedIn = true, screenName = "微博用户")
-                    authPreferences.saveSession(uid = uid, screenName = "微博用户")
-                    ApiResult.Success(session)
-                }
-            }
-            is ApiResult.Error -> ApiResult.Error(result.code, result.message, result.throwable)
-            ApiResult.Loading -> ApiResult.Loading
-        }
-    }
-
-    suspend fun loginWithPassword(username: String, password: String): ApiResult<UserSession> {
-        return when (val result = apiService.loginWithPassword(username, password)) {
-            is ApiResult.Success -> {
-                val (uid, cookie) = result.data
-                if (cookie.isNotBlank()) {
-                    loginWithCookie(cookie)
-                } else {
-                    val session = UserSession(uid = uid, isLoggedIn = true, screenName = username)
-                    authPreferences.saveSession(uid = uid, screenName = username)
-                    ApiResult.Success(session)
-                }
-            }
-            is ApiResult.Error -> ApiResult.Error(result.code, result.message, result.throwable)
-            ApiResult.Loading -> ApiResult.Loading
-        }
-    }
-
     /**
      * 解析完整的Cookie字符串（如包含 SUB, SUBP, _T_WM 等）
      */

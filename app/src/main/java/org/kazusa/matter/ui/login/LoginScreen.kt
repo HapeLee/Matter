@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Web
 import androidx.compose.material3.Button
@@ -49,7 +48,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.kazusa.matter.core.network.WeiboRequestHeaders
@@ -61,13 +59,7 @@ import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.theme.MatterShapeTokens
 import org.kazusa.matter.ui.theme.TextSecondary
 
-import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -78,14 +70,8 @@ fun LoginScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val countdown by viewModel.countdown.collectAsStateWithLifecycle()
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    var phoneInput by remember { mutableStateOf("") }
-    var codeInput by remember { mutableStateOf("") }
-    var usernameInput by remember { mutableStateOf("") }
-    var passwordInput by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
     var cookieInput by remember { mutableStateOf("") }
 
     LaunchedEffect(uiState) {
@@ -128,19 +114,7 @@ fun LoginScreen(
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text("短信登录", style = if (selectedTab == 1) MaterialTheme.typography.titleSmallEmphasized else MaterialTheme.typography.titleSmall) },
-                    icon = { Icon(Icons.Default.PhoneAndroid, contentDescription = null) }
-                )
-                Tab(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    text = { Text("密码登录", style = if (selectedTab == 2) MaterialTheme.typography.titleSmallEmphasized else MaterialTheme.typography.titleSmall) },
-                    icon = { Icon(Icons.Default.AccountCircle, contentDescription = null) }
-                )
-                Tab(
-                    selected = selectedTab == 3,
-                    onClick = { selectedTab = 3 },
-                    text = { Text("Cookie导入", style = if (selectedTab == 3) MaterialTheme.typography.titleSmallEmphasized else MaterialTheme.typography.titleSmall) },
+                    text = { Text("Cookie导入", style = if (selectedTab == 1) MaterialTheme.typography.titleSmallEmphasized else MaterialTheme.typography.titleSmall) },
                     icon = { Icon(Icons.Default.VpnKey, contentDescription = null) }
                 )
             }
@@ -311,203 +285,6 @@ fun LoginScreen(
                         }
                     }
                     1 -> {
-                        // 手机短信验证码登录
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(24.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            Text(
-                                text = "手机快捷登录",
-                                style = MaterialTheme.typography.titleMediumEmphasized
-                            )
-                            Text(
-                                text = "未注册手机号验证后将自动创建或关联微博账号",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
-
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            // 手机号输入框
-                            OutlinedTextField(
-                                value = phoneInput,
-                                onValueChange = { if (it.length <= 11) phoneInput = it },
-                                label = { Text("手机号码") },
-                                placeholder = { Text("请输入11位中国大陆手机号") },
-                                leadingIcon = {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(start = 12.dp, end = 4.dp)
-                                    ) {
-                                        Text("+86", style = MaterialTheme.typography.titleSmallEmphasized)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                    }
-                                },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            // 验证码输入框与获取按钮
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                OutlinedTextField(
-                                    value = codeInput,
-                                    onValueChange = { if (it.length <= 6) codeInput = it },
-                                    label = { Text("验证码") },
-                                    placeholder = { Text("6位短信验证码") },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    singleLine = true,
-                                    modifier = Modifier.weight(1f)
-                                )
-
-                                OutlinedButton(
-                                    onClick = { viewModel.sendSmsCode(phoneInput) },
-                                    enabled = phoneInput.length == 11 && countdown == 0 && uiState !is LoginUiState.Loading,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.height(54.dp)
-                                ) {
-                                    Text(
-                                        text = if (countdown > 0) "${countdown}s后重发" else "获取验证码",
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
-                                }
-                            }
-
-                            // 错误或发送成功提示
-                            when (uiState) {
-                                is LoginUiState.Error -> {
-                                    Text(
-                                        text = (uiState as LoginUiState.Error).message,
-                                        color = MaterialTheme.colorScheme.error,
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                                is LoginUiState.CodeSent -> {
-                                    Text(
-                                        text = "✓ ${(uiState as LoginUiState.CodeSent).message}",
-                                        color = MaterialTheme.colorScheme.primary,
-                                        style = MaterialTheme.typography.bodySmallEmphasized
-                                    )
-                                }
-                                else -> {}
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Button(
-                                onClick = { viewModel.loginWithSms(phoneInput, codeInput) },
-                                enabled = phoneInput.length == 11 && codeInput.isNotBlank() && uiState !is LoginUiState.Loading,
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(50.dp)
-                            ) {
-                                if (uiState is LoginUiState.Loading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Text("登 录", style = MaterialTheme.typography.titleMediumEmphasized)
-                                }
-                            }
-                        }
-                    }
-                    2 -> {
-                        // 账号密码登录
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(24.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            Text(
-                                text = "账号密码登录",
-                                style = MaterialTheme.typography.titleMediumEmphasized
-                            )
-                            Text(
-                                text = "支持使用微博绑定手机号、邮箱或个性化账号名登录。若触发了安全防护验证，请切换至「网页授权(推荐)」。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            OutlinedTextField(
-                                value = usernameInput,
-                                onValueChange = { usernameInput = it },
-                                label = { Text("账号 / 手机号 / 邮箱") },
-                                placeholder = { Text("请输入微博账号") },
-                                leadingIcon = {
-                                    Icon(Icons.Default.AccountCircle, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            OutlinedTextField(
-                                value = passwordInput,
-                                onValueChange = { passwordInput = it },
-                                label = { Text("密码") },
-                                placeholder = { Text("请输入微博密码") },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                },
-                                trailingIcon = {
-                                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                        Icon(
-                                            imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                            contentDescription = if (passwordVisible) "隐藏密码" else "显示密码",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                },
-                                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            if (uiState is LoginUiState.Error) {
-                                Text(
-                                    text = (uiState as LoginUiState.Error).message,
-                                    color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Button(
-                                onClick = { viewModel.loginWithPassword(usernameInput, passwordInput) },
-                                enabled = usernameInput.isNotBlank() && passwordInput.isNotBlank() && uiState !is LoginUiState.Loading,
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(50.dp)
-                            ) {
-                                if (uiState is LoginUiState.Loading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Text("登 录", style = MaterialTheme.typography.titleMediumEmphasized)
-                                }
-                            }
-                        }
-                    }
-                    3 -> {
                         // 手动输入 Cookie / SUB 凭据
                         Column(
                             modifier = Modifier
