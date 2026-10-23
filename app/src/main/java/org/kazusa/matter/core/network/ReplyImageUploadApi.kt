@@ -28,7 +28,7 @@ internal class ReplyImageUploadApi(private val client: HttpClient, private val w
                     parameter("ent", "miniblog")
                     parameter("ori", "1")
                     parameter("cs", CRC32().apply { update(bytes) }.value.toString())
-                    header("Cookie", credentials.cookieHeader)
+                    cookieHeader(credentials.cookieHeader)
                     header("Origin", "https://weibo.com")
                     header("Referer", "https://weibo.com/")
                     contentType(ContentType.Application.OctetStream)

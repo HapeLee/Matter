@@ -71,8 +71,24 @@ private const val HOT_FEED_GROUP_TYPE = 1
 class WeiboApiService(
     private val client: HttpClient,
     private val authPreferences: AuthPreferences? = null,
-    private val sessionExpiredBus: SessionExpiredBus = SessionExpiredBus()
+    private val sessionExpiredBus: SessionExpiredBus = SessionExpiredBus(),
+    cookieFallbackSource: CookieFallbackSource? = null
 ) {
+
+    init {
+        // CookieAuth 插件的兜底来源：未显式声明凭据的微博内容域请求注入当前会话
+        // （或缓存的游客凭据）。不主动请求，避免插件内递归。
+        cookieFallbackSource?.bind {
+            try {
+                authPreferences?.sessionFlow?.firstOrNull()?.cookieHeader?.takeIf { it.isNotBlank() }
+                    ?: cachedVisitorCookie.orEmpty()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                ""
+            }
+        }
+    }
 
     /**
      * 写操作（点赞 / 收藏 / 关注）共用：缓存 `st`、串行提交、识别频控并冷却。
@@ -222,7 +238,7 @@ class WeiboApiService(
         return try {
             val response = client.get("https://m.weibo.cn/api/config") {
                 if (cookie.isNotBlank()) {
-                    header("Cookie", cookie)
+                    cookieHeader(cookie)
                 }
             }
             val rawText = response.bodyAsText()
@@ -445,7 +461,7 @@ class WeiboApiService(
         }
         return try {
             val response = client.get("https://m.weibo.cn/feed/friends") {
-                header("Cookie", sessionCookie)
+                cookieHeader(sessionCookie)
                 header("Referer", "https://m.weibo.cn/")
                 header("MWeibo-Pwa", "1")
                 parameter("page", page)
@@ -495,7 +511,7 @@ class WeiboApiService(
         return try {
             val response = client.get("https://m.weibo.cn/feed/group") {
                 if (effectiveCookie.isNotBlank()) {
-                    header("Cookie", effectiveCookie)
+                    cookieHeader(effectiveCookie)
                 }
                 header("Referer", "https://m.weibo.cn/")
                 header("MWeibo-Pwa", "1")
@@ -548,7 +564,7 @@ class WeiboApiService(
         try {
             val response = client.get("https://weibo.com/ajax/feed/allGroups") {
                 if (effectiveCookie.isNotBlank()) {
-                    header("Cookie", effectiveCookie)
+                    cookieHeader(effectiveCookie)
                 }
                 header("Referer", "https://weibo.com")
             }
@@ -618,7 +634,7 @@ class WeiboApiService(
         return try {
             val response = client.get("https://api.weibo.com/2/friendships/groups.json") {
                 if (effectiveCookie.isNotBlank()) {
-                    header("Cookie", effectiveCookie)
+                    cookieHeader(effectiveCookie)
                 }
             }
             if (response.status == HttpStatusCode.OK) {
@@ -670,7 +686,7 @@ class WeiboApiService(
                     }
                 }
             ) {
-                header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
                 val rawText = response.bodyAsText()
@@ -703,7 +719,7 @@ class WeiboApiService(
                     append("name", name)
                 }
             ) {
-                header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
                 header("Referer", "https://weibo.com/")
                 header("X-Requested-With", "XMLHttpRequest")
             }
@@ -757,7 +773,7 @@ class WeiboApiService(
                     append("name", name)
                 }
             ) {
-                header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
                 return ApiResult.Success(Unit)
@@ -775,7 +791,7 @@ class WeiboApiService(
                     append("name", name)
                 }
             ) {
-                header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
                 header("Referer", "https://weibo.com/")
                 header("X-Requested-With", "XMLHttpRequest")
             }
@@ -814,7 +830,7 @@ class WeiboApiService(
                     append("list_id", gid)
                 }
             ) {
-                header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
                 return ApiResult.Success(Unit)
@@ -831,7 +847,7 @@ class WeiboApiService(
                     append("gid", gid)
                 }
             ) {
-                header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
                 header("Referer", "https://weibo.com/")
                 header("X-Requested-With", "XMLHttpRequest")
             }
@@ -871,7 +887,7 @@ class WeiboApiService(
                     append("list_ids", gidListStr)
                 }
             ) {
-                header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
                 ApiResult.Success(Unit)
@@ -883,7 +899,7 @@ class WeiboApiService(
                         append("gids", gidListStr)
                     }
                 ) {
-                    header("Cookie", effectiveCookie)
+                    cookieHeader(effectiveCookie)
                     header("Referer", "https://weibo.com/")
                     header("X-Requested-With", "XMLHttpRequest")
                 }
@@ -926,7 +942,7 @@ class WeiboApiService(
                 header("Referer", "https://m.weibo.cn/")
                 header("MWeibo-Pwa", "1")
                 header("X-Requested-With", "XMLHttpRequest")
-                if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
                 val rawText = response.bodyAsText()
@@ -960,7 +976,7 @@ class WeiboApiService(
             val response = client.get("https://weibo.com/ajax/feed/allGroups") {
                 header("Referer", "https://weibo.com/")
                 header("X-Requested-With", "XMLHttpRequest")
-                if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status != HttpStatusCode.OK) {
                 return ApiResult.Error(
@@ -1050,7 +1066,7 @@ class WeiboApiService(
                 parameter("count", count)
                 header("Referer", "https://weibo.com/")
                 header("X-Requested-With", "XMLHttpRequest")
-                if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status != HttpStatusCode.OK) {
                 return ApiResult.Error(
@@ -1166,7 +1182,7 @@ class WeiboApiService(
                 header("Referer", "https://m.weibo.cn/")
                 header("MWeibo-Pwa", "1")
                 header("X-Requested-With", "XMLHttpRequest")
-                if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
                 val rawText = response.bodyAsText()
@@ -1385,7 +1401,7 @@ class WeiboApiService(
                 header("Referer", "https://m.weibo.cn/detail/$id")
                 header("MWeibo-Pwa", "1")
                 header("X-Requested-With", "XMLHttpRequest")
-                if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
                 val rawText = response.bodyAsText()
@@ -1427,7 +1443,7 @@ class WeiboApiService(
                     header("Referer", "https://m.weibo.cn/detail/$id")
                     header("MWeibo-Pwa", "1")
                     header("X-Requested-With", "XMLHttpRequest")
-                    if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                    cookieHeader(effectiveCookie)
                 }
                 if (response.status == HttpStatusCode.OK) {
                     val rawText = response.bodyAsText()
@@ -1450,7 +1466,7 @@ class WeiboApiService(
                     header("Referer", "https://m.weibo.cn/detail/$id")
                     header("MWeibo-Pwa", "1")
                     header("X-Requested-With", "XMLHttpRequest")
-                    if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                    cookieHeader(effectiveCookie)
                 }
                 if (response.status == HttpStatusCode.OK) {
                     val rawText = response.bodyAsText()
@@ -1491,7 +1507,7 @@ class WeiboApiService(
                 header("Referer", "https://m.weibo.cn/detail/$postId?cid=$commentId")
                 header("MWeibo-Pwa", "1")
                 header("X-Requested-With", "XMLHttpRequest")
-                if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
                 decodeCommentReplies(response.bodyAsText())
@@ -1523,7 +1539,7 @@ class WeiboApiService(
                 header("Referer", "https://m.weibo.cn/detail/$id")
                 header("MWeibo-Pwa", "1")
                 header("X-Requested-With", "XMLHttpRequest")
-                if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
                 val rawText = response.bodyAsText()
@@ -1563,7 +1579,7 @@ class WeiboApiService(
                 header("Referer", "https://m.weibo.cn/detail/$id")
                 header("MWeibo-Pwa", "1")
                 header("X-Requested-With", "XMLHttpRequest")
-                if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
                 val rawText = response.bodyAsText()
@@ -1620,7 +1636,7 @@ class WeiboApiService(
                         append("st", credentials.token)
                     }
                 ) {
-                    header("Cookie", credentials.cookieHeader)
+                    cookieHeader(credentials.cookieHeader)
                     header("X-XSRF-TOKEN", credentials.token)
                     header("Origin", "https://m.weibo.cn")
                     header("Referer", "https://m.weibo.cn/detail/$refererId")
@@ -1690,7 +1706,7 @@ class WeiboApiService(
                         append("st", credentials.token)
                     }
                 ) {
-                    header("Cookie", credentials.cookieHeader)
+                    cookieHeader(credentials.cookieHeader)
                     header("X-XSRF-TOKEN", credentials.token)
                     header("Origin", if (pictureId == null) "https://m.weibo.cn" else "https://weibo.com")
                     header("Referer", if (pictureId == null) "https://m.weibo.cn/detail/$id" else "https://weibo.com/")
@@ -1718,7 +1734,7 @@ class WeiboApiService(
         }
         if (cookies["XSRF-TOKEN"].isNullOrBlank()) {
             val response = client.get("https://weibo.com/") {
-                header("Cookie", base.cookieHeader)
+                cookieHeader(base.cookieHeader)
                 header("Referer", "https://weibo.com/")
             }
             if (response.status == HttpStatusCode.TooManyRequests) {
@@ -1838,7 +1854,7 @@ class WeiboApiService(
     ): WeiboWriteCredentials {
         val cookies = parseCookieHeader(cookie)
         val bootstrap = client.get("https://m.weibo.cn/api/config") {
-            header("Cookie", cookie)
+            cookieHeader(cookie)
             header("Referer", "https://m.weibo.cn/")
         }
         if (bootstrap.status == HttpStatusCode.TooManyRequests) {
@@ -1923,7 +1939,7 @@ class WeiboApiService(
                         append("st", credentials.token)
                     }
                 ) {
-                    header("Cookie", credentials.cookieHeader)
+                    cookieHeader(credentials.cookieHeader)
                     header("X-XSRF-TOKEN", credentials.token)
                     header("Origin", "https://m.weibo.cn")
                     header("Referer", "https://m.weibo.cn/u/$targetUid")
@@ -1986,7 +2002,7 @@ class WeiboApiService(
                         header("Referer", "https://m.weibo.cn/u/$targetUid")
                         header("MWeibo-Pwa", "1")
                         header("X-Requested-With", "XMLHttpRequest")
-                        if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                        cookieHeader(effectiveCookie)
                     }
                     if (response.status.value == 432) {
                         cachedVisitorCookie = null
@@ -1999,7 +2015,7 @@ class WeiboApiService(
                                 header("Referer", "https://m.weibo.cn/u/$targetUid")
                                 header("MWeibo-Pwa", "1")
                                 header("X-Requested-With", "XMLHttpRequest")
-                                header("Cookie", effectiveCookie)
+                                cookieHeader(effectiveCookie)
                             }
                         }
                     }
@@ -2040,7 +2056,7 @@ class WeiboApiService(
                         header("X-Requested-With", "XMLHttpRequest")
                         header("client-version", "v2.44.75")
                         header("server-version", "v2024.05.24.1")
-                        if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                        cookieHeader(effectiveCookie)
                     }
                     if (pcResponse.status == HttpStatusCode.OK) {
                         val pcText = pcResponse.bodyAsText()
@@ -2103,7 +2119,7 @@ class WeiboApiService(
                     header("X-Requested-With", "XMLHttpRequest")
                     header("client-version", "v2.44.75")
                     header("server-version", "v2024.05.24.1")
-                    if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                    cookieHeader(effectiveCookie)
                 }
 
             suspend fun fetchData(url: String): JsonObject? {
@@ -2169,7 +2185,7 @@ class WeiboApiService(
                     header("Referer", "https://weibo.com/u/$uid?tabtype=album")
                     header("Accept", "application/json, text/plain, */*")
                     header("X-Requested-With", "XMLHttpRequest")
-                    if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                    cookieHeader(effectiveCookie)
                 }
 
             var response = request()
@@ -2247,7 +2263,7 @@ class WeiboApiService(
                     header("Referer", "https://weibo.com/")
                     header("Accept", "application/json, text/plain, */*")
                     header("X-Requested-With", "XMLHttpRequest")
-                    if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                    cookieHeader(effectiveCookie)
                 }
 
             var response = request()
@@ -2340,7 +2356,7 @@ class WeiboApiService(
                     header("Referer", "https://weibo.com/u/$uid?tabtype=newVideo")
                     header("Accept", "application/json, text/plain, */*")
                     header("X-Requested-With", "XMLHttpRequest")
-                    if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                    cookieHeader(effectiveCookie)
                 }
 
             var response = request()
@@ -2421,7 +2437,7 @@ class WeiboApiService(
                     header("Referer", "https://m.weibo.cn/u/$uid")
                     header("MWeibo-Pwa", "1")
                     header("X-Requested-With", "XMLHttpRequest")
-                    if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                    cookieHeader(effectiveCookie)
                 }
 
             var response = request()
@@ -2500,7 +2516,7 @@ class WeiboApiService(
                 header("Referer", "https://m.weibo.cn/u/$uid")
                 header("MWeibo-Pwa", "1")
                 header("X-Requested-With", "XMLHttpRequest")
-                if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status.value == 432) {
                 cachedVisitorCookie = null
@@ -2516,7 +2532,7 @@ class WeiboApiService(
                         header("Referer", "https://m.weibo.cn/u/$uid")
                         header("MWeibo-Pwa", "1")
                         header("X-Requested-With", "XMLHttpRequest")
-                        header("Cookie", effectiveCookie)
+                        cookieHeader(effectiveCookie)
                     }
                 }
             }
@@ -2626,7 +2642,7 @@ class WeiboApiService(
                 header("Referer", "https://m.weibo.cn/u/$targetUid")
                 header("MWeibo-Pwa", "1")
                 header("X-Requested-With", "XMLHttpRequest")
-                if (effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie)
+                cookieHeader(effectiveCookie)
             }
             if (response.status.value == 432) {
                 cachedVisitorCookie = null
@@ -2640,7 +2656,7 @@ class WeiboApiService(
                         header("Referer", "https://m.weibo.cn/u/$targetUid")
                         header("MWeibo-Pwa", "1")
                         header("X-Requested-With", "XMLHttpRequest")
-                        header("Cookie", effectiveCookie)
+                        cookieHeader(effectiveCookie)
                     }
                 }
             }

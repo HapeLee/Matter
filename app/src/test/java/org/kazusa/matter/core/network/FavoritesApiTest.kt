@@ -19,7 +19,7 @@ import org.kazusa.matter.data.repository.favoriteId
 class FavoritesApiTest {
     @Test
     fun readsMobileCardsAndUsesServerPageEvenForShortPages() = runBlocking {
-        val client = HttpClient(MockEngine { request ->
+        val client = cookieAwareClient { request ->
             assertEquals("230259", request.url.parameters["containerid"])
             assertEquals("0", request.url.parameters["openApp"])
             assertEquals("2", request.url.parameters["page"])
@@ -28,7 +28,7 @@ class FavoritesApiTest {
                 {"card_type":11,"card_group":[{"card_type":9,"mblog":{"id":"124"}}]},
                 {"card_type":9,"mblog":{"id":"123"}}
             ]}}""")
-        })
+        }
         try {
             val result = WeiboApiService(client).getFavorites("SUB=test", 2) as ApiResult.Success
             assertEquals(listOf(123L, 124L), result.data.posts.map { it.id })
@@ -46,7 +46,7 @@ class FavoritesApiTest {
             """{"ok":0,"msg":"请先登录"}""" to false,
             """{"ok":1,"data":{}}""" to false
         )) {
-            val client = HttpClient(MockEngine { respond(response) })
+            val client = cookieAwareClient { respond(response) }
             try {
                 val result = WeiboApiService(client).getFavorites("SUB=test", 1)
                 assertEquals(success, result is ApiResult.Success)
@@ -59,7 +59,7 @@ class FavoritesApiTest {
     fun writesUseFreshTokenCookiesAndDifferentMobileActionPaths() = runBlocking {
         for (favorite in listOf(true, false)) {
             var requests = 0
-            val client = HttpClient(MockEngine { request ->
+            val client = cookieAwareClient { request ->
                 requests++
                 if (requests == 1) {
                     assertEquals("/api/config", request.url.encodedPath)
@@ -77,7 +77,7 @@ class FavoritesApiTest {
                     assertFalse(request.headers[HttpHeaders.Cookie]!!.contains("stale-token"))
                     respond("""{"ok":1}""")
                 }
-            })
+            }
             try {
                 assertTrue(WeiboApiService(client).setFavorite("SUB=test; XSRF-TOKEN=stale-token", "123", favorite) is ApiResult.Success)
                 assertEquals(2, requests)
@@ -88,10 +88,10 @@ class FavoritesApiTest {
     @Test
     fun failedWritesDoNotChangeFavoriteStateAndCanBeRetried() = runBlocking {
         var writes = 0
-        val client = HttpClient(MockEngine { request ->
+        val client = cookieAwareClient { request ->
             if (request.method == HttpMethod.Get) respond("""{"ok":1,"data":{"login":true,"st":"token"}}""")
             else { writes++; respond("""{"ok":0,"msg":"操作失败"}""") }
-        })
+        }
         try {
             val repository = FavoritesRepository(UserSession(uid = "1", sub = "test", isLoggedIn = true), WeiboApiService(client))
             repeat(2) { assertTrue(repository.toggle(WeiboStatusDto(id = 123)) is ApiResult.Error) }
@@ -103,7 +103,7 @@ class FavoritesApiTest {
 
     @Test
     fun guestRequestsNeverReachTheNetwork() = runBlocking {
-        val client = HttpClient(MockEngine { error("Guest must not send authenticated requests") })
+        val client = cookieAwareClient { error("Guest must not send authenticated requests") }
         try {
             val repository = FavoritesRepository(UserSession(uid = "guest", isLoggedIn = true), WeiboApiService(client))
             assertTrue(repository.getFavorites(1) is ApiResult.Error)
@@ -116,7 +116,7 @@ class FavoritesApiTest {
         val writing = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         val actions = mutableListOf<String>()
-        val client = HttpClient(MockEngine { request ->
+        val client = cookieAwareClient { request ->
             if (request.method == HttpMethod.Get) respond("""{"ok":1,"data":{"login":true,"st":"token"}}""")
             else {
                 actions += request.url.encodedPath
@@ -124,7 +124,7 @@ class FavoritesApiTest {
                 release.await()
                 respond("""{"ok":1}""")
             }
-        })
+        }
         try {
             val repository = FavoritesRepository(UserSession(uid = "1", sub = "test", isLoggedIn = true), WeiboApiService(client))
             val post = WeiboStatusDto(id = 123)
@@ -143,7 +143,7 @@ class FavoritesApiTest {
 
     @Test(expected = CancellationException::class)
     fun cancellationIsNotReportedAsANetworkFailure() = runBlocking {
-        val client = HttpClient(MockEngine { throw CancellationException("cancelled") })
+        val client = cookieAwareClient { throw CancellationException("cancelled") }
         try { WeiboApiService(client).getFavorites("SUB=test", 1); Unit } finally { client.close() }
     }
 

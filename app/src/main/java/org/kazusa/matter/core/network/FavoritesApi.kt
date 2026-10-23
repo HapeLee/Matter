@@ -22,7 +22,7 @@ internal class FavoritesApi(
 ) {
     suspend fun getFavorites(cookie: String, page: Int): ApiResult<UserPostsPage> = request {
         val response = client.get("https://m.weibo.cn/api/container/getIndex") {
-            header("Cookie", cookie)
+            cookieHeader(cookie)
             header("Referer", "https://m.weibo.cn/collect")
             parameter("containerid", "230259")
             parameter("openApp", "0")
@@ -33,7 +33,7 @@ internal class FavoritesApi(
 
     suspend fun getLikedPosts(cookie: String, page: Int): ApiResult<UserPostsPage> = request {
         val response = client.get("https://m.weibo.cn/api/likes/byme") {
-            header("Cookie", cookie)
+            cookieHeader(cookie)
             header("Referer", "https://m.weibo.cn/collect")
             parameter("page", page)
         }
@@ -55,7 +55,7 @@ internal class FavoritesApi(
                     append("st", credentials.token)
                 }
             ) {
-                header("Cookie", credentials.cookieHeader)
+                cookieHeader(credentials.cookieHeader)
                 header("X-XSRF-TOKEN", credentials.token)
                 header("Origin", "https://m.weibo.cn")
                 header("Referer", "https://m.weibo.cn/")

@@ -25,7 +25,7 @@ object KtorClientFactory {
         encodeDefaults = true
     }
 
-    fun createClient(): HttpClient {
+    fun createClient(cookieFallback: CookieFallbackSource? = null): HttpClient {
         val okHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
@@ -46,6 +46,11 @@ object KtorClientFactory {
                 requestTimeoutMillis = 20_000
                 connectTimeoutMillis = 15_000
                 socketTimeoutMillis = 20_000
+            }
+
+            // Cookie 头唯一注入点：业务方法用 cookieHeader(...) 声明凭据
+            install(CookieAuth) {
+                fallbackSource = cookieFallback
             }
 
             // 网络日志只在 debug 构建输出：INFO 级 URL 可能带 uid / 登录 ticket，release 不落 logcat

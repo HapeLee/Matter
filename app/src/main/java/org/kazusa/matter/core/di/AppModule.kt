@@ -10,6 +10,7 @@ import org.koin.dsl.onClose
 import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.core.datastore.MediaPreferences
 import org.kazusa.matter.core.datastore.UserSession
+import org.kazusa.matter.core.network.CookieFallbackSource
 import org.kazusa.matter.core.network.KtorClientFactory
 import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.data.cache.TimelineCacheManager
@@ -68,8 +69,9 @@ val dataModule = module {
     single { ThemePreferences(androidContext()) }
     single { MediaPreferences(androidContext()) }
     single<Json> { KtorClientFactory.jsonConfig }
-    single<HttpClient> { KtorClientFactory.createClient() } onClose { it?.close() }
-    single { WeiboApiService(get(), get(), get()) }
+    single<CookieFallbackSource> { CookieFallbackSource() }
+    single<HttpClient> { KtorClientFactory.createClient(get()) } onClose { it?.close() }
+    single { WeiboApiService(get(), get(), get(), get()) }
     single<OnlineEmojiSource> { WeiboEmojiApi(get()) }
     single<EmojiPackageStore> { AndroidEmojiPackageStore(File(androidContext().filesDir, "emoji-packs")) }
     single { EmojiRepository(get(), get()) }
