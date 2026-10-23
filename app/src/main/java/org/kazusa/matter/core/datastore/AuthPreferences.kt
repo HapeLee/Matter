@@ -22,9 +22,7 @@ class AuthPreferences(private val context: Context) {
         val UID = stringPreferencesKey("uid")
         val SUB = stringPreferencesKey("sub")
         val SUBP = stringPreferencesKey("subp")
-        val GSID = stringPreferencesKey("gsid")
         val RAW_COOKIE = stringPreferencesKey("raw_cookie")
-        val TOKEN = stringPreferencesKey("token")
         val SCREEN_NAME = stringPreferencesKey("screen_name")
         val AVATAR_URL = stringPreferencesKey("avatar_url")
         val DESCRIPTION = stringPreferencesKey("description")
@@ -127,9 +125,7 @@ class AuthPreferences(private val context: Context) {
                 uid = prefs[Keys.UID] ?: "",
                 sub = prefs[Keys.SUB] ?: "",
                 subp = prefs[Keys.SUBP] ?: "",
-                gsid = prefs[Keys.GSID] ?: "",
                 rawCookie = prefs[Keys.RAW_COOKIE] ?: "",
-                token = prefs[Keys.TOKEN] ?: "",
                 screenName = prefs[Keys.SCREEN_NAME] ?: "",
                 avatarUrl = prefs[Keys.AVATAR_URL] ?: "",
                 description = prefs[Keys.DESCRIPTION] ?: "",
@@ -144,9 +140,7 @@ class AuthPreferences(private val context: Context) {
         uid: String,
         sub: String = "",
         subp: String = "",
-        gsid: String = "",
         rawCookie: String = "",
-        token: String = "",
         screenName: String = "",
         avatarUrl: String = "",
         description: String = "",
@@ -158,9 +152,7 @@ class AuthPreferences(private val context: Context) {
             prefs[Keys.UID] = uid
             if (sub.isNotBlank()) prefs[Keys.SUB] = sub
             if (subp.isNotBlank()) prefs[Keys.SUBP] = subp
-            if (gsid.isNotBlank()) prefs[Keys.GSID] = gsid
             if (rawCookie.isNotBlank()) prefs[Keys.RAW_COOKIE] = rawCookie
-            if (token.isNotBlank()) prefs[Keys.TOKEN] = token
             if (screenName.isNotBlank()) prefs[Keys.SCREEN_NAME] = screenName
             if (avatarUrl.isNotBlank()) prefs[Keys.AVATAR_URL] = avatarUrl
             if (description.isNotBlank()) prefs[Keys.DESCRIPTION] = description
@@ -196,9 +188,7 @@ class AuthPreferences(private val context: Context) {
             prefs.remove(Keys.UID)
             prefs.remove(Keys.SUB)
             prefs.remove(Keys.SUBP)
-            prefs.remove(Keys.GSID)
             prefs.remove(Keys.RAW_COOKIE)
-            prefs.remove(Keys.TOKEN)
             prefs.remove(Keys.SCREEN_NAME)
             prefs.remove(Keys.AVATAR_URL)
             prefs.remove(Keys.DESCRIPTION)
