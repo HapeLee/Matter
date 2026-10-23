@@ -13,14 +13,14 @@ import org.kazusa.matter.data.repository.FavoritesRepository
 class LikedPostsApiTest {
     @Test
     fun likedPostsUseTheirOwnEndpointAndKeepTheActualFavoriteState() = runBlocking {
-        val client = HttpClient(MockEngine { request ->
+        val client = cookieAwareClient { request ->
             assertEquals("/api/likes/byme", request.url.encodedPath)
             assertEquals("2", request.url.parameters["page"])
             assertEquals("SUB=test", request.headers["Cookie"])
             respond("""{"ok":1,"data":{"total_number":847,"page":3,"statuses":[
                 {"id":123,"favorited":false},{"id":124,"favorited":true},{"id":123}
             ]}}""")
-        })
+        }
         try {
             val page = (WeiboApiService(client).getLikedPosts("SUB=test", 2) as ApiResult.Success).data
             assertEquals(listOf(123L, 124L), page.posts.map { it.id })
@@ -33,7 +33,7 @@ class LikedPostsApiTest {
     @Test
     fun nullMissingOrEmptyStatusesEndPaginationEvenWithANextPage() = runBlocking {
         for (data in listOf("""{"page":1000,"statuses":null}""", """{"page":1000}""", """{"page":1000,"statuses":[]}""")) {
-            val client = HttpClient(MockEngine { respond("""{"ok":1,"data":$data}""") })
+            val client = cookieAwareClient { respond("""{"ok":1,"data":$data}""") }
             try {
                 val page = (WeiboApiService(client).getLikedPosts("SUB=test", 999) as ApiResult.Success).data
                 assertTrue(page.posts.isEmpty())
@@ -53,7 +53,7 @@ class LikedPostsApiTest {
             """{"ok":1,"data":{"statuses":{}}}""",
             "<html>login required</html>"
         )) {
-            val client = HttpClient(MockEngine { respond(response) })
+            val client = cookieAwareClient { respond(response) }
             try { assertTrue(WeiboApiService(client).getLikedPosts("SUB=test", 1) is ApiResult.Error) }
             finally { client.close() }
         }
@@ -61,7 +61,7 @@ class LikedPostsApiTest {
 
     @Test
     fun guestCannotReadEitherCollection() = runBlocking {
-        val client = HttpClient(MockEngine { error("Must not issue a request for a guest") })
+        val client = cookieAwareClient { error("Must not issue a request for a guest") }
         try {
             val repository = FavoritesRepository(UserSession(uid = "guest", isLoggedIn = true), WeiboApiService(client))
             for (collection in UserPostCollection.entries) assertTrue(repository.getPosts(collection, 1) is ApiResult.Error)

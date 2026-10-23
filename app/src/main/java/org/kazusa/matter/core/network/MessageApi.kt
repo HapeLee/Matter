@@ -46,7 +46,7 @@ internal class MessageApi(
     ): ApiResult<MessageConversationPage> = request(cookie) {
         // 与网页端一致：只传 page，是否还有下一页由返回是否为空判断
         val response = client.get("$MESSAGE_BASE/message/msglist") {
-            header("Cookie", cookie)
+            cookieHeader(cookie)
             header("Referer", "$MESSAGE_BASE/message")
             parameter("page", page)
         }
@@ -65,7 +65,7 @@ internal class MessageApi(
             MessageTab.DIRECT -> error("私信分区不使用提醒接口")
         }
         val response = client.get("$MESSAGE_BASE/message/$path") {
-            header("Cookie", cookie)
+            cookieHeader(cookie)
             header("Referer", "$MESSAGE_BASE/message")
             parameter("page", page)
         }
@@ -80,7 +80,7 @@ internal class MessageApi(
         count: Int = PAGE_SIZE
     ): ApiResult<ChatMessagePage> = request(cookie) {
         val response = client.get("$MESSAGE_BASE/api/chat/list") {
-            header("Cookie", cookie)
+            cookieHeader(cookie)
             header("Referer", "$MESSAGE_BASE/message/chat?uid=$peerUid")
             parameter("uid", peerUid)
             parameter("count", count)
