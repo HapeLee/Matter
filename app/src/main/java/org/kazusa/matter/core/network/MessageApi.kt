@@ -19,6 +19,7 @@ import org.kazusa.matter.data.model.MessageConversationPage
 import org.kazusa.matter.data.model.MessageNotice
 import org.kazusa.matter.data.model.MessageNoticePage
 import org.kazusa.matter.data.model.MessageTab
+import org.kazusa.matter.core.session.SessionExpiredBus
 
 /**
  * 微博移动端消息（m.weibo.cn）接口。
@@ -30,10 +31,14 @@ import org.kazusa.matter.data.model.MessageTab
  * - 收到的赞 `GET /message/attitude?page=N`
  * - 聊天记录 `GET /api/chat/list?uid=…&count=…[&max_id=…]`
  *
- * 未登录统一返回 `{"ok":-100,"url":"<登录页>"}`，这里翻译成 401，交给页面提示登录。
+ * 未登录统一返回 `{"ok":-100,"url":"<登录页>"}`，这里翻译成 401 并上报会话失效，
+ * 由导航根统一跳登录页。
  * 接口没有公开文档，字段按「取第一个可用候选键」解析，缺字段降级为空值而不是整页抛异常。
  */
-internal class MessageApi(private val client: HttpClient) {
+internal class MessageApi(
+    private val client: HttpClient,
+    private val sessionExpiredBus: SessionExpiredBus? = null
+) {
 
     suspend fun conversations(
         cookie: String,
@@ -116,7 +121,11 @@ internal class MessageApi(private val client: HttpClient) {
         val body = element as? JsonObject
             ?: throw MessageApiException(null, "消息接口返回的数据格式无法识别")
         val ok = body.int("ok") ?: 0
-        if (ok == NOT_LOGGED_IN) throw MessageApiException(401, "登录后才能查看消息")
+        if (ok == NOT_LOGGED_IN) {
+            // 请求一定带着会话 Cookie（request 入口已挡掉空 Cookie），-100 说明凭据已失效
+            sessionExpiredBus?.notifySessionExpired()
+            throw MessageApiException(401, SessionExpiredBus.MESSAGE)
+        }
         if (ok <= 0) {
             throw MessageApiException(
                 body.int("errno")?.takeIf { it != 0 },

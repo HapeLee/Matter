@@ -12,11 +12,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.model.UserPostsPage
+import org.kazusa.matter.core.session.SessionExpiredBus
 
 /** 与移动网页端保持一致，复用 Matter 的 m.weibo.cn Cookie 会话。 */
 internal class FavoritesApi(
     private val client: HttpClient,
-    private val writeSession: WeiboWriteSession
+    private val writeSession: WeiboWriteSession,
+    private val sessionExpiredBus: SessionExpiredBus? = null
 ) {
     suspend fun getFavorites(cookie: String, page: Int): ApiResult<UserPostsPage> = request {
         val response = client.get("https://m.weibo.cn/api/container/getIndex") {
@@ -97,6 +99,11 @@ internal class FavoritesApi(
         val emptyFavorites = allowEmpty && body["msg"]?.jsonPrimitive?.contentOrNull == "这里还没有内容"
         if (body["error_code"] != null ||
             (body["ok"]?.jsonPrimitive?.content != "1" && !emptyFavorites)) {
+            if (body["ok"]?.jsonPrimitive?.intOrNull == -100) {
+                // 读接口带着会话 Cookie 仍被判定未登录：上报全局会话失效
+                sessionExpiredBus?.notifySessionExpired()
+                throw FavoritesException(-100, SessionExpiredBus.MESSAGE)
+            }
             throw FavoritesException(body["error_code"]?.jsonPrimitive?.intOrNull,
                 body.errorMessage("微博请求失败，请重新登录后重试"))
         }

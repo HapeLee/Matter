@@ -7,6 +7,7 @@ import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.core.datastore.UserSession
 import org.kazusa.matter.core.network.ApiResult
 import org.kazusa.matter.core.network.MessageApi
+import org.kazusa.matter.core.session.SessionExpiredBus
 import org.kazusa.matter.data.model.ChatMessagePage
 import org.kazusa.matter.data.model.MessageConversationPage
 import org.kazusa.matter.data.model.MessageNoticePage
@@ -31,10 +32,11 @@ interface MessageRepository {
 
 class WeiboMessageRepository(
     private val authPreferences: AuthPreferences,
-    client: HttpClient
+    client: HttpClient,
+    sessionExpiredBus: SessionExpiredBus? = null
 ) : MessageRepository {
 
-    private val api = MessageApi(client)
+    private val api = MessageApi(client, sessionExpiredBus)
 
     override suspend fun conversations(page: Int): ApiResult<MessageConversationPage> {
         val session = currentSession() ?: return notLoggedIn()
