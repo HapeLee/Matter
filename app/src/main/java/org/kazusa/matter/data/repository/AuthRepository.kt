@@ -85,11 +85,13 @@ class AuthRepository(
      * 通过Cookie或Token进行登录并拉取用户信息校验
      */
     suspend fun loginWithCookie(cookieString: String): ApiResult<UserSession> {
-        val cookies = parseCookie(cookieString)
+        // 多域 Cookie 池先按「首个非空值生效」去重：不处理的话两个账号的 SUB 会同头
+        // 发送，服务端按第一个取值，验证与保存的就可能是两个不同的账号。
+        // 验证（verifyConfig）与保存（saveSession）必须用同一份去重结果。
+        val formattedCookie = AuthCookieSanitizer.canonicalize(cookieString)
+        val cookies = parseCookie(formattedCookie)
         val sub = cookies["SUB"].orEmpty()
         val subp = cookies["SUBP"].orEmpty()
-        // 使用完整的 cookie 字符串，确保保留 _T_WM, SUB, SUBP 等所有关键状态
-        val formattedCookie = if (cookieString.contains("SUB=")) cookieString else "SUB=$sub; ${if (subp.isNotBlank()) "SUBP=$subp" else ""}".trim()
 
         return when (val result = apiService.verifyConfig(formattedCookie)) {
             is ApiResult.Success -> {
