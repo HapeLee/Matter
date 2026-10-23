@@ -12,11 +12,22 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import org.kazusa.matter.core.session.CredentialCipher
 import java.io.IOException
 
 val Context.authDataStore: DataStore<Preferences> by preferencesDataStore(name = "matter_auth_pref")
 
-class AuthPreferences(private val context: Context) {
+class AuthPreferences(
+    private val context: Context,
+    private val credentialCipher: CredentialCipher = CredentialCipher.None
+) {
+
+    /** 凭据字段写入前加密；空白与旧语义一致（不覆盖已有值）。 */
+    private fun encodeCredential(value: String): String = credentialCipher.encrypt(value)
+
+    /** 凭据字段读出后解密；密文解不开按空处理，会话层会把用户引导回登录页。 */
+    private fun decodeCredential(value: String?): String =
+        value?.takeIf { it.isNotBlank() }?.let { credentialCipher.decrypt(it) }.orEmpty()
 
     private object Keys {
         val UID = stringPreferencesKey("uid")
@@ -123,9 +134,9 @@ class AuthPreferences(private val context: Context) {
         .map { prefs ->
             UserSession(
                 uid = prefs[Keys.UID] ?: "",
-                sub = prefs[Keys.SUB] ?: "",
-                subp = prefs[Keys.SUBP] ?: "",
-                rawCookie = prefs[Keys.RAW_COOKIE] ?: "",
+                sub = decodeCredential(prefs[Keys.SUB]),
+                subp = decodeCredential(prefs[Keys.SUBP]),
+                rawCookie = decodeCredential(prefs[Keys.RAW_COOKIE]),
                 screenName = prefs[Keys.SCREEN_NAME] ?: "",
                 avatarUrl = prefs[Keys.AVATAR_URL] ?: "",
                 description = prefs[Keys.DESCRIPTION] ?: "",
@@ -150,9 +161,9 @@ class AuthPreferences(private val context: Context) {
     ) {
         context.authDataStore.edit { prefs ->
             prefs[Keys.UID] = uid
-            if (sub.isNotBlank()) prefs[Keys.SUB] = sub
-            if (subp.isNotBlank()) prefs[Keys.SUBP] = subp
-            if (rawCookie.isNotBlank()) prefs[Keys.RAW_COOKIE] = rawCookie
+            if (sub.isNotBlank()) prefs[Keys.SUB] = encodeCredential(sub)
+            if (subp.isNotBlank()) prefs[Keys.SUBP] = encodeCredential(subp)
+            if (rawCookie.isNotBlank()) prefs[Keys.RAW_COOKIE] = encodeCredential(rawCookie)
             if (screenName.isNotBlank()) prefs[Keys.SCREEN_NAME] = screenName
             if (avatarUrl.isNotBlank()) prefs[Keys.AVATAR_URL] = avatarUrl
             if (description.isNotBlank()) prefs[Keys.DESCRIPTION] = description
@@ -178,6 +189,22 @@ class AuthPreferences(private val context: Context) {
             if (followersCount.isNotBlank()) prefs[Keys.FOLLOWERS_COUNT] = followersCount
             if (friendsCount.isNotBlank()) prefs[Keys.FRIENDS_COUNT] = friendsCount
             if (statusesCount.isNotBlank()) prefs[Keys.STATUSES_COUNT] = statusesCount
+        }
+    }
+
+    /**
+     * 就地把历史版本明文落盘的凭据改写为密文。幂等：已是密文或没有凭据时不动。
+     * 由应用启动时调用一次（见 MatterApplication）。
+     */
+    suspend fun migrateLegacyCredentials() {
+        if (credentialCipher === CredentialCipher.None) return
+        context.authDataStore.edit { prefs ->
+            listOf(Keys.SUB, Keys.SUBP, Keys.RAW_COOKIE).forEach { key ->
+                val value = prefs[key]
+                if (!value.isNullOrBlank() && !credentialCipher.isEncrypted(value)) {
+                    prefs[key] = credentialCipher.encrypt(value)
+                }
+            }
         }
     }
 
