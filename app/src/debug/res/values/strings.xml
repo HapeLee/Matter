@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Debug 专用资源覆盖：仅影响 debug 变体，与 release 包共存时便于区分 -->
-<resources>
-    <string name="app_name">Matter D</string>
-</resources>
