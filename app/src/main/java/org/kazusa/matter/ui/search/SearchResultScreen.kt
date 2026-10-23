@@ -108,6 +108,7 @@ fun SearchResultScreen(
     onPostClick: (WeiboStatusDto) -> Unit,
     onImageClick: (urls: List<String>, index: Int) -> Unit = { _, _ -> },
     onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit = { _, _, _, _, _ -> },
+    onMentionClick: (String) -> Unit = {},
     onTopicClick: (String) -> Unit = {},
     /** 点词条组里的词条（相关搜索 / 热门话题）→ 用该词条再搜一次 */
     onChipClick: (String) -> Unit = {},
@@ -338,7 +339,7 @@ fun SearchResultScreen(
                                             onPostClick = onPostClick,
                                             onImageClick = onImageClick,
                                             onVideoClick = onVideoClick,
-                                            onMentionClick = onTopicClick,
+                                            onMentionClick = onMentionClick,
                                             onTopicClick = onTopicClick
                                         )
                                     }

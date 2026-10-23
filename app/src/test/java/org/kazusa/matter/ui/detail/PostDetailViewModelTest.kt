@@ -5,6 +5,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import org.kazusa.matter.data.repository.ReplyRepository
+import org.kazusa.matter.data.repository.ReplySession
+import org.kazusa.matter.data.repository.PublishedReply
+import org.kazusa.matter.data.model.ReplyImageHandle
+import org.kazusa.matter.data.model.ReplyImageReader
+import org.kazusa.matter.data.model.ReplyImageContent
+import org.kazusa.matter.data.model.ReplyPickerKind
+import org.kazusa.matter.data.model.ReplySuggestion
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -51,13 +60,25 @@ class PostDetailViewModelTest {
     private fun viewModel(
         postId: String,
         likeRepository: LikeRepository = LikeRepository { _, isLike, _ -> ApiResult.Success(isLike) },
-        source: FakeSource = FakeSource()
+        source: FakeSource = FakeSource(),
+        sessions: MutableStateFlow<ReplySession> = MutableStateFlow(ReplySession("1", "SUB=test", true)),
+        repository: ReplyRepository? = null
     ) = keep(
         PostDetailViewModel(
             postId = postId,
             recordHistory = {},
             likeRepository = likeRepository,
-            dataSource = source
+            dataSource = source,
+            replyRepository = repository ?: ReplyRepository(sessions) { _, postId, commentId, text, _ ->
+                when (val result = source.publish(postId, commentId, text)) {
+                    is ApiResult.Success -> ApiResult.Success(result.data?.let {
+                        PublishedReply(requireNotNull(it.id), it.text, it.createdAt, it.user?.id,
+                            it.user?.screenName.orEmpty(), it.user?.avatarLarge)
+                    })
+                    is ApiResult.Error -> result
+                    ApiResult.Loading -> ApiResult.Loading
+                }
+            }
         )
     )
 
@@ -276,7 +297,7 @@ class PostDetailViewModelTest {
         assertEquals("回复内容", vm.replyState.value.draft)
         assertTrue(vm.replyState.value.isOpen)
         assertFalse(vm.replyState.value.isSending)
-        assertEquals(listOf("操作频繁，请稍后再试"), messages)
+        assertEquals("操作频繁，请稍后再试", vm.replyState.value.errorMessage)
     }
 
     @Test
@@ -328,6 +349,231 @@ class PostDetailViewModelTest {
         assertEquals(listOf(888L), vm.uiState.value.comments.map { it.id })
     }
 
+    @Test
+    fun oldCommentsResponseCannotEraseSuccessfulReply() = runTest {
+        val vm = viewModel("reply-list-race", source = FakeSource(
+            commentsResponse = { _, _ -> delay(1000); ApiResult.Success(CommentsDataDto()) },
+            createCommentResponse = { _, text -> ApiResult.Success(WeiboCommentDto(id = 111, text = text)) }
+        ))
+        vm.load()
+        runCurrent()
+        vm.updateReplyDraft("新评论")
+        vm.submitReply()
+        advanceUntilIdle()
+        assertEquals(listOf(111L), vm.uiState.value.comments.map { it.id })
+    }
+
+    @Test
+    fun changingDraftDuringSendKeepsNewContent() = runTest {
+        val vm = viewModel("reply-edit-race", source = FakeSource(createCommentResponse = { _, text ->
+            delay(1000)
+            ApiResult.Success(WeiboCommentDto(id = 112, text = text))
+        }))
+        vm.load(); advanceUntilIdle()
+        vm.openReplyComposer(); vm.updateReplyDraft("先发送")
+        vm.submitReply(); runCurrent()
+        vm.updateReplyDraft("新输入")
+        advanceUntilIdle()
+        assertEquals("新输入", vm.replyState.value.draft)
+        assertTrue(vm.replyState.value.isOpen)
+        assertFalse(vm.replyState.value.isSending)
+    }
+
+    @Test
+    fun repliesUseSelectedCommentAndKeepDraftsSeparate() = runTest {
+        var sentId: Long? = null
+        val root = WeiboCommentDto(id = 200)
+        val vm = viewModel("reply-target", source = FakeSource(
+            commentsResponse = { _, _ -> ApiResult.Success(CommentsDataDto(data = listOf(root))) },
+            replyCommentResponse = { _, id, text ->
+                sentId = id
+                ApiResult.Success(WeiboCommentDto(id = 202, text = text))
+            }
+        ))
+        vm.load(); advanceUntilIdle()
+        vm.openReplyComposer(); vm.updateReplyDraft("微博草稿")
+        vm.replyToComment(WeiboCommentDto(id = 201), 200)
+        assertEquals("", vm.replyState.value.draft)
+        vm.updateReplyDraft("回复楼中楼")
+        vm.submitReply(); advanceUntilIdle()
+        assertEquals(201L, sentId)
+        assertEquals(listOf(200L), vm.uiState.value.comments.map { it.id })
+        assertEquals(listOf(202L), vm.commentRepliesOf(root).replies.map { it.id })
+        vm.openReplyComposer()
+        assertEquals("微博草稿", vm.replyState.value.draft)
+    }
+
+    @Test
+    fun switchingAccountDiscardsLateSuccessAndDraft() = runTest {
+        val sessions = MutableStateFlow(ReplySession("1", "SUB=old", true))
+        val vm = viewModel("reply-session", sessions = sessions, source = FakeSource(
+            createCommentResponse = { _, text ->
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { delay(1000) }
+                ApiResult.Success(WeiboCommentDto(id = 333, text = text))
+            }
+        ))
+        vm.load(); advanceUntilIdle()
+        vm.openReplyComposer(); vm.updateReplyDraft("旧账号内容")
+        vm.submitReply(); runCurrent()
+        sessions.value = ReplySession("2", "SUB=new", true)
+        advanceUntilIdle()
+        assertEquals("", vm.replyState.value.draft)
+        assertFalse(vm.replyState.value.isSending)
+        assertTrue(vm.uiState.value.comments.isEmpty())
+    }
+
+    @Test
+    fun failedReplyCanRetryTheSameDraft() = runTest {
+        var calls = 0
+        val vm = viewModel("reply-retry", source = FakeSource(createCommentResponse = { _, text ->
+            if (++calls == 1) ApiResult.Error(message = "失败")
+            else ApiResult.Success(WeiboCommentDto(id = 444, text = text))
+        }))
+        vm.load(); advanceUntilIdle()
+        vm.openReplyComposer(); vm.updateReplyDraft("保留后重试")
+        vm.submitReply(); advanceUntilIdle()
+        assertEquals("失败", vm.replyState.value.errorMessage)
+        vm.submitReply(); advanceUntilIdle()
+        assertEquals(listOf(444L), vm.uiState.value.comments.map { it.id })
+        assertEquals(null, vm.replyState.value.errorMessage)
+    }
+
+    @Test
+    fun closingAndReopeningWhileSendingClearsSentDraftWithoutClosingNewPanel() = runTest {
+        val vm = viewModel("reply-reopen", source = FakeSource(createCommentResponse = { _, text ->
+            delay(1000)
+            ApiResult.Success(WeiboCommentDto(id = 555, text = text))
+        }))
+        vm.load(); advanceUntilIdle()
+        vm.openReplyComposer(); vm.updateReplyDraft("发送内容")
+        vm.submitReply(); runCurrent()
+        vm.dismissReplyComposer(); vm.openReplyComposer()
+        advanceUntilIdle()
+        assertEquals("", vm.replyState.value.draft)
+        assertTrue(vm.replyState.value.isOpen)
+    }
+
+    @Test
+    fun unchangedEditorEchoDuringSendDoesNotKeepAnAlreadySentDraft() = runTest {
+        val vm = viewModel("reply-editor-echo", source = FakeSource(createCommentResponse = { _, text ->
+            delay(1000)
+            ApiResult.Success(WeiboCommentDto(id = 557, text = text))
+        }))
+        vm.load(); advanceUntilIdle()
+        vm.openReplyComposer(); vm.updateReplyDraft("发送内容")
+        vm.submitReply(); runCurrent()
+        // 编辑器重组、打开或点击发送前可能重复回传相同正文。
+        vm.updateReplyDraft("发送内容")
+        advanceUntilIdle()
+        assertEquals("", vm.replyState.value.draft)
+        assertFalse(vm.replyState.value.isOpen)
+    }
+
+    @Test
+    fun editingThenSwitchingTargetsDoesNotEraseTheEditedDraftWhenSendCompletes() = runTest {
+        val vm = viewModel("reply-target-edit", source = FakeSource(createCommentResponse = { _, text ->
+            delay(1000)
+            ApiResult.Success(WeiboCommentDto(id = 556, text = text))
+        }))
+        vm.load(); advanceUntilIdle()
+        vm.openReplyComposer(); vm.updateReplyDraft("发送内容")
+        vm.submitReply(); runCurrent()
+        vm.updateReplyDraft("留给下一条")
+        vm.replyToComment(WeiboCommentDto(id = 999), 999)
+        advanceUntilIdle()
+        assertEquals(999L, vm.replyState.value.target?.commentId)
+        vm.openReplyComposer()
+        assertEquals("留给下一条", vm.replyState.value.draft)
+    }
+
+    @Test
+    fun cancellingThePageLeavesDraftAndReleasesPending() = runTest {
+        val vm = viewModel("reply-cancel", source = FakeSource(createCommentResponse = { _, _ ->
+            delay(10000)
+            ApiResult.Success(null)
+        }))
+        vm.load(); advanceUntilIdle()
+        vm.updateReplyDraft("取消保留")
+        vm.submitReply(); runCurrent()
+        assertTrue(vm.replyState.value.isSending)
+        stores.forEach(ViewModelStore::clear)
+        runCurrent()
+        assertFalse(vm.replyState.value.isSending)
+        assertEquals("取消保留", vm.replyState.value.draft)
+    }
+
+    @Test
+    fun replyLimitDoesNotSplitEmojiSurrogatePair() {
+        assertEquals("a".repeat(MAX_REPLY_LENGTH - 1), limitReplyDraft("a".repeat(MAX_REPLY_LENGTH - 1) + "😀"))
+        assertEquals(MAX_REPLY_LENGTH, limitReplyDraft("a".repeat(MAX_REPLY_LENGTH)).length)
+    }
+
+    @Test
+    fun slowRepliesPageDoesNotEraseNewlyPublishedReply() = runTest {
+        val root = WeiboCommentDto(id = 100)
+        val vm = viewModel("reply-page-race", source = FakeSource(
+            commentsResponse = { _, _ -> ApiResult.Success(CommentsDataDto(data = listOf(root))) },
+            repliesResponse = { _, _, _, _ ->
+                delay(1000)
+                ApiResult.Success(CommentsDataDto(data = listOf(WeiboCommentDto(id = 101)), maxId = 200))
+            },
+            replyCommentResponse = { _, _, text -> ApiResult.Success(WeiboCommentDto(id = 102, text = text)) }
+        ))
+        vm.load(); advanceUntilIdle()
+        vm.loadCommentReplies(root); runCurrent()
+        vm.replyToComment(root, 100); vm.updateReplyDraft("新回复")
+        vm.submitReply(); advanceUntilIdle()
+        val state = vm.commentRepliesOf(root)
+        assertEquals(setOf(101L, 102L), state.replies.map { it.id }.toSet())
+        assertEquals(200L, state.nextMaxId)
+        assertFalse(state.loading)
+    }
+
+    @Test
+    fun imageOnlyReplyRetainsUploadedIdAfterFailureAndReusesItOnRetry() = runTest {
+        val sessions = MutableStateFlow(ReplySession("1", "SUB=test", true))
+        var uploads = 0
+        var writes = 0
+        val repository = ReplyRepository(sessions,
+            imageReader = ReplyImageReader { ReplyImageContent(byteArrayOf(1, 2)) },
+            uploadImage = { _, _ -> uploads++; ApiResult.Success("pic123") }
+        ) { _, _, _, text, pictureId ->
+            assertEquals("", text)
+            assertEquals("pic123", pictureId)
+            writes++
+            if (writes == 1) ApiResult.Error(message = "发布失败") else ApiResult.Success(null)
+        }
+        val vm = viewModel("image-retry", sessions = sessions, repository = repository)
+        vm.load(); advanceUntilIdle()
+        val owner = vm.beginReplyImageSelection()
+        vm.selectReplyImage(ReplyImageHandle("content://test/1"), owner)
+        vm.submitReply(); advanceUntilIdle()
+        assertEquals("pic123", vm.replyState.value.attachment?.uploadedId)
+        assertEquals("发布失败", vm.replyState.value.errorMessage)
+        vm.submitReply(); advanceUntilIdle()
+        assertEquals(1, uploads)
+        assertEquals(2, writes)
+        assertEquals(null, vm.replyState.value.attachment)
+    }
+
+    @Test
+    fun oldPickerSearchCannotOverwriteNewQuery() = runTest {
+        val sessions = MutableStateFlow(ReplySession("1", "SUB=test", true))
+        val repository = ReplyRepository(sessions, search = { _, _, query ->
+            if (query == "old") kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { delay(1000) }
+            ApiResult.Success(listOf(ReplySuggestion(query.ifBlank { "follow" }, query.ifBlank { "follow" })))
+        }) { _, _, _, _, _ -> ApiResult.Success(null) }
+        val vm = viewModel("picker-race", sessions = sessions, repository = repository)
+        vm.load(); advanceUntilIdle()
+        vm.openReplyPicker(ReplyPickerKind.MENTION)
+        vm.searchReplyPicker("old")
+        testScheduler.advanceTimeBy(300); runCurrent()
+        vm.searchReplyPicker("new")
+        advanceUntilIdle()
+        assertEquals("new", vm.replyPickerState.value.query)
+        assertEquals(listOf("new"), vm.replyPickerState.value.suggestions.map { it.name })
+    }
+
     private class FakeSource(
         private val postResponse: suspend (String) -> ApiResult<WeiboStatusDto> = {
             ApiResult.Success(WeiboStatusDto(id = 9, attitudesCount = "0"))
@@ -340,6 +586,7 @@ class PostDetailViewModelTest {
             { _, _ -> ApiResult.Success(AttitudesDataDto()) },
         private val repliesResponse: suspend (String, Long, Long, Int) -> ApiResult<CommentsDataDto> =
             { _, _, _, _ -> ApiResult.Success(CommentsDataDto()) },
+        private val replyCommentResponse: (suspend (String, Long, String) -> ApiResult<WeiboCommentDto?>)? = null,
         private val createCommentResponse: suspend (String, String) -> ApiResult<WeiboCommentDto?> =
             { _, _ -> ApiResult.Success(null) }
     ) : PostDetailDataSource {
@@ -361,9 +608,8 @@ class PostDetailViewModelTest {
             maxIdType: Int
         ): ApiResult<CommentsDataDto> = repliesResponse(postId, commentId, maxId, maxIdType)
 
-        override suspend fun createComment(
-            postId: String,
-            text: String
-        ): ApiResult<WeiboCommentDto?> = createCommentResponse(postId, text)
+        suspend fun publish(postId: String, commentId: Long?, text: String): ApiResult<WeiboCommentDto?> =
+            if (commentId == null) createCommentResponse(postId, text)
+            else requireNotNull(replyCommentResponse)(postId, commentId, text)
     }
 }

@@ -73,6 +73,8 @@ internal fun CommentThread(
     repliesProvider: (WeiboCommentDto) -> CommentRepliesState,
     /** 请求下一页回复；请求与并发控制在详情 ViewModel 内完成。 */
     onLoadReplies: (WeiboCommentDto) -> Unit,
+    onReply: (WeiboCommentDto, Long) -> Unit,
+    rootCommentId: Long? = comment.id,
     postAuthorId: Long?,
     postAuthorName: String?,
     onUserClick: (Long?) -> Unit,
@@ -149,6 +151,7 @@ internal fun CommentThread(
             onTopicClick = onTopicClick,
             onImageClick = onImageClick,
             onLikeClick = { toggleLike() },
+            onClick = { rootCommentId?.let { onReply(comment, it) } },
             likeEnabled = comment.id != null
         )
         if (state.replies.isNotEmpty() || canFetch || state.loading || state.error != null) {
@@ -171,6 +174,8 @@ internal fun CommentThread(
                             comment = reply,
                             repliesProvider = repliesProvider,
                             onLoadReplies = onLoadReplies,
+                            onReply = onReply,
+                            rootCommentId = rootCommentId,
                             postAuthorId = postAuthorId,
                             postAuthorName = postAuthorName,
                             onUserClick = onUserClick,

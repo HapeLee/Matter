@@ -29,6 +29,7 @@ import org.koin.viewmodel.factory.KoinViewModelFactory
 import org.kazusa.matter.core.datastore.UserSession
 import org.kazusa.matter.data.repository.*
 import org.kazusa.matter.data.model.UserPostCollection
+import org.kazusa.matter.ui.detail.PostDetailViewModel
 import org.kazusa.matter.ui.saved.SavedPostsViewModel
 import org.kazusa.matter.ui.search.SearchResultViewModel
 import org.robolectric.RobolectricTestRunner
@@ -77,6 +78,32 @@ class ViewModelInjectionTest {
             assertNotSame(first, replacement)
         } finally {
             firstOwner.viewModelStore.clear(); secondOwner.viewModelStore.clear()
+            app.close()
+        }
+    }
+
+    @Test
+    @OptIn(KoinInternalApi::class)
+    fun replyComposerResolvesInTheProductionNavigationScope() = runTest {
+        val app = koinApplication {
+            androidContext(RuntimeEnvironment.getApplication())
+            modules(appModule)
+        }
+        val owner = EntryOwner()
+        try {
+            app.koin.get<ReplyRepository>()
+            app.koin.get<EmojiRepository>()
+            val vm = ViewModelProvider.create(
+                owner.viewModelStore,
+                KoinViewModelFactory(PostDetailViewModel::class, app.koin.scopeRegistry.rootScope,
+                    params = { parametersOf("123") }),
+                owner.extras
+            )[PostDetailViewModel::class]
+            vm.openReplyComposer()
+            vm.updateReplyDraft("草稿")
+            assertEquals("草稿", vm.replyState.value.draft)
+        } finally {
+            owner.viewModelStore.clear()
             app.close()
         }
     }

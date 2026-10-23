@@ -27,51 +27,6 @@ data class FormattedWeiboText(
 
 object WeiboTextFormatter {
 
-    /**
-     * 常用官方微博表情对照表 (Sina CDN 高清静态图)
-     */
-    private val OFFICIAL_EMOJI_MAP: Map<String, String> = mapOf(
-        "[doge]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/b7/2014new_doge02_org.png",
-        "[二哈]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/22/2018new_erha_org.png",
-        "[笑cry]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/34/2015new_xiaoku_org.png",
-        "[偷笑]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/71/2018new_touxiao_org.png",
-        "[泪]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/6e/2018new_leimu_org.png",
-        "[心]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/8a/2018new_xin_org.png",
-        "[赞]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/e6/2018new_zan_org.png",
-        "[吃惊]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/49/2018new_chijing_org.png",
-        "[思考]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/30/2018new_sikao_org.png",
-        "[害羞]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/c1/2018new_haixiu_org.png",
-        "[憧憬]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/c9/2018new_chongjing_org.png",
-        "[鼓掌]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/6e/2018new_guzhang_org.png",
-        "[拜拜]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/fd/2018new_baibai_org.png",
-        "[给力]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/36/2018new_geili_org.png",
-        "[悲伤]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/ee/2018new_beishang_org.png",
-        "[太开心]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/1e/2018new_taikaixin_org.png",
-        "[摊手]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/62/2018new_tanshou_org.png",
-        "[喵喵]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/7b/2018new_miaomiao_org.png",
-        "[疑问]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/b8/2018new_ningwen_org.png",
-        "[握手]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/e9/2018new_woshou_org.png",
-        "[作揖]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/e7/2018new_zuoyi_org.png",
-        "[互粉]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/86/2018new_hufen02_org.png",
-        "[鲜花]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/d4/2018new_xianhua_org.png",
-        "[委屈]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/a5/2018new_weiqu_org.png",
-        "[可爱]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/09/2018new_keai_org.png",
-        "[酷]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/c4/2018new_ku_org.png",
-        "[汗]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/28/2018new_han_org.png",
-        "[衰]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/a2/2018new_shuai_org.png",
-        "[闭嘴]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/62/2018new_bizui_org.png",
-        "[钱]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/a2/2018new_qian_org.png",
-        "[失望]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/0c/2018new_shiwang_org.png",
-        "[晕]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/07/2018new_yun_org.png",
-        "[阴险]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/9e/2018new_yinxian_org.png",
-        "[怒]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/f6/2018new_nu_org.png",
-        "[哈欠]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/45/2018new_haqian_org.png",
-        "[并不简单]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/aa/2018new_bingbujiandan_org.png",
-        "[泪奔]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/72/2018new_leiben_org.png",
-        "[亲亲]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/2c/2018new_qinqin_org.png",
-        "[生病]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/3b/2018new_shengbing_org.png",
-        "[求抱抱]" to "https://img.t.sinajs.cn/t4/appstyle/expression/ext/normal/c4/2018new_baobao_org.png"
-    )
 
     fun formatHtmlText(html: String?): String {
         if (html.isNullOrBlank()) return ""
@@ -98,7 +53,8 @@ object WeiboTextFormatter {
         rawText: String?,
         primaryColor: Color,
         onMentionClick: ((String) -> Unit)? = null,
-        onTopicClick: ((String) -> Unit)? = null
+        onTopicClick: ((String) -> Unit)? = null,
+        emojiImages: Map<String, String> = emptyMap()
     ): FormattedWeiboText {
         if (rawText.isNullOrBlank()) {
             return FormattedWeiboText(AnnotatedString(""))
@@ -119,41 +75,37 @@ object WeiboTextFormatter {
             alt
         }
 
-        // 2. 预提取 HTML 中的超链接 (如 <a href="http://t.cn/xxx">网页链接</a>)
-        // 编码为特殊标记符号以便后续安全还原
-        val linkRegex = Regex("""<a[^>]+href="(?<href>[^"]+)"[^>]*>(?<content>.*?)</a>""", RegexOption.IGNORE_CASE)
-        preprocessed = linkRegex.replace(preprocessed) { matchResult ->
-            val href = matchResult.groups["href"]?.value ?: ""
-            val rawContent = matchResult.groups["content"]?.value ?: ""
-            val cleanTitle = rawContent.replace(Regex("<[^>]*>"), "").trim()
-            val title = if (cleanTitle.isNotBlank()) cleanTitle else "网页链接"
-            // HTML 包装的话题也交给 #话题# 分支，避免被当作网页链接添加图标。
-            if (Regex("""#[^#\n\r]+#""").matches(title)) {
-                title
-            } else {
-                "\uFFF9LINK|${href}|${title}\uFFFA"
-            }
+        // HTML 的博主、话题链接保留完整标题（包括昵称中的标点），并记录站内目标。
+        val htmlLinks = mutableListOf<Pair<String, String>>()
+        val linkRegex = Regex("""<a\b([^>]*)>(.*?)</a\s*>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+        val hrefRegex = Regex("""\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')""", RegexOption.IGNORE_CASE)
+        preprocessed = linkRegex.replace(preprocessed) { match ->
+            val hrefMatch = hrefRegex.find(match.groupValues[1])
+            val href = decodeEntities(hrefMatch?.groups?.get(1)?.value ?: hrefMatch?.groups?.get(2)?.value.orEmpty())
+            val title = decodeEntities(match.groupValues[2].replace(Regex("<[^>]*>"), "")).trim().ifBlank { "网页链接" }
+            val index = htmlLinks.size
+            htmlLinks += href to title
+            "\uFFF9LINK|$index\uFFFA"
         }
 
-        // 3. 清理换行符与剩余 HTML 标签及实体字符
-        preprocessed = preprocessed
-            .replace("<br />", "\n")
-            .replace("<br/>", "\n")
-            .replace("<br>", "\n")
-            .replace(Regex("<[^>]*>"), "")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&amp;", "&")
-            .replace("&quot;", "\"")
-            .replace("&nbsp;", " ")
-            .trim()
+        preprocessed = decodeEntities(preprocessed
+            .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("<[^>]*>"), "")).trim()
+
+        fun AnnotatedString.Builder.appendEntity(label: String, target: String, tag: String, onClick: ((String) -> Unit)?) {
+            val style = SpanStyle(color = primaryColor)
+            if (onClick == null || target.isBlank()) withStyle(style) { append(label) }
+            else withLink(LinkAnnotation.Clickable(tag, TextLinkStyles(style = style), linkInteractionListener = { onClick(target) })) {
+                append(label)
+            }
+        }
 
         val inlineContentMap = mutableMapOf<String, InlineTextContent>()
         var inlineIdCounter = 0
 
         val annotated = buildAnnotatedString {
             // 匹配模式：HTML链接标记、原生URL链接、微博表情标签、@昵称、#话题#
-            val tokenRegex = Regex("""(\uFFF9LINK\|[^\uFFFA]+\uFFFA)|(https?://[a-zA-Z0-9./?&=_%#:-]+)|(\[[^\[\]\s]+\])|(@[\u4e00-\u9fa5a-zA-Z0-9_-]+)|(#[^#\n\r]+#)""")
+            val tokenRegex = Regex("""(\uFFF9LINK\|[0-9]+\uFFFA)|(${WeiboTextEntities.URL_PATTERN})|(\[[^\[\]\s]+\])|${WeiboTextEntities.TOPIC_PATTERN}|${WeiboTextEntities.MENTION_PATTERN}""")
             var lastIndex = 0
 
             tokenRegex.findAll(preprocessed).forEach { match ->
@@ -166,10 +118,36 @@ object WeiboTextFormatter {
                 when {
                     // HTML 链接标记
                     token.startsWith("\uFFF9LINK|") && token.endsWith("\uFFFA") -> {
-                        val body = token.removePrefix("\uFFF9LINK|").removeSuffix("\uFFFA")
-                        val parts = body.split("|")
-                        val href = parts.getOrNull(0) ?: ""
-                        val title = parts.getOrNull(1) ?: "网页链接"
+                        val index = token.removePrefix("\uFFF9LINK|").removeSuffix("\uFFFA").toIntOrNull()
+                        val (rawHref, title) = htmlLinks.getOrNull(index ?: -1) ?: ("" to "")
+                        val userId = userIdFromLink(rawHref)
+                        when {
+                            title.startsWith("@") -> {
+                                appendEntity(title, userId ?: title.drop(1), "mention", onMentionClick)
+                                lastIndex = range.last + 1
+                                return@forEach
+                            }
+                            WeiboTextEntities.topic.matches(title) -> {
+                                appendEntity(title, WeiboTextEntities.topicName(title), "topic", onTopicClick)
+                                lastIndex = range.last + 1
+                                return@forEach
+                            }
+                            userId != null -> {
+                                appendEntity(title, userId, "mention", onMentionClick)
+                                lastIndex = range.last + 1
+                                return@forEach
+                            }
+                        }
+                        val href = when {
+                            rawHref.startsWith("//") -> "https:$rawHref"
+                            rawHref.startsWith("/") -> "https://m.weibo.cn$rawHref"
+                            else -> rawHref
+                        }
+                        if (!href.startsWith("https://") && !href.startsWith("http://")) {
+                            append(title)
+                            lastIndex = range.last + 1
+                            return@forEach
+                        }
                         val linkStyle = SpanStyle(color = primaryColor)
                         val linkIconId = "link_icon_${inlineIdCounter++}"
                         inlineContentMap[linkIconId] = InlineTextContent(
@@ -228,7 +206,7 @@ object WeiboTextFormatter {
 
                     // 微博表情图标
                     token.startsWith("[") && token.endsWith("]") -> {
-                        val emojiUrl = dynamicEmojiMap[token] ?: OFFICIAL_EMOJI_MAP[token]
+                        val emojiUrl = weiboEmojiImageModel(token, emojiImages) ?: dynamicEmojiMap[token]
                         if (emojiUrl != null) {
                             val inlineId = "emoji_${inlineIdCounter++}"
                             appendInlineContent(inlineId, token)
@@ -250,47 +228,9 @@ object WeiboTextFormatter {
                         }
                     }
 
-                    // @用户昵称
-                    token.startsWith("@") -> {
-                        val linkStyle = SpanStyle(color = primaryColor)
-                        if (onMentionClick != null) {
-                            val name = token.removePrefix("@")
-                            withLink(
-                                LinkAnnotation.Clickable(
-                                    tag = "mention",
-                                    styles = TextLinkStyles(style = linkStyle),
-                                    linkInteractionListener = { onMentionClick(name) }
-                                )
-                            ) {
-                                append(token)
-                            }
-                        } else {
-                            withStyle(linkStyle) {
-                                append(token)
-                            }
-                        }
-                    }
-
-                    // #话题#
-                    token.startsWith("#") && token.endsWith("#") -> {
-                        val linkStyle = SpanStyle(color = primaryColor)
-                        if (onTopicClick != null) {
-                            val topic = token.removePrefix("#").removeSuffix("#")
-                            withLink(
-                                LinkAnnotation.Clickable(
-                                    tag = "topic",
-                                    styles = TextLinkStyles(style = linkStyle),
-                                    linkInteractionListener = { onTopicClick(topic) }
-                                )
-                            ) {
-                                append(token)
-                            }
-                        } else {
-                            withStyle(linkStyle) {
-                                append(token)
-                            }
-                        }
-                    }
+                    token.startsWith("@") -> appendEntity(token, token.drop(1), "mention", onMentionClick)
+                    token.startsWith("#") && token.endsWith("#") ->
+                        appendEntity(token, WeiboTextEntities.topicName(token), "topic", onTopicClick)
 
                     else -> {
                         append(token)
@@ -308,6 +248,32 @@ object WeiboTextFormatter {
             annotatedString = annotated,
             inlineContent = inlineContentMap
         )
+    }
+
+    private fun userIdFromLink(href: String): String? =
+        Regex("""^(?:https?://(?:m\.)?weibo\.(?:com|cn))?/(?:u|profile)/(\d+)(?:[/?#]|$)""", RegexOption.IGNORE_CASE)
+            .find(href)?.groupValues?.get(1)
+            ?: if (href.startsWith("sinaweibo://userinfo?")) Regex("""[?&]uid=(\d+)(?:&|$)""").find(href)?.groupValues?.get(1) else null
+
+    private fun decodeEntities(value: String): String = Regex("""&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos|nbsp);""").replace(value) { match ->
+        val entity = match.groupValues[1]
+        when (entity) {
+            "amp" -> "&"
+            "lt" -> "<"
+            "gt" -> ">"
+            "quot" -> "\""
+            "apos" -> "'"
+            "nbsp" -> " "
+            else -> {
+                val number = if (entity.startsWith("#x")) entity.drop(2).toIntOrNull(16) else entity.drop(1).toIntOrNull()
+                when {
+                    number == null || number !in 0..0x10ffff || number in 0xd800..0xdfff -> match.value
+                    number <= 0xffff -> number.toChar().toString()
+                    else -> ((number - 0x10000) / 0x400 + 0xd800).toChar().toString() +
+                        ((number - 0x10000) % 0x400 + 0xdc00).toChar()
+                }
+            }
+        }
     }
 
     fun formatAnnotatedText(

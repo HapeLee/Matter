@@ -33,6 +33,8 @@ import org.kazusa.matter.data.repository.SearchHistoryRepository
 import org.kazusa.matter.ui.theme.ThemePreferences
 import org.kazusa.matter.data.repository.FavoritesRepository
 import org.kazusa.matter.data.repository.FollowRepository
+import org.kazusa.matter.ui.detail.OnlineEmojiViewModel
+import org.kazusa.matter.core.util.LocalOnlineEmojiImages
 import org.kazusa.matter.data.repository.LikeRepository
 import org.kazusa.matter.ui.components.LocalCommentLikeStates
 import org.kazusa.matter.ui.components.LocalFavoritesRepository
@@ -83,6 +85,8 @@ fun MatterNavGraph() {
     val searchHistoryRepository = koinInject<SearchHistoryRepository>()
     val likeRepository = koinInject<LikeRepository>()
     val followRepository = koinInject<FollowRepository>()
+    val onlineEmojiViewModel: OnlineEmojiViewModel = koinViewModel()
+    val onlineEmojiImages by onlineEmojiViewModel.images.collectAsStateWithLifecycle()
     val koin = getKoin()
     // 点赞状态在仓库里是只读 StateFlow；这里收集一次下发给列表项，避免每张卡片各自订阅
     val postLikeStates by likeRepository.postStates.collectAsStateWithLifecycle()
@@ -141,6 +145,7 @@ fun MatterNavGraph() {
     }
 
     CompositionLocalProvider(
+        LocalOnlineEmojiImages provides onlineEmojiImages,
         LocalImageMorphState provides morphState,
         LocalSharedElementTarget provides sharedElementTarget,
         LocalFavoritesRepository provides favoritesRepository,
@@ -445,6 +450,9 @@ fun MatterNavGraph() {
                                                 onVideoClick = { url, title, streams, coverUrl, mid ->
                                                     navigate(Screen.VideoPlayer(videoUrl = url, title = title, streams = streams, coverUrl = coverUrl, mid = mid))
                                                 },
+                                                onMentionClick = { mention ->
+                                                    navigate(Screen.UserProfile(uid = mention, screenName = mention))
+                                                },
                                                 onTopicClick = { topicName ->
                                                     navigate(Screen.TopicStatus(keyword = topicName, title = "#$topicName#"))
                                                 },
@@ -478,6 +486,9 @@ fun MatterNavGraph() {
                                                 },
                                                 onVideoClick = { url, title, streams, coverUrl, mid ->
                                                     navigate(Screen.VideoPlayer(videoUrl = url, title = title, streams = streams, coverUrl = coverUrl, mid = mid))
+                                                },
+                                                onMentionClick = { mention ->
+                                                    navigate(Screen.UserProfile(uid = mention, screenName = mention))
                                                 },
                                                 onTopicClick = { topicName ->
                                                     navigate(Screen.TopicStatus(keyword = topicName, title = "#$topicName#"))
