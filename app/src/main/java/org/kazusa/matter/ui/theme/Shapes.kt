@@ -1,7 +1,6 @@
 package org.kazusa.matter.ui.theme
 
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Shapes
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -9,20 +8,6 @@ import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedCornerStyle
 import com.kyant.shapes.RoundedRectangle
 import com.kyant.shapes.UnevenRoundedRectangle
-
-/**
- * Expressive 主题使用的应用自定义圆角。
- *
- * 这里必须继续用 `RoundedCornerShape`：M3 的 `Shapes` 要求 `CornerBasedShape`
- * （会按 `topStart/topEnd` 等角单独取值），连续曲率的形状不是它的子类。
- */
-val MatterShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(20.dp),
-    large = RoundedCornerShape(28.dp),
-    extraLarge = RoundedCornerShape(36.dp)
-)
 
 /**
  * **平滑圆角工厂**（Kyant0 Shapes，G2 连续曲率、近似 G3）。

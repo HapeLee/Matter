@@ -144,7 +144,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import org.kazusa.matter.data.cache.UserAvatarCache
 import org.kazusa.matter.data.model.UserAlbum
 import org.kazusa.matter.data.model.UserProfileDetail
@@ -1163,8 +1162,7 @@ private fun ImmersiveProfileHeader(
                         Text(
                             text = descriptionText.orEmpty(),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 21.sp
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
