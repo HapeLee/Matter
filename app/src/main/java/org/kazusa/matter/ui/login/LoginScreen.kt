@@ -166,7 +166,6 @@ fun LoginScreen(
                                             cookieManager.setAcceptThirdPartyCookies(this, true)
 
                                             fun checkAndExtractLogin(currentUrl: String?) {
-                                                android.util.Log.d("WeiboLogin", "Current url: $currentUrl")
                                                 // 如果还在登录页面输入账号密码或人机验证，不要过早触发自动验证
                                                 val isAtSigninPage = currentUrl != null && (
                                                     currentUrl.contains("passport.weibo.com/sso/signin") ||

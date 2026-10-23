@@ -158,7 +158,7 @@ class WeiboApiService(
             val subp = subpRegex.find(incarnateText)?.groupValues?.get(1).orEmpty()
             if (sub.isNotBlank()) {
                 val cookie = if (subp.isNotBlank()) "SUB=$sub; SUBP=$subp" else "SUB=$sub"
-                android.util.Log.d("WeiboAuth", "fetchVisitorCookie success: ${cookie.take(25)}...")
+                android.util.Log.d("WeiboAuth", "fetchVisitorCookie success, length=${cookie.length}")
                 cookie
             } else {
                 ""
@@ -181,7 +181,8 @@ class WeiboApiService(
                 }
             }
             val rawText = response.bodyAsText()
-            android.util.Log.d("WeiboAuth", "verifyConfig status=${response.status}, preview=${rawText.take(200)}")
+            // 响应体含 st / uid / user_token，任何前缀都不允许进日志
+            android.util.Log.d("WeiboAuth", "verifyConfig status=${response.status}")
             if (response.status == HttpStatusCode.OK) {
                 val body = KtorClientFactory.jsonConfig.decodeFromString<WeiboConfigResponse>(rawText)
                 if (body.data?.login == true) {
@@ -405,7 +406,7 @@ class WeiboApiService(
                 }
             }
             val rawText = response.bodyAsText()
-            android.util.Log.d("TimelineApi", "friends response status=${response.status}, len=${rawText.length}, preview=${rawText.take(200)}")
+            android.util.Log.d("TimelineApi", "friends response status=${response.status}, len=${rawText.length}")
             if (response.status == HttpStatusCode.OK) {
                 val body = KtorClientFactory.jsonConfig.decodeFromString<TimelineResponse>(rawText)
                 if (body.ok == 1) {
@@ -454,7 +455,7 @@ class WeiboApiService(
                 }
             }
             val rawText = response.bodyAsText()
-            android.util.Log.d("TimelineApi", "group response status=${response.status}, len=${rawText.length}, preview=${rawText.take(200)}")
+            android.util.Log.d("TimelineApi", "group response status=${response.status}, len=${rawText.length}")
             if (response.status == HttpStatusCode.OK) {
                 val body = KtorClientFactory.jsonConfig.decodeFromString<TimelineResponse>(rawText)
                 if (body.ok == 1) {
