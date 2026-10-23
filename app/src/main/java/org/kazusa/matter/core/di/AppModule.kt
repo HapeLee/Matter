@@ -35,6 +35,8 @@ import org.kazusa.matter.data.repository.EmojiRepository
 import org.kazusa.matter.data.model.EmojiPackageStore
 import org.kazusa.matter.core.network.OnlineEmojiSource
 import org.kazusa.matter.core.network.WeiboEmojiApi
+import org.kazusa.matter.core.platform.AndroidWebCookieStore
+import org.kazusa.matter.core.session.WebSessionCookieStore
 import org.kazusa.matter.core.media.AndroidEmojiPackageStore
 import org.kazusa.matter.ui.detail.OnlineEmojiViewModel
 import java.io.File
@@ -59,6 +61,7 @@ import org.kazusa.matter.ui.timeline.TimelineViewModel
 
 val dataModule = module {
     single { AuthPreferences(androidContext()) }
+    single<WebSessionCookieStore> { AndroidWebCookieStore() }
     single { ThemePreferences(androidContext()) }
     single { MediaPreferences(androidContext()) }
     single<Json> { KtorClientFactory.jsonConfig }
@@ -74,7 +77,7 @@ val dataModule = module {
     single { TimelineCacheManager(androidContext()) }
     single { TimelinePositionManager(androidContext()) }
 
-    single { AuthRepository(get(), get()) }
+    single { AuthRepository(get(), get(), get()) }
     single { TimelineRepository(get(), get(), get(), get()) }
     single { GroupRepository(get(), get()) }
     single { HotFeedRepository(get(), get()) }

@@ -108,7 +108,7 @@ fun ProfileScreen(
                     onClick = {
                         showLogoutDialog = false
                         coroutineScope.launch {
-                            authPreferences.clearSession()
+                            authRepository.logout()
                             onLogout()
                         }
                     }

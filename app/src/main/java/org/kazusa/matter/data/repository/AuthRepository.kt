@@ -4,13 +4,15 @@ import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.core.datastore.UserSession
 import org.kazusa.matter.core.network.ApiResult
 import org.kazusa.matter.core.network.WeiboApiService
+import org.kazusa.matter.core.session.WebSessionCookieStore
 import org.kazusa.matter.data.model.WeiboUserDto
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
 
 class AuthRepository(
     private val authPreferences: AuthPreferences,
-    private val apiService: WeiboApiService
+    private val apiService: WeiboApiService,
+    private val webCookieStore: WebSessionCookieStore
 ) {
 
     val sessionFlow: Flow<UserSession> = authPreferences.sessionFlow
@@ -217,5 +219,8 @@ class AuthRepository(
 
     suspend fun logout() {
         authPreferences.clearSession()
+        // 登录 WebView 的 Cookie 库里同样躺着 SUB/SUBP；不清掉的话下次进登录页
+        // 会自动抓回旧凭据登回原账号。清理失败也不能阻断本地登出。
+        runCatching { webCookieStore.clearAll() }
     }
 }
