@@ -28,6 +28,7 @@ import androidx.navigation3.ui.NavDisplay
 import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.core.datastore.MediaPreferences
 import org.kazusa.matter.core.network.WeiboApiService
+import org.kazusa.matter.core.session.WebSessionCookieStore
 import org.kazusa.matter.data.repository.AuthRepository
 import org.kazusa.matter.data.repository.SearchHistoryRepository
 import org.kazusa.matter.ui.theme.ThemePreferences
@@ -79,6 +80,7 @@ import kotlinx.coroutines.launch
 fun MatterNavGraph() {
     val authPreferences = koinInject<AuthPreferences>()
     val authRepository = koinInject<AuthRepository>()
+    val webCookieStore = koinInject<WebSessionCookieStore>()
     val themePreferences = koinInject<ThemePreferences>()
     val mediaPreferences = koinInject<MediaPreferences>()
     val apiService = koinInject<WeiboApiService>()
@@ -208,6 +210,7 @@ fun MatterNavGraph() {
                                             val loginViewModel: LoginViewModel = koinViewModel()
                                             LoginScreen(
                                                 viewModel = loginViewModel,
+                                                webCookieStore = webCookieStore,
                                                 onLoginSuccess = {
                                                     replaceRoot(Screen.MainTabs)
                                                 }

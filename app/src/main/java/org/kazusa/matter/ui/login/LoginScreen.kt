@@ -53,6 +53,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.kazusa.matter.core.network.WeiboRequestHeaders
+import org.kazusa.matter.core.session.WebSessionCookieStore
+import org.kazusa.matter.data.repository.AuthCookieSanitizer
 import org.kazusa.matter.ui.components.ImmersiveTopBar
 import org.kazusa.matter.ui.components.MatterCard
 import org.kazusa.matter.ui.components.TopBarTitleText
@@ -71,6 +73,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 @Composable
 fun LoginScreen(
     viewModel: LoginViewModel,
+    webCookieStore: WebSessionCookieStore,
     onLoginSuccess: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -147,10 +150,18 @@ fun LoginScreen(
                     0 -> {
                         // 网页授权登录 (支持极验/易盾等各类人机验证并自动捕获 SUB Cookie)
                         var webViewRef by remember { mutableStateOf<WebView?>(null) }
+                        // 创建 WebView 前先清掉残留 Cookie：否则页面一加载就会
+                        // 抓回旧账号的 SUB 自动登录，用户永远换不了号
+                        var cookieStoreCleared by remember { mutableStateOf(false) }
+                        LaunchedEffect(Unit) {
+                            webCookieStore.clearAll()
+                            cookieStoreCleared = true
+                        }
 
                         Column(modifier = Modifier.fillMaxSize()) {
                             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                                AndroidView(
+                                if (cookieStoreCleared) {
+                                    AndroidView(
                                     factory = { context ->
                                         WebView(context).apply {
                                             webViewRef = this
@@ -182,16 +193,20 @@ fun LoginScreen(
                                                     currentUrl?.let { append(cookieManager.getCookie(it).orEmpty()) }
                                                 }
 
-                                                val hasSubCookie = cookiePool.contains("SUB=") && !cookiePool.contains("SUB=\"\"")
+                                                // 多域名拼接后按「首个非空值生效」去重，
+                                                // 防止两个账号的 SUB 同头发给服务端
+                                                val sanitizedPool = AuthCookieSanitizer.canonicalize(cookiePool)
+
+                                                val hasSubCookie = sanitizedPool.contains("SUB=")
                                                 val isRedirectedToTarget = currentUrl != null && (
                                                     currentUrl.contains("m.weibo.cn") ||
-                                                    currentUrl.contains("weibo.com") ||
-                                                    currentUrl.contains("sina.cn") ||
-                                                    currentUrl.contains("crossdomain")
+                                                        currentUrl.contains("weibo.com") ||
+                                                        currentUrl.contains("sina.cn") ||
+                                                        currentUrl.contains("crossdomain")
                                                 )
 
                                                 if (hasSubCookie && isRedirectedToTarget && uiState !is LoginUiState.Success && uiState !is LoginUiState.Loading) {
-                                                    viewModel.loginWithCookie(cookiePool)
+                                                    viewModel.loginWithCookie(sanitizedPool)
                                                 }
                                             }
 
@@ -211,6 +226,12 @@ fun LoginScreen(
                                     },
                                     modifier = Modifier.fillMaxSize()
                                 )
+                                } else {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.align(Alignment.Center),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
 
                                 if (uiState is LoginUiState.Loading) {
                                     LinearProgressIndicator(
@@ -265,7 +286,7 @@ fun LoginScreen(
                                                     append(cookieManager.getCookie("https://sina.cn").orEmpty()).append("; ")
                                                     url?.let { append(cookieManager.getCookie(it).orEmpty()) }
                                                 }
-                                                viewModel.loginWithCookie(cookiePool)
+                                                viewModel.loginWithCookie(AuthCookieSanitizer.canonicalize(cookiePool))
                                             },
                                             enabled = uiState !is LoginUiState.Loading,
                                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
