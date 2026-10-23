@@ -5,9 +5,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -31,6 +34,7 @@ import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.core.session.WebSessionCookieStore
 import org.kazusa.matter.core.session.SessionExpiredBus
 import org.kazusa.matter.data.repository.AuthRepository
+import org.kazusa.matter.data.repository.SessionProbe
 import org.kazusa.matter.data.repository.SearchHistoryRepository
 import org.kazusa.matter.ui.theme.ThemePreferences
 import org.kazusa.matter.data.repository.FavoritesRepository
@@ -159,6 +163,28 @@ fun MatterNavGraph() {
                 replaceRoot(Screen.Login)
             }
         }
+    }
+
+    // 会话探活：冷启动与回前台时验证一次登录凭据，服务端明确判定未登录才走
+    // 统一登出；网络异常不误报。5 分钟节流，避免频繁切换前后台打爆 /api/config。
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var lastProbeElapsed by remember { mutableLongStateOf(0L) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_START) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastProbeElapsed >= SESSION_PROBE_INTERVAL_MS) {
+                    lastProbeElapsed = now
+                    coroutineScope.launch {
+                        if (authRepository.probeSession() == SessionProbe.EXPIRED) {
+                            sessionExpiredBus.notifySessionExpired()
+                        }
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     CompositionLocalProvider(
@@ -687,3 +713,6 @@ fun MatterNavGraph() {
         }
     }
 }
+
+/** 会话探活最小间隔：频繁切换前后台时不重复打 /api/config。 */
+private const val SESSION_PROBE_INTERVAL_MS = 5 * 60 * 1000L
