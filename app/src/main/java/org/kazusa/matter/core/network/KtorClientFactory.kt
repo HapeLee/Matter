@@ -12,6 +12,7 @@ import io.ktor.client.request.header
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
+import org.kazusa.matter.BuildConfig
 import java.util.concurrent.TimeUnit
 
 object KtorClientFactory {
@@ -47,11 +48,14 @@ object KtorClientFactory {
                 socketTimeoutMillis = 20_000
             }
 
-            install(Logging) {
-                level = LogLevel.INFO
-                logger = object : Logger {
-                    override fun log(message: String) {
-                        android.util.Log.d("WeiboKtorClient", message)
+            // 网络日志只在 debug 构建输出：INFO 级 URL 可能带 uid / 登录 ticket，release 不落 logcat
+            if (BuildConfig.DEBUG) {
+                install(Logging) {
+                    level = LogLevel.INFO
+                    logger = object : Logger {
+                        override fun log(message: String) {
+                            android.util.Log.d("WeiboKtorClient", message)
+                        }
                     }
                 }
             }
