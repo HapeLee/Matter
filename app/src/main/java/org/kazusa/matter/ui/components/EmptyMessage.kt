@@ -35,9 +35,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 /** 默认颜文字，点击可随机切换一个 */
 val DefaultEmptyFaces = listOf(
@@ -69,7 +68,7 @@ fun EmptyMessage(
     buttonEnabled: Boolean = true,
     onButtonClick: (() -> Unit)? = null,
     faces: List<String> = DefaultEmptyFaces,
-    faceTextSize: TextUnit = 30.sp,
+    faceStyle: TextStyle = MaterialTheme.typography.headlineLarge,
     onFaceClick: (() -> Unit)? = null
 ) {
     var currentFace by remember(faces) {
@@ -102,7 +101,7 @@ fun EmptyMessage(
             } else if (currentFace.isNotBlank()) {
                 Text(
                     text = currentFace,
-                    fontSize = faceTextSize,
+                    style = faceStyle,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier

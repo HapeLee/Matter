@@ -60,6 +60,7 @@ fun SearchInputField(
     // 另外该边距必须施加在玻璃胶囊**自身的外层 modifier** 上：padding 位于玻璃绘制之外才能改变胶囊几何。
     // 若加在内层 Row 上，胶囊已被 fillMaxWidth 撑满、形状不变，只有里面的文字平移。
     val edgePadding = TopBarTokens.buttonEdgePadding(scrollAlpha)
+    val titleStyle = topBarTitleStyle(scrollAlpha)
     LiquidGlassCapsule(
         backdrop = backdrop,
         glassAlpha = scrollAlpha,
@@ -93,7 +94,7 @@ fun SearchInputField(
                     value = query,
                     onValueChange = onQueryChange,
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.headlineMediumEmphasized.copy(
+                    textStyle = titleStyle.copy(
                         color = onSurface,
                         shadow = liquidTextShadow()
                     ),
@@ -108,7 +109,7 @@ fun SearchInputField(
                             if (query.isEmpty()) {
                                 Text(
                                     text = placeholder,
-                                    style = MaterialTheme.typography.headlineMediumEmphasized.copy(
+                                    style = titleStyle.copy(
                                         shadow = liquidTextShadow()
                                     ),
                                     color = onSurfaceVariant,

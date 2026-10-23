@@ -54,7 +54,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -605,7 +604,6 @@ private fun UnreadBadge(count: Int) {
             text = if (count > 99) "99+" else count.toString(),
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
             style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onError
         )
     }

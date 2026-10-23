@@ -3,39 +3,15 @@ package org.kazusa.matter.ui.theme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MaterialExpressiveTheme
-import androidx.compose.material3.MotionScheme
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.materialkolor.DynamicMaterialTheme
-import com.materialkolor.PaletteStyle
 import org.kazusa.matter.ui.effect.LocalBlurEffectsEnabled
-
-private val FallbackDarkColorScheme = darkColorScheme(
-    primary = WeiboOrange,
-    secondary = WeiboOrangeDark,
-    background = DarkBackground,
-    surface = DarkSurface,
-    onPrimary = Color.White,
-    onBackground = DarkTextPrimary,
-    onSurface = DarkTextPrimary
-)
-
-private val FallbackLightColorScheme = lightColorScheme(
-    primary = WeiboOrange,
-    secondary = WeiboOrangeDark,
-    background = SurfaceLight,
-    surface = CardBackgroundLight,
-    onPrimary = Color.White,
-    onBackground = TextPrimary,
-    onSurface = TextPrimary
-)
 
 @Composable
 fun MatterTheme(
@@ -71,11 +47,7 @@ fun MatterTheme(
 
     // Establish Expressive defaults before either color provider. Nested MaterialTheme calls
     // inherit the expressive motion scheme while preserving Monet / seed-color animations.
-    MaterialExpressiveTheme(
-        motionScheme = MotionScheme.expressive(),
-        shapes = MatterShapes,
-        typography = Typography
-    ) {
+    MaterialExpressiveTheme {
         if (activeColorScheme != null) {
             MaterialTheme(
                 colorScheme = activeColorScheme,

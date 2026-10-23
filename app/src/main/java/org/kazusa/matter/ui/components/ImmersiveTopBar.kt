@@ -29,6 +29,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.lerp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -39,6 +41,14 @@ import org.kazusa.matter.ui.effect.liquid.LiquidGlassCapsule
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIconButton
 import org.kazusa.matter.ui.effect.liquid.liquidTextShadow
+
+/** 复用玻璃已经动画化的显示进度，在两档主题样式之间平滑过渡。 */
+@Composable
+internal fun topBarTitleStyle(glassProgress: Float): TextStyle = lerp(
+    start = MaterialTheme.typography.headlineMediumEmphasized,
+    stop = MaterialTheme.typography.headlineSmallEmphasized,
+    fraction = glassProgress.coerceIn(0f, 1f),
+)
 
 /**
  * 顶栏滚动联动状态，由 [ImmersiveTopBar] 内部根据滚动位置计算并透传给插槽，
@@ -272,7 +282,8 @@ fun TopBarTitleCapsule(
 /**
  * 标准顶栏标题文本胶囊（如「发现」、「关注分组」、「设置与外观」、「微博正文」）。
  *
- * 自动套用统一的 [MaterialTheme.typography.titleLarge]、[liquidTextShadow] 景深阴影与滚动内收动画。
+ * 无胶囊时使用 headlineMediumEmphasized；胶囊显示时切换为 headlineSmallEmphasized。
+ * 保留 [liquidTextShadow] 景深阴影与滚动内收动画。
  * - 若提供 [onBackClick]，自动在标题左侧包裹标准返回图标（类似微博正文：[< 标题]），且点击胶囊任意区域触发返回；
  * - 无需在 [ImmersiveTopBar] 中额外占用 [ImmersiveTopBar.navigationIcon] 导航槽，保持全屏胶囊语言统一。
  */
@@ -312,7 +323,7 @@ fun TopBarTitleText(
         Text(
             text = text,
             color = TopBarTokens.ContentColor,
-            style = MaterialTheme.typography.headlineMediumEmphasized.copy(
+            style = topBarTitleStyle(scroll.alpha).copy(
                 shadow = liquidTextShadow()
             ),
             maxLines = 1,
