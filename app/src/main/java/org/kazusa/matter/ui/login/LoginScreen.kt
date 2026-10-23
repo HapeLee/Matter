@@ -4,7 +4,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 
 
 import android.annotation.SuppressLint
+import android.net.http.SslError
 import android.webkit.CookieManager
+import android.webkit.SslErrorHandler
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -39,6 +42,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -131,6 +135,17 @@ fun LoginScreen(
                             webCookieStore.clearAll()
                             cookieStoreCleared = true
                         }
+                        // 离开登录页释放 WebView：仅把它从组合树摘掉不会销毁原生实例
+                        DisposableEffect(Unit) {
+                            onDispose {
+                                webViewRef?.apply {
+                                    stopLoading()
+                                    loadUrl("about:blank")
+                                    destroy()
+                                }
+                                webViewRef = null
+                            }
+                        }
 
                         Column(modifier = Modifier.fillMaxSize()) {
                             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -142,6 +157,7 @@ fun LoginScreen(
                                             settings.javaScriptEnabled = true
                                             settings.domStorageEnabled = true
                                             settings.databaseEnabled = true
+                                            settings.safeBrowsingEnabled = true
                                             // 与后续 API / CDN 请求保持一致：登录时拿到的会话
                                             // 与之后请求的 UA 不同，会被判成换了客户端
                                             settings.userAgentString = WeiboRequestHeaders.USER_AGENT
@@ -185,6 +201,30 @@ fun LoginScreen(
                                             }
 
                                             webViewClient = object : WebViewClient() {
+                                                // 登录流程只会经过微博/新浪域名；白名单外
+                                                // 的跳转一律不在内嵌 WebView 中加载
+                                                override fun shouldOverrideUrlLoading(
+                                                    view: WebView?,
+                                                    request: WebResourceRequest?
+                                                ): Boolean {
+                                                    val host = request?.url?.host?.lowercase()
+                                                        ?: return true
+                                                    val allowed = listOf(
+                                                        "weibo.com", "weibo.cn",
+                                                        "sina.com", "sina.com.cn", "sina.cn"
+                                                    )
+                                                    return allowed.none { host == it || host.endsWith(".$it") }
+                                                }
+
+                                                // 证书校验失败直接终止加载，绝不放行
+                                                override fun onReceivedSslError(
+                                                    view: WebView?,
+                                                    handler: SslErrorHandler?,
+                                                    error: SslError?
+                                                ) {
+                                                    handler?.cancel()
+                                                }
+
                                                 override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
                                                     super.doUpdateVisitedHistory(view, url, isReload)
                                                     checkAndExtractLogin(url)
