@@ -92,6 +92,7 @@ android {
     buildTypes {
         debug {
             // Debug 包与 Release 包共存：org.kazusa.matter.debug
+            // 应用名与 release 一致（不带 D），桌面/抽屉里靠黄色图标辨认（见 src/debug/res）
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
         }
