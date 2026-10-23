@@ -191,7 +191,21 @@ class AuthPreferences(private val context: Context) {
 
     suspend fun clearSession() {
         context.authDataStore.edit { prefs ->
-            prefs.clear()
+            // 只清会话与凭据键。onboarding 完成标记和分组偏好不属于会话：
+            // 登出不该把用户重新赶回引导页，也不该清空分组显示与排序设置。
+            prefs.remove(Keys.UID)
+            prefs.remove(Keys.SUB)
+            prefs.remove(Keys.SUBP)
+            prefs.remove(Keys.GSID)
+            prefs.remove(Keys.RAW_COOKIE)
+            prefs.remove(Keys.TOKEN)
+            prefs.remove(Keys.SCREEN_NAME)
+            prefs.remove(Keys.AVATAR_URL)
+            prefs.remove(Keys.DESCRIPTION)
+            prefs.remove(Keys.FOLLOWERS_COUNT)
+            prefs.remove(Keys.FRIENDS_COUNT)
+            prefs.remove(Keys.STATUSES_COUNT)
+            prefs.remove(Keys.IS_LOGGED_IN)
         }
     }
 }
