@@ -9,6 +9,9 @@ import org.kazusa.matter.data.model.WeiboUserDto
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
 
+/** 会话探活结果：只有 [SessionProbe.EXPIRED] 表示服务端明确判定凭据失效。 */
+enum class SessionProbe { SKIP, VALID, EXPIRED, NETWORK_ERROR }
+
 class AuthRepository(
     private val authPreferences: AuthPreferences,
     private val apiService: WeiboApiService,
@@ -217,6 +220,27 @@ class AuthRepository(
             rawCookie = "",
             screenName = "访客体验用户"
         )
+    }
+
+    /**
+     * 会话探活：冷启动 / 回前台时用 /api/config 验证一次登录凭据。
+     *
+     * 只有服务端明确返回「未登录」（401）才算失效；网络异常、HTTP 非 200
+     * 一律不触发登出，避免信号差时把用户误登出。游客与未登录没有可探活的
+     * 会话，直接跳过（不产生多余请求）。
+     */
+    suspend fun probeSession(): SessionProbe {
+        val current = authPreferences.sessionFlow.firstOrNull()
+            ?: return SessionProbe.SKIP
+        if (!current.isLoggedIn || current.uid.isBlank() || current.uid == "guest") {
+            return SessionProbe.SKIP
+        }
+        return when (val result = apiService.verifyConfig(current.cookieHeader)) {
+            is ApiResult.Success -> SessionProbe.VALID
+            is ApiResult.Error ->
+                if (result.code == 401) SessionProbe.EXPIRED else SessionProbe.NETWORK_ERROR
+            ApiResult.Loading -> SessionProbe.SKIP
+        }
     }
 
     suspend fun logout() {
