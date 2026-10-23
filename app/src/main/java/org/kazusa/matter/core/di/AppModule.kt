@@ -36,6 +36,7 @@ import org.kazusa.matter.data.model.EmojiPackageStore
 import org.kazusa.matter.core.network.OnlineEmojiSource
 import org.kazusa.matter.core.network.WeiboEmojiApi
 import org.kazusa.matter.core.platform.AndroidWebCookieStore
+import org.kazusa.matter.core.session.SessionExpiredBus
 import org.kazusa.matter.core.session.WebSessionCookieStore
 import org.kazusa.matter.core.media.AndroidEmojiPackageStore
 import org.kazusa.matter.ui.detail.OnlineEmojiViewModel
@@ -62,11 +63,13 @@ import org.kazusa.matter.ui.timeline.TimelineViewModel
 val dataModule = module {
     single { AuthPreferences(androidContext()) }
     single<WebSessionCookieStore> { AndroidWebCookieStore() }
+    // 会话失效唯一事件源：网络层上报，导航根消费（清会话 + 跳登录）
+    single { SessionExpiredBus() }
     single { ThemePreferences(androidContext()) }
     single { MediaPreferences(androidContext()) }
     single<Json> { KtorClientFactory.jsonConfig }
     single<HttpClient> { KtorClientFactory.createClient() } onClose { it?.close() }
-    single { WeiboApiService(get(), get()) }
+    single { WeiboApiService(get(), get(), get()) }
     single<OnlineEmojiSource> { WeiboEmojiApi(get()) }
     single<EmojiPackageStore> { AndroidEmojiPackageStore(File(androidContext().filesDir, "emoji-packs")) }
     single { EmojiRepository(get(), get()) }
@@ -95,7 +98,7 @@ val dataModule = module {
     single<HotSearchRepository> { WeiboHotSearchRepository(get()) }
 
     // 私信域：独立协议（api.weibo.com/webim），与会话绑定的 Cookie 每次请求时重新读取
-    single<MessageRepository> { WeiboMessageRepository(get(), get()) }
+    single<MessageRepository> { WeiboMessageRepository(get(), get(), get()) }
 
     // 由导航根按会话请求并记忆；不能声明为应用单例，否则收藏状态会跨账号复用。
     factory { parameters -> FavoritesRepository(parameters.get<UserSession>(), get()) }

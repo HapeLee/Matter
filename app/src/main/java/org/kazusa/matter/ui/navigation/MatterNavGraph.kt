@@ -29,6 +29,7 @@ import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.core.datastore.MediaPreferences
 import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.core.session.WebSessionCookieStore
+import org.kazusa.matter.core.session.SessionExpiredBus
 import org.kazusa.matter.data.repository.AuthRepository
 import org.kazusa.matter.data.repository.SearchHistoryRepository
 import org.kazusa.matter.ui.theme.ThemePreferences
@@ -144,6 +145,20 @@ fun MatterNavGraph() {
     val sharedElementTarget = remember { SharedElementTarget() }
     val favoritesRepository = remember(session?.uid, session?.cookieHeader, session?.isLoggedIn, koin) {
         koin.get<FavoritesRepository> { parametersOf(requireNotNull(session)) }
+    }
+
+    // 会话失效统一收口：任一接口确认 -100 且当前确实处于登录态时，清会话
+    // （含 WebView Cookie，防自动登回旧账号）并回到登录页。游客与未登录的
+    // -100 不算失效；清掉 DataStore 后 session 变空，后续重复事件自然被挡。
+    val sessionExpiredBus = koinInject<SessionExpiredBus>()
+    LaunchedEffect(Unit) {
+        sessionExpiredBus.expired.collect {
+            val current = session ?: return@collect
+            if (current.isLoggedIn && current.uid.isNotBlank() && current.uid != "guest") {
+                authRepository.logout()
+                replaceRoot(Screen.Login)
+            }
+        }
     }
 
     CompositionLocalProvider(

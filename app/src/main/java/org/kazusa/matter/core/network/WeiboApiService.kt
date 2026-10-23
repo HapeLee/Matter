@@ -1,6 +1,7 @@
 package org.kazusa.matter.core.network
 
 import org.kazusa.matter.core.datastore.AuthPreferences
+import org.kazusa.matter.core.session.SessionExpiredBus
 import org.kazusa.matter.data.model.GroupListResponse
 import org.kazusa.matter.data.model.PasswordLoginResponse
 import org.kazusa.matter.data.model.SearchResultItem
@@ -69,7 +70,8 @@ private const val HOT_FEED_GROUP_TYPE = 1
 
 class WeiboApiService(
     private val client: HttpClient,
-    private val authPreferences: AuthPreferences? = null
+    private val authPreferences: AuthPreferences? = null,
+    private val sessionExpiredBus: SessionExpiredBus = SessionExpiredBus()
 ) {
 
     /**
@@ -78,7 +80,7 @@ class WeiboApiService(
      */
     private val writeSession = WeiboWriteSession(::fetchWriteCredentials)
 
-    private val favoritesApi = FavoritesApi(client, writeSession)
+    private val favoritesApi = FavoritesApi(client, writeSession, sessionExpiredBus)
     private val replyImageUploadApi = ReplyImageUploadApi(client, writeSession)
 
     suspend fun uploadReplyImage(cookie: String, bytes: ByteArray): ApiResult<String> =
@@ -95,6 +97,26 @@ class WeiboApiService(
 
     @Volatile
     private var cachedVisitorCookie: String? = null
+
+    /**
+     * 会话失效统一上报：请求确实携带了 Cookie 且微博返回 -100、本地又仍认为处于
+     * 登录态（非游客）时，发一次全局失效事件。游客凭据被拒或未携带 Cookie 的 -100
+     * 不算会话失效，不触发登出。
+     */
+    private suspend fun reportSessionExpiredIfLoggedIn(usedCookie: String, code: Int?) {
+        if (code != -100 || usedCookie.isBlank()) return
+        val prefs = authPreferences ?: return
+        val session = try {
+            prefs.sessionFlow.firstOrNull()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        } ?: return
+        if (session.isLoggedIn && session.uid.isNotBlank() && session.uid != "guest") {
+            sessionExpiredBus.notifySessionExpired()
+        }
+    }
 
     /**
      * 获取当前有效 Cookie：
@@ -412,9 +434,10 @@ class WeiboApiService(
                 if (body.ok == 1) {
                     ApiResult.Success(body)
                 } else {
+                    reportSessionExpiredIfLoggedIn(cookie, body.ok)
                     ApiResult.Error(
                         code = body.ok,
-                        message = if (body.ok == -100) "登录凭证已失效(-100)，请点击下方退出并重新登录" else "获取微博动态失败(ok=${body.ok})"
+                        message = if (body.ok == -100) SessionExpiredBus.MESSAGE else "获取微博动态失败(ok=${body.ok})"
                     )
                 }
             } else {
@@ -461,9 +484,10 @@ class WeiboApiService(
                 if (body.ok == 1) {
                     ApiResult.Success(body)
                 } else {
+                    reportSessionExpiredIfLoggedIn(effectiveCookie, body.ok)
                     ApiResult.Error(
                         code = body.ok,
-                        message = if (body.ok == -100) "登录凭证已失效(-100)，请点击下方退出并重新登录" else "获取分组微博失败(ok=${body.ok})"
+                        message = if (body.ok == -100) SessionExpiredBus.MESSAGE else "获取分组微博失败(ok=${body.ok})"
                     )
                 }
             } else {
@@ -917,9 +941,10 @@ class WeiboApiService(
                 .jsonObject
             val ok = (root["ok"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
             if (ok != 1) {
+                reportSessionExpiredIfLoggedIn(effectiveCookie, ok)
                 return ApiResult.Error(
                     code = ok,
-                    message = if (ok == -100) "登录状态已失效，请重新登录后查看热门" else "获取热门分类失败(ok=$ok)"
+                    message = if (ok == -100) SessionExpiredBus.MESSAGE else "获取热门分类失败(ok=$ok)"
                 )
             }
 
@@ -1006,9 +1031,10 @@ class WeiboApiService(
                 .jsonObject
             val ok = (root["ok"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
             if (ok != 1) {
+                reportSessionExpiredIfLoggedIn(effectiveCookie, ok)
                 val msg = (root["msg"] as? JsonPrimitive)?.contentOrNull
                     ?: (root["message"] as? JsonPrimitive)?.contentOrNull
-                    ?: if (ok == -100) "登录状态已失效，请重新登录后查看热门" else "获取热门流失败(ok=$ok)"
+                    ?: if (ok == -100) SessionExpiredBus.MESSAGE else "获取热门流失败(ok=$ok)"
                 return ApiResult.Error(code = ok, message = msg)
             }
 
@@ -2466,8 +2492,9 @@ class WeiboApiService(
                 val rawText = response.bodyAsText()
                 val cardResp = KtorClientFactory.jsonConfig.decodeFromString<org.kazusa.matter.data.model.WeiboCardResponse>(rawText)
                 if (cardResp.ok != 1) {
+                    reportSessionExpiredIfLoggedIn(effectiveCookie, cardResp.ok)
                     val errorMsg = if (cardResp.ok == -100) {
-                        "该博主内容需要登录微博账号后方可查看 (ok: -100)"
+                        SessionExpiredBus.MESSAGE
                     } else {
                         "微博返回异常状态 (ok: ${cardResp.ok})"
                     }
@@ -2595,8 +2622,9 @@ class WeiboApiService(
             val cardResp = KtorClientFactory.jsonConfig
                 .decodeFromString<WeiboCardResponse>(response.bodyAsText())
             if (cardResp.ok != 1) {
+                reportSessionExpiredIfLoggedIn(effectiveCookie, cardResp.ok)
                 val message = if (cardResp.ok == -100) {
-                    "该列表需要登录微博账号后才能查看"
+                    SessionExpiredBus.MESSAGE
                 } else {
                     "微博返回异常状态 (ok: ${cardResp.ok})"
                 }

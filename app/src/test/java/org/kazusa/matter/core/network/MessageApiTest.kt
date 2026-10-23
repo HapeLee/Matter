@@ -3,6 +3,8 @@ package org.kazusa.matter.core.network
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
@@ -11,6 +13,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.kazusa.matter.data.model.MessageTab
+import org.kazusa.matter.core.session.SessionExpiredBus
 
 class MessageApiTest {
 
@@ -129,6 +132,27 @@ class MessageApiTest {
             assertTrue(result is ApiResult.Error)
             assertEquals(401, (result as ApiResult.Error).code)
         } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun minus100AlsoNotifiesSessionExpiredBusWithUnifiedMessage() = runBlocking {
+        val client = HttpClient(MockEngine {
+            respond("""{"ok":-100,"url":"https://passport.weibo.com/sso/signin"}""")
+        })
+        val bus = SessionExpiredBus()
+        var fired = 0
+        val collector = launch(Dispatchers.Unconfined) {
+            bus.expired.collect { fired++ }
+        }
+        try {
+            val result = MessageApi(client, bus).conversations("SUB=test", page = 1)
+            assertTrue(result is ApiResult.Error)
+            assertEquals(SessionExpiredBus.MESSAGE, (result as ApiResult.Error).message)
+            assertEquals(1, fired)
+        } finally {
+            collector.cancel()
             client.close()
         }
     }
