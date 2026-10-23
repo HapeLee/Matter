@@ -97,6 +97,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import org.kazusa.matter.core.util.TimeUtils
+import org.kazusa.matter.core.util.LocalOnlineEmojiImages
 import org.kazusa.matter.core.util.WeiboTextFormatter
 import org.kazusa.matter.core.util.formatInteractionCount
 import androidx.compose.ui.text.style.TextAlign
@@ -161,6 +162,7 @@ fun PostDetailScreen(
     // 业务状态全部来自 NavEntry 级 ViewModel：请求生命周期、并发与回滚都在里面，
     // 这里只做读取；页面重建不会丢失分页 / 排序 / 点赞等状态。
     val viewModel: PostDetailViewModel = koinViewModel { parametersOf(postId) }
+    val onlineEmojiViewModel: OnlineEmojiViewModel = koinViewModel()
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // 楼中楼状态按评论 id 存在 ViewModel 里；这里收集一次，按 key 取用
@@ -451,9 +453,10 @@ fun PostDetailScreen(
                                                 // 楼中楼的分页、游标与加载态都在 ViewModel 里按评论 id 管理
                                                 repliesProvider = { comment ->
                                                     repliesStates[viewModel.repliesKeyOf(comment)]
-                                                        ?: initialCommentReplies(comment)
+                                                        ?: viewModel.commentRepliesOf(comment)
                                                 },
                                                 onLoadReplies = viewModel::loadCommentReplies,
+                                                onReply = viewModel::replyToComment,
                                                 postAuthorId = postAuthorId,
                                                 postAuthorName = postAuthorName,
                                                 onUserClick = onUserClick,
@@ -532,6 +535,17 @@ fun PostDetailScreen(
         if (post != null) {
             PostReplySheet(
                 replyState = viewModel.replyState,
+                onlineEmojiState = onlineEmojiViewModel.state,
+                onOpenOnlineEmojis = onlineEmojiViewModel::openCatalog,
+                onRefreshOnlineEmojis = onlineEmojiViewModel::refreshCatalog,
+                onInstallEmojiPackage = onlineEmojiViewModel::install,
+                pickerState = viewModel.replyPickerState,
+                onBeginImageSelection = viewModel::beginReplyImageSelection,
+                onImageSelected = viewModel::selectReplyImage,
+                onRemoveImage = viewModel::removeReplyImage,
+                onOpenPicker = viewModel::openReplyPicker,
+                onPickerQueryChange = viewModel::searchReplyPicker,
+                onPickerDismiss = viewModel::closeReplyPicker,
                 placeholder = replyPlaceholderFor(post.user?.screenName),
                 onDismiss = viewModel::dismissReplyComposer,
                 onDraftChange = viewModel::updateReplyDraft,
@@ -691,8 +705,10 @@ private fun PostDetailBody(
 
             // 微博正文 (宽松舒适的阅读体验，高亮并支持点击@博主、#话题#、网页链接与表情图标)
             val primaryColor = MaterialTheme.colorScheme.primary
-            val contentFormatted = remember(post.textRaw, post.text, primaryColor, onMentionClick, onTopicClick) {
+            val onlineEmojiImages = LocalOnlineEmojiImages.current
+            val contentFormatted = remember(post.textRaw, post.text, primaryColor, onMentionClick, onTopicClick, onlineEmojiImages) {
                 WeiboTextFormatter.formatWeiboContent(
+                    emojiImages = onlineEmojiImages,
                     rawText = post.textRaw ?: post.text,
                     primaryColor = primaryColor,
                     onMentionClick = onMentionClick,
@@ -761,8 +777,10 @@ private fun PostDetailBody(
                 val authorName = retweet.user?.screenName ?: "原微博"
                 val retweetPrimaryColor = MaterialTheme.colorScheme.primary
                 val authorLinkBaseSpan = MaterialTheme.typography.bodyMediumEmphasized.toSpanStyle()
-                val bodyFormatted = remember(retweet.textRaw, retweet.text, retweetPrimaryColor, onMentionClick, onTopicClick) {
+                val onlineEmojiImages = LocalOnlineEmojiImages.current
+                val bodyFormatted = remember(retweet.textRaw, retweet.text, retweetPrimaryColor, onMentionClick, onTopicClick, onlineEmojiImages) {
                     WeiboTextFormatter.formatWeiboContent(
+                        emojiImages = onlineEmojiImages,
                         rawText = retweet.textRaw ?: retweet.text,
                         primaryColor = retweetPrimaryColor,
                         onMentionClick = onMentionClick,
@@ -1119,8 +1137,10 @@ private fun RepostItemRow(
             Spacer(modifier = Modifier.height(4.dp))
 
             val primaryColor = MaterialTheme.colorScheme.primary
-            val contentFormatted = remember(repost.textRaw, repost.text, primaryColor) {
+            val onlineEmojiImages = LocalOnlineEmojiImages.current
+            val contentFormatted = remember(repost.textRaw, repost.text, primaryColor, onlineEmojiImages) {
                 WeiboTextFormatter.formatWeiboContent(
+                    emojiImages = onlineEmojiImages,
                     rawText = repost.textRaw ?: repost.text,
                     primaryColor = primaryColor,
                     onMentionClick = onMentionClick,
@@ -1220,7 +1240,7 @@ internal fun CommentRow(
     onImageClick: (List<String>, Int) -> Unit = { _, _ -> },
     onLikeClick: () -> Unit = {},
     likeEnabled: Boolean = true,
-    /** 整行点击（目前只用于提供按压水波纹反馈，可后续接入“回复评论”等动作）。 */
+    /** 整行点击打开回复；头像、昵称、图片和点赞保留各自点击行为。 */
     onClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -1240,8 +1260,10 @@ internal fun CommentRow(
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
     }
-    val commentFormatted = remember(replyText, primaryColor, onMentionClick, onTopicClick) {
+    val onlineEmojiImages = LocalOnlineEmojiImages.current
+    val commentFormatted = remember(replyText, primaryColor, onMentionClick, onTopicClick, onlineEmojiImages) {
         WeiboTextFormatter.formatWeiboContent(
+            emojiImages = onlineEmojiImages,
             rawText = replyText,
             primaryColor = primaryColor,
             onMentionClick = onMentionClick,

@@ -45,6 +45,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.decodeURLQueryComponent
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.parameters
 import kotlinx.coroutines.flow.firstOrNull
@@ -78,6 +79,10 @@ class WeiboApiService(
     private val writeSession = WeiboWriteSession(::fetchWriteCredentials)
 
     private val favoritesApi = FavoritesApi(client, writeSession)
+    private val replyImageUploadApi = ReplyImageUploadApi(client, writeSession)
+
+    suspend fun uploadReplyImage(cookie: String, bytes: ByteArray): ApiResult<String> =
+        replyImageUploadApi.upload(cookie, bytes)
 
     suspend fun getFavorites(cookie: String, page: Int = 1): ApiResult<UserPostsPage> =
         favoritesApi.getFavorites(cookie, page)
@@ -1581,7 +1586,7 @@ class WeiboApiService(
 
     /**
      * 回复（评论）微博。
-     * 端点: POST https://m.weibo.cn/api/comments/create
+     * 端点: POST https://m.weibo.cn/api/comments/create 或 comments/reply（附带 cid）。
      *
      * 移动端 PWA 提交的是 `mid` + `content` + `st`（mid 即详情链接里的微博 id）；
      * 这里同时带上 `id`，兼容仍按 `id` 取目标微博的端。
@@ -1593,29 +1598,43 @@ class WeiboApiService(
     suspend fun createComment(
         id: String,
         text: String,
-        cookie: String = ""
+        cookie: String = "",
+        commentId: Long? = null,
+        pictureId: String? = null
     ): ApiResult<org.kazusa.matter.data.model.WeiboCommentDto?> {
+        if (id.isBlank() || (commentId != null && commentId <= 0)) {
+            return ApiResult.Error(message = "回复目标无效")
+        }
         val content = text.trim()
-        if (content.isEmpty()) return ApiResult.Error(message = "回复内容不能为空")
+        if (content.isEmpty() && pictureId.isNullOrBlank()) return ApiResult.Error(message = "回复内容不能为空")
         return try {
             val effectiveCookie = getEffectiveCookie(cookie)
             if (effectiveCookie.isBlank()) {
                 return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
             }
-            writeSession.execute(cookie = effectiveCookie, action = "回复") { credentials ->
+            writeSession.execute(cookie = effectiveCookie, action = "回复") { mobileCredentials ->
+                val credentials = if (pictureId == null) mobileCredentials else desktopReplyCredentials(mobileCredentials)
                 val response = client.submitForm(
-                    url = "https://m.weibo.cn/api/comments/create",
+                    url = if (pictureId == null) "https://m.weibo.cn/api/comments/${if (commentId == null) "create" else "reply"}"
+                        else "https://weibo.com/ajax/comments/${if (commentId == null) "create" else "reply"}",
                     formParameters = parameters {
                         append("mid", id)
                         append("id", id)
-                        append("content", content)
+                        commentId?.let { append("cid", it.toString()) }
+                        if (pictureId == null) append("content", content) else {
+                            append("comment", content.ifBlank { "图片评论" })
+                            append("pic_id", pictureId)
+                            append("is_repost", "0")
+                            append("comment_ori", "0")
+                            append("is_comment", "0")
+                        }
                         append("st", credentials.token)
                     }
                 ) {
                     header("Cookie", credentials.cookieHeader)
                     header("X-XSRF-TOKEN", credentials.token)
-                    header("Origin", "https://m.weibo.cn")
-                    header("Referer", "https://m.weibo.cn/detail/$id")
+                    header("Origin", if (pictureId == null) "https://m.weibo.cn" else "https://weibo.com")
+                    header("Referer", if (pictureId == null) "https://m.weibo.cn/detail/$id" else "https://weibo.com/")
                     header("MWeibo-Pwa", "1")
                     header("X-Requested-With", "XMLHttpRequest")
                 }
@@ -1629,6 +1648,33 @@ class WeiboApiService(
             android.util.Log.e("WeiboApi", "createComment failed", e)
             ApiResult.Error(message = e.localizedMessage ?: "回复异常", throwable = e)
         }
+    }
+
+    /** 附图走网页评论协议，使用网页域自己的 XSRF Cookie，不混用移动端 st。 */
+    private suspend fun desktopReplyCredentials(base: WeiboWriteCredentials): WeiboWriteCredentials {
+        val cookies = linkedMapOf<String, String>()
+        base.cookieHeader.split(';').forEach { part ->
+            val name = part.substringBefore('=').trim()
+            if (name.isNotEmpty() && '=' in part) cookies[name] = part.substringAfter('=').trim()
+        }
+        if (cookies["XSRF-TOKEN"].isNullOrBlank()) {
+            val response = client.get("https://weibo.com/") {
+                header("Cookie", base.cookieHeader)
+                header("Referer", "https://weibo.com/")
+            }
+            if (response.status == HttpStatusCode.TooManyRequests) {
+                writeSession.reportRateLimited()
+                throw WriteGateException(429, WeiboWriteErrors.RATE_LIMITED_MESSAGE)
+            }
+            response.headers.getAll("Set-Cookie").orEmpty().forEach { header ->
+                val pair = header.substringBefore(';')
+                if ('=' in pair) cookies[pair.substringBefore('=').trim()] = pair.substringAfter('=').trim()
+            }
+        }
+        val csrf = cookies["XSRF-TOKEN"]?.takeIf { it.isNotBlank() }
+            ?: throw WriteGateException(401, "无法获取微博网页发布凭据，请重新登录后重试；所选图片已保留")
+        return base.copy(cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" },
+            token = csrf.decodeURLQueryComponent())
     }
 
     /**
@@ -1840,6 +1886,19 @@ class WeiboApiService(
         }
     }
 
+    private suspend fun resolveMentionUserId(name: String, cookie: String): ApiResult<String> =
+        when (val result = searchWeiboPage(name, searchType = 3, cookie = cookie)) {
+            is ApiResult.Success -> {
+                val user = result.data.items.asSequence().mapNotNull { it.card?.user }
+                    .firstOrNull { it.screenName == name }
+                val id = user?.id?.toString() ?: user?.idStr
+                if (!id.isNullOrBlank() && id.all { it.isDigit() }) ApiResult.Success(id)
+                else ApiResult.Error(message = "未找到博主 @$name，请检查昵称是否已更改")
+            }
+            is ApiResult.Error -> result
+            ApiResult.Loading -> ApiResult.Loading
+        }
+
     /**
      * 获取博主资料卡片
      * 端点: https://m.weibo.cn/api/container/getIndex?containerid=100505{uid}
@@ -1847,26 +1906,17 @@ class WeiboApiService(
      */
     suspend fun getUserProfile(uid: String, cookie: String = ""): ApiResult<org.kazusa.matter.data.model.WeiboUserDto> {
         return try {
-            val isNumeric = uid.all { it.isDigit() }
-            val cleanUid = if (isNumeric) uid else uid.removePrefix("name:")
+            val cleanUid = uid.removePrefix("name:").removePrefix("@").trim()
+            if (cleanUid.isBlank()) return ApiResult.Error(message = "博主名称不能为空")
+            val isNumeric = !uid.startsWith("name:") && cleanUid.all { it.isDigit() }
             var effectiveCookie = getEffectiveCookie(cookie)
-
-            // 如果不是数字 UID（如来自 @mention 的昵称），先通过搜索获取该用户的真实数字 UID
-            var numericUid = if (isNumeric) uid else null
-            if (numericUid == null) {
-                val searchRes = searchWeibo(cleanUid, page = 1, cookie = cookie)
-                if (searchRes is ApiResult.Success) {
-                    val matching = searchRes.data.firstOrNull { it.user?.screenName == cleanUid }?.user
-                        ?: searchRes.data.firstOrNull()?.user
-                    if (matching?.id != null) {
-                        numericUid = matching.id.toString()
-                    } else if (matching != null) {
-                        return ApiResult.Success(matching)
-                    }
-                }
+            val numericUid = if (isNumeric) cleanUid else when (val resolved = resolveMentionUserId(cleanUid, effectiveCookie)) {
+                is ApiResult.Success -> resolved.data
+                is ApiResult.Error -> return resolved
+                ApiResult.Loading -> return ApiResult.Error(message = "博主资料暂不可用，请重试")
             }
 
-            val targetUid = numericUid ?: cleanUid
+            val targetUid = numericUid
 
             // 1. 尝试 m.weibo.cn 移动端接口
             if (targetUid.all { it.isDigit() }) {
@@ -1914,6 +1964,8 @@ class WeiboApiService(
                             }
                         }
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (e: Exception) {
                     android.util.Log.w("WeiboApi", "m.weibo.cn getUserProfile failed for $targetUid, trying PC fallback", e)
                 }
@@ -1943,6 +1995,8 @@ class WeiboApiService(
                             }
                         }
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (e: Exception) {
                     android.util.Log.w("WeiboApi", "weibo.com PC getUserProfile failed for $targetUid", e)
                 }
@@ -1956,6 +2010,8 @@ class WeiboApiService(
                     screenName = if (targetUid.all { it.isDigit() }) "博主 $targetUid" else targetUid
                 )
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             android.util.Log.e("WeiboApi", "getUserProfile failed", e)
             ApiResult.Error(message = e.localizedMessage ?: "加载博主资料异常", throwable = e)
@@ -2365,28 +2421,14 @@ class WeiboApiService(
         cookie: String = ""
     ): ApiResult<UserTimelineResult> {
         return try {
-            val isNumericUid = uid.all { it.isDigit() }
+            val cleanUid = uid.removePrefix("name:").removePrefix("@").trim()
+            if (cleanUid.isBlank()) return ApiResult.Error(message = "博主名称不能为空")
+            val isNumericUid = !uid.startsWith("name:") && cleanUid.all { it.isDigit() }
             if (!isNumericUid) {
-                // 如果传入的是博主昵称而非数字 uid，优先通过搜索该昵称获取博主发布的内容与博主信息
-                val cleanName = uid.removePrefix("name:")
-                val searchRes = searchWeibo(cleanName, page = page, cookie = cookie)
-                if (searchRes is ApiResult.Success) {
-                    val matchingUser = searchRes.data.firstOrNull { it.user?.screenName == cleanName }?.user
-                        ?: searchRes.data.firstOrNull()?.user
-                    if (matchingUser?.id != null && page == 1) {
-                        val realTimeline = getUserTimeline(matchingUser.id.toString(), page = 1, cookie = cookie)
-                        if (realTimeline is ApiResult.Success && realTimeline.data.statuses.isNotEmpty()) {
-                            return realTimeline
-                        }
-                    }
-                    return ApiResult.Success(
-                        UserTimelineResult(
-                            user = matchingUser ?: org.kazusa.matter.data.model.WeiboUserDto(screenName = cleanName),
-                            statuses = searchRes.data,
-                            total = searchRes.data.size,
-                            hasMore = searchRes.data.isNotEmpty()
-                        )
-                    )
+                return when (val resolved = resolveMentionUserId(cleanUid, getEffectiveCookie(cookie))) {
+                    is ApiResult.Success -> getUserTimeline(resolved.data, page, cookie)
+                    is ApiResult.Error -> resolved
+                    ApiResult.Loading -> ApiResult.Error(message = "博主资料暂不可用，请重试")
                 }
             }
 
@@ -2450,6 +2492,8 @@ class WeiboApiService(
             } else {
                 ApiResult.Error(code = response.status.value, message = "获取博主动态失败: HTTP ${response.status}")
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             android.util.Log.e("WeiboApi", "getUserTimeline failed", e)
             ApiResult.Error(message = e.localizedMessage ?: "加载博主动态异常", throwable = e)

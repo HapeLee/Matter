@@ -53,6 +53,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.kazusa.matter.core.util.TimeUtils
+import org.kazusa.matter.core.util.LocalOnlineEmojiImages
 import org.kazusa.matter.core.util.WeiboTextFormatter
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.repository.LikeState
@@ -308,8 +309,10 @@ private fun PostCardContent(
             // 微博正文 (支持长按文本自由复制，高亮并支持点击@博主、#话题#、网页链接与表情图标)
             // HTML 解码 + AnnotatedString 构建开销较大，按文本内容缓存，避免每次重组重跑
             val primaryColor = MaterialTheme.colorScheme.primary
-            val contentFormatted = remember(post.textRaw, post.text, primaryColor, onMentionClick, onTopicClick) {
+            val onlineEmojiImages = LocalOnlineEmojiImages.current
+            val contentFormatted = remember(post.textRaw, post.text, primaryColor, onMentionClick, onTopicClick, onlineEmojiImages) {
                 WeiboTextFormatter.formatWeiboContent(
+                    emojiImages = onlineEmojiImages,
                     rawText = post.textRaw ?: post.text,
                     primaryColor = primaryColor,
                     onMentionClick = onMentionClick,
@@ -440,8 +443,10 @@ private fun RetweetCard(
         val authorName = retweet.user?.screenName ?: "原微博"
         val primaryColor = MaterialTheme.colorScheme.primary
         val authorLinkBaseSpan = MaterialTheme.typography.bodyMediumEmphasized.toSpanStyle()
-        val bodyFormatted = remember(retweet.textRaw, retweet.text, primaryColor, onMentionClick, onTopicClick) {
+        val onlineEmojiImages = LocalOnlineEmojiImages.current
+        val bodyFormatted = remember(retweet.textRaw, retweet.text, primaryColor, onMentionClick, onTopicClick, onlineEmojiImages) {
             WeiboTextFormatter.formatWeiboContent(
+                emojiImages = onlineEmojiImages,
                 rawText = retweet.textRaw ?: retweet.text,
                 primaryColor = primaryColor,
                 onMentionClick = onMentionClick,

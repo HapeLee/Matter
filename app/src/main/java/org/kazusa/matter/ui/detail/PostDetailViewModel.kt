@@ -2,6 +2,8 @@ package org.kazusa.matter.ui.detail
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
@@ -21,6 +23,12 @@ import org.kazusa.matter.data.model.WeiboAttitudeDto
 import org.kazusa.matter.data.model.WeiboCommentDto
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.repository.BrowsingHistoryRepository
+import org.kazusa.matter.data.model.ReplyImageHandle
+import org.kazusa.matter.data.model.ReplyPickerKind
+import org.kazusa.matter.data.model.ReplySuggestion
+import org.kazusa.matter.data.model.WeiboUserDto
+import org.kazusa.matter.data.repository.ReplyRepository
+import org.kazusa.matter.data.repository.ReplySession
 import org.kazusa.matter.data.repository.LikeRepository
 
 /** 正文页的子页签。 */
@@ -38,12 +46,16 @@ internal interface PostDetailDataSource {
     suspend fun attitudes(postId: String, page: Int): ApiResult<AttitudesDataDto>
     suspend fun replies(postId: String, commentId: Long, maxId: Long, maxIdType: Int): ApiResult<CommentsDataDto>
 
-    /** 回复微博；成功时尽量带回服务端新建的评论。 */
-    suspend fun createComment(postId: String, text: String): ApiResult<WeiboCommentDto?>
 }
 
-/** 单条回复的最大长度：与微博移动端一致，超出部分不再进入草稿。 */
-private const val MAX_REPLY_LENGTH = 2000
+/** 输入长度保护；不把 UTF-16 代理对截成半个字符。 */
+internal const val MAX_REPLY_LENGTH = 2000
+
+internal fun limitReplyDraft(text: String): String {
+    val end = if (text.length > MAX_REPLY_LENGTH && text[MAX_REPLY_LENGTH - 1].isHighSurrogate()
+        && text[MAX_REPLY_LENGTH].isLowSurrogate()) MAX_REPLY_LENGTH - 1 else MAX_REPLY_LENGTH
+    return text.take(end)
+}
 
 private class ApiPostDetailDataSource(private val apiService: WeiboApiService) : PostDetailDataSource {
     override suspend fun post(postId: String): ApiResult<WeiboStatusDto> =
@@ -66,8 +78,6 @@ private class ApiPostDetailDataSource(private val apiService: WeiboApiService) :
     ): ApiResult<CommentsDataDto> =
         apiService.getCommentReplies(postId, commentId, maxId, maxIdType)
 
-    override suspend fun createComment(postId: String, text: String): ApiResult<WeiboCommentDto?> =
-        apiService.createComment(postId, text)
 }
 
 /**
@@ -130,8 +140,24 @@ internal data class ReplyComposerState(
     val isOpen: Boolean = false,
     val draft: String = "",
     /** 回复请求在途：期间禁止重复提交。 */
-    val isSending: Boolean = false
+    val isSending: Boolean = false,
+    val target: ReplyTarget? = null,
+    val attachment: ReplyAttachment? = null,
+    val isUploading: Boolean = false,
+    val errorMessage: String? = null
 )
+
+internal data class ReplyAttachment(val image: ReplyImageHandle, val uploadedId: String? = null)
+
+internal data class ReplyPickerState(
+    val kind: ReplyPickerKind? = null,
+    val query: String = "",
+    val loading: Boolean = false,
+    val suggestions: List<ReplySuggestion> = emptyList(),
+    val error: String? = null
+)
+
+internal data class ReplyTarget(val commentId: Long, val rootId: Long, val screenName: String)
 
 /**
  * 微博正文页的业务状态。
@@ -148,19 +174,22 @@ internal class PostDetailViewModel internal constructor(
     private val postId: String,
     private val recordHistory: suspend (WeiboStatusDto) -> Unit,
     private val likeRepository: LikeRepository,
-    private val dataSource: PostDetailDataSource
+    private val dataSource: PostDetailDataSource,
+    private val replyRepository: ReplyRepository
 ) : ViewModel() {
 
     constructor(
         postId: String,
         apiService: WeiboApiService,
         historyRepository: BrowsingHistoryRepository,
-        likeRepository: LikeRepository
+        likeRepository: LikeRepository,
+        replyRepository: ReplyRepository
     ) : this(
         postId = postId,
         recordHistory = { post -> historyRepository.recordPost(post) },
         likeRepository = likeRepository,
-        dataSource = ApiPostDetailDataSource(apiService)
+        dataSource = ApiPostDetailDataSource(apiService),
+        replyRepository = replyRepository
     )
 
     private val _uiState = MutableStateFlow(PostDetailUiState())
@@ -240,69 +269,250 @@ internal class PostDetailViewModel internal constructor(
         }
     }
 
-    /** 展开悬浮回复条；上次未发送的草稿保留。 */
-    fun openReplyComposer() {
-        _replyState.update { it.copy(isOpen = true) }
+    private val _replyPickerState = MutableStateFlow(ReplyPickerState())
+    val replyPickerState: StateFlow<ReplyPickerState> = _replyPickerState.asStateFlow()
+    private var pickerJob: Job? = null
+    private var pickerToken = 0
+    private val replyAttachments = mutableMapOf<Long?, ReplyAttachment>()
+
+    fun openReplyPicker(kind: ReplyPickerKind) {
+        composerRevision++
+        _replyPickerState.value = ReplyPickerState(kind = kind)
+        searchReplyPicker("")
     }
 
-    /** 收起悬浮回复条；草稿不清空，避免误触关闭后丢内容。 */
+    fun closeReplyPicker() {
+        pickerToken++
+        pickerJob?.cancel()
+        _replyPickerState.value = ReplyPickerState()
+    }
+
+    fun searchReplyPicker(query: String) {
+        val kind = _replyPickerState.value.kind ?: return
+        val token = ++pickerToken
+        pickerJob?.cancel()
+        _replyPickerState.update { it.copy(query = query, loading = true, suggestions = emptyList(), error = null) }
+        pickerJob = viewModelScope.launch {
+            try {
+                if (query.isNotBlank()) delay(250)
+                val result = replyRepository.suggestions(kind, query)
+                currentCoroutineContext().ensureActive()
+                if (token != pickerToken) return@launch
+                when (result) {
+                    is ApiResult.Success -> _replyPickerState.update { it.copy(loading = false, suggestions = result.data) }
+                    is ApiResult.Error -> _replyPickerState.update { it.copy(loading = false, error = result.message) }
+                    ApiResult.Loading -> _replyPickerState.update { it.copy(loading = false) }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (token == pickerToken) _replyPickerState.update { it.copy(loading = false, error = "加载失败，请重试") }
+            }
+        }
+    }
+
+    fun beginReplyImageSelection(): Int = ++composerRevision
+
+    fun selectReplyImage(image: ReplyImageHandle, owner: Int) {
+        if (owner != composerRevision || _replyState.value.isSending) return
+        val key = _replyState.value.target?.commentId
+        val attachment = ReplyAttachment(image)
+        replyAttachments[key] = attachment
+        draftVersions[key] = (draftVersions[key] ?: 0) + 1
+        composerRevision++
+        _replyState.update { it.copy(attachment = attachment, errorMessage = null) }
+    }
+
+    fun removeReplyImage() {
+        if (_replyState.value.isSending) return
+        val key = _replyState.value.target?.commentId
+        replyAttachments.remove(key)
+        draftVersions[key] = (draftVersions[key] ?: 0) + 1
+        composerRevision++
+        _replyState.update { it.copy(attachment = null, errorMessage = null) }
+    }
+
+    private var replyJob: Job? = null
+    private var replyToken = 0
+    private var composerRevision = 0
+    private var replySession: ReplySession? = null
+    private val replyDrafts = mutableMapOf<Long?, String>()
+    private val draftVersions = mutableMapOf<Long?, Int>()
+    // 写入已成功、列表尚未确认的评论；旧列表响应不能抹掉它们。
+    private val publishedComments = linkedMapOf<Long, WeiboCommentDto>()
+    private val publishedReplies = mutableMapOf<Long, LinkedHashMap<Long, WeiboCommentDto>>()
+
+    init {
+        viewModelScope.launch {
+            replyRepository.sessions.collect { session ->
+                if (replySession != null && replySession != session) {
+                    replyToken++
+                    composerRevision++
+                    replyJob?.cancel()
+                    closeReplyPicker()
+                    replyAttachments.clear()
+                    replyDrafts.clear()
+                    draftVersions.clear()
+                    publishedComments.clear()
+                    publishedReplies.clear()
+                    clearReplies()
+                    _replyState.value = ReplyComposerState()
+                    _uiState.update { it.copy(comments = emptyList()) }
+                    if (started) loadComments()
+                }
+                replySession = session
+            }
+        }
+    }
+
+    /** 不同回复目标各自保留草稿，收起后重开仍回复原目标。 */
+    fun openReplyComposer() = openComposer(null)
+
+    fun replyToComment(comment: WeiboCommentDto, rootId: Long) {
+        val id = comment.id ?: return
+        openComposer(ReplyTarget(id, rootId, comment.user?.screenName.orEmpty()))
+    }
+
+    private fun openComposer(target: ReplyTarget?) {
+        closeReplyPicker()
+        val old = _replyState.value
+        replyDrafts[old.target?.commentId] = old.draft
+        composerRevision++
+        _replyState.value = old.copy(isOpen = true, target = target,
+            draft = replyDrafts[target?.commentId].orEmpty(),
+            attachment = replyAttachments[target?.commentId],
+            errorMessage = old.errorMessage.takeIf { old.target == target })
+    }
+
     fun dismissReplyComposer() {
+        closeReplyPicker()
+        composerRevision++
         _replyState.update { it.copy(isOpen = false) }
     }
 
     fun updateReplyDraft(text: String) {
-        _replyState.update { it.copy(draft = text.take(MAX_REPLY_LENGTH)) }
+        val limited = limitReplyDraft(text)
+        if (_replyState.value.draft == limited) return
+        composerRevision++
+        val key = _replyState.value.target?.commentId
+        draftVersions[key] = (draftVersions[key] ?: 0) + 1
+        _replyState.update { it.copy(draft = limited, errorMessage = null) }
     }
 
-    /**
-     * 提交回复。
-     *
-     * 只有成功才清空草稿并收起输入条；失败（未登录、频控、内容不合规）保留内容，
-     * 原因通过 [messages] 交给界面提示。服务端没带回新建评论时静默重拉一次首屏评论。
-     */
     fun submitReply() {
-        val target = _uiState.value.post ?: return
-        val content = _replyState.value.draft.trim()
-        if (content.isEmpty() || _replyState.value.isSending) return
-        _replyState.update { it.copy(isSending = true) }
-        viewModelScope.launch {
+        val post = _uiState.value.post ?: return
+        val composer = _replyState.value
+        val content = composer.draft.trim()
+        if ((content.isEmpty() && composer.attachment == null) || composer.isSending) return
+        val session = replySession ?: return
+        val token = ++replyToken
+        val revision = composerRevision
+        val target = composer.target
+        val draftVersion = draftVersions[target?.commentId] ?: 0
+        _replyState.update { it.copy(isSending = true, errorMessage = null) }
+        replyJob = viewModelScope.launch {
             try {
-                when (val res = dataSource.createComment(targetIdOf(target), content)) {
+                var pictureId = composer.attachment?.uploadedId
+                if (composer.attachment != null && pictureId == null) {
+                    _replyState.update { it.copy(isUploading = true) }
+                    val upload = replyRepository.upload(session, composer.attachment.image)
+                    currentCoroutineContext().ensureActive()
+                    if (token != replyToken || replyRepository.currentSession() != session) return@launch
+                    when (upload) {
+                        is ApiResult.Success -> {
+                            pictureId = upload.data
+                            val attachment = composer.attachment.copy(uploadedId = upload.data)
+                            replyAttachments[target?.commentId] = attachment
+                            if (_replyState.value.target == target) _replyState.update { it.copy(attachment = attachment) }
+                        }
+                        is ApiResult.Error -> {
+                            if (_replyState.value.target == target) _replyState.update { it.copy(errorMessage = upload.message) }
+                            else messageChannel.trySend(upload.message)
+                            return@launch
+                        }
+                        ApiResult.Loading -> {
+                            _replyState.update { it.copy(errorMessage = "图片上传未完成，请重试") }
+                            return@launch
+                        }
+                    }
+                    _replyState.update { it.copy(isUploading = false) }
+                }
+                val result = replyRepository.submit(session, targetIdOf(post), target?.commentId, content, pictureId)
+                currentCoroutineContext().ensureActive()
+                if (token != replyToken || replyRepository.currentSession() != session) return@launch
+                when (result) {
                     is ApiResult.Success -> {
-                        val created = res.data
-                        _uiState.update { state ->
-                            val inserted = if (created != null &&
-                                state.comments.none { it.listKey == created.listKey }
-                            ) {
-                                listOf(created) + state.comments
-                            } else {
-                                state.comments
-                            }
-                            state.copy(comments = inserted, hasLoadedComments = true)
+                        val created = result.data?.takeIf { composer.attachment == null }?.let {
+                            WeiboCommentDto(id = it.id, text = it.text, createdAt = it.createdAt,
+                                user = WeiboUserDto(id = it.authorId, screenName = it.authorName,
+                                    avatarLarge = it.authorAvatar),
+                                replyComment = target?.let { reply -> WeiboCommentDto(id = reply.commentId,
+                                    user = WeiboUserDto(screenName = reply.screenName)) })
                         }
-                        // 发送期间用户又改了内容：保留草稿与输入条，不要把新输入一起清掉
-                        _replyState.update { state ->
-                            if (state.draft.trim() != content) {
-                                state
-                            } else {
-                                state.copy(isOpen = false, draft = "")
+                        if (target == null) {
+                            if (created != null) publishedComments[requireNotNull(created.id)] = created
+                            _uiState.update { it.copy(comments = mergePublishedComments(it.comments),
+                                hasLoadedComments = true, selectedTab = DetailSubTab.COMMENTS) }
+                        } else if (created != null) {
+                            publishedReplies.getOrPut(target.rootId) { linkedMapOf() }[requireNotNull(created.id)] = created
+                            val root = findComment(target.rootId)
+                            if (root != null) {
+                                val current = commentRepliesOf(root)
+                                _repliesStates.update { it + (repliesKeyOf(root) to current.copy(
+                                    replies = mergeCommentReplies(listOf(created), current.replies, target.rootId))) }
                             }
                         }
-                        // 只回了 ok=1、没有评论对象：重拉一次让列表与线上一致
-                        if (created == null) loadComments()
+                        if ((draftVersions[target?.commentId] ?: 0) == draftVersion) {
+                            replyDrafts[target?.commentId] = ""
+                            replyAttachments.remove(target?.commentId)
+                            if (_replyState.value.target == target) _replyState.update {
+                                it.copy(draft = "", attachment = null, isOpen = if (composerRevision == revision) false else it.isOpen,
+                                    errorMessage = null)
+                            }
+                        }
+                        if (created == null) {
+                            if (target == null) loadComments() else {
+                                val root = findComment(target.rootId)
+                                if (root == null) loadComments() else {
+                                    val key = repliesKeyOf(root)
+                                    repliesTokens[key] = (repliesTokens[key] ?: 0) + 1
+                                    repliesJobs.remove(key)?.cancel()
+                                    _repliesStates.update { it + (key to commentRepliesOf(root).copy(
+                                        loading = false, loadedPage = false, nextMaxId = 0, nextMaxIdType = 0)) }
+                                    loadCommentReplies(root)
+                                }
+                            }
+                        }
                         messageChannel.trySend("回复成功")
                     }
-
-                    is ApiResult.Error -> messageChannel.trySend(
-                        res.message.ifBlank { "回复失败，请稍后重试" }
-                    )
-
-                    ApiResult.Loading -> Unit
+                    is ApiResult.Error -> {
+                        val error = result.message.ifBlank { "回复失败，请稍后重试" }
+                        if (_replyState.value.target == target) _replyState.update { it.copy(errorMessage = error) }
+                        else messageChannel.trySend(error)
+                    }
+                    ApiResult.Loading -> _replyState.update { it.copy(errorMessage = "回复未完成，请重试") }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                if (token == replyToken) _replyState.update { it.copy(errorMessage = failure.message ?: "回复失败，请稍后重试") }
             } finally {
-                _replyState.update { it.copy(isSending = false) }
+                if (token == replyToken) _replyState.update { it.copy(isSending = false, isUploading = false) }
             }
         }
+    }
+
+    private fun findComment(id: Long): WeiboCommentDto? =
+        _uiState.value.comments.firstOrNull { it.id == id }
+
+    private fun mergePublishedComments(
+        incoming: List<WeiboCommentDto>,
+        knownAtRequestStart: Set<Long> = emptySet()
+    ): List<WeiboCommentDto> {
+        // 写入之后才发起的读取可用服务端快照替换；写入前的旧读取须保留新回复。
+        knownAtRequestStart.forEach(publishedComments::remove)
+        val local = publishedComments.values.toList().asReversed()
+        return (local.filter { pending -> incoming.none { it.id == pending.id } } + incoming).distinctBy { it.listKey }
     }
 
     /**
@@ -349,6 +559,7 @@ internal class PostDetailViewModel internal constructor(
     }
 
     fun loadComments(targetPostId: String? = null, hotSort: Boolean = _uiState.value.sortByHot) {
+        val knownWrites = publishedComments.keys.toSet()
         val idToQuery = targetPostId ?: targetId()
         commentsRequestedForId = idToQuery
         commentsToken += 1
@@ -361,7 +572,7 @@ internal class PostDetailViewModel internal constructor(
                     is ApiResult.Success -> {
                         if (token != commentsToken) return@launch
                         _uiState.update { current ->
-                            val incoming = res.data.data
+                            val incoming = mergePublishedComments(res.data.data, knownWrites)
                             // 只有内容真的换了才触发淡入，否则重复拉同一份数据会闪一下
                             val changed = incoming.map { it.listKey } != current.comments.map { it.listKey }
                             val version = current.contentVersion
@@ -397,7 +608,9 @@ internal class PostDetailViewModel internal constructor(
 
     /** 读取某条评论的楼中楼状态；界面通常从 [repliesStates] 自行取用。 */
     fun commentRepliesOf(comment: WeiboCommentDto): CommentRepliesState =
-        _repliesStates.value[repliesKeyOf(comment)] ?: initialCommentReplies(comment)
+        _repliesStates.value[repliesKeyOf(comment)] ?: initialCommentReplies(comment).let { state ->
+            state.copy(replies = mergeCommentReplies(publishedReplies[comment.id]?.values?.toList().orEmpty(), state.replies, comment.id))
+        }
 
     /** 楼中楼状态在 Map 里的 key；界面按 key 取用，避免每帧重算。 */
     fun repliesKeyOf(comment: WeiboCommentDto): String =
@@ -424,14 +637,14 @@ internal class PostDetailViewModel internal constructor(
                 )) {
                     is ApiResult.Success -> {
                         if (repliesTokens[key] != token) return@launch
-                        _repliesStates.update { it + (key to current.withPage(res.data, commentId)) }
+                        _repliesStates.update { it + (key to commentRepliesOf(comment).withPage(res.data, commentId)) }
                     }
 
                     is ApiResult.Error -> {
                         if (repliesTokens[key] != token) return@launch
                         _repliesStates.update {
                             it + (
-                                key to current.copy(
+                                key to commentRepliesOf(comment).copy(
                                     loading = false,
                                     error = res.message.ifBlank { "加载回复失败，请重试" }
                                 )
@@ -441,7 +654,7 @@ internal class PostDetailViewModel internal constructor(
 
                     ApiResult.Loading -> {
                         if (repliesTokens[key] == token) {
-                            _repliesStates.update { it + (key to current.copy(loading = false)) }
+                            _repliesStates.update { it + (key to commentRepliesOf(comment).copy(loading = false)) }
                         }
                     }
                 }
@@ -455,7 +668,7 @@ internal class PostDetailViewModel internal constructor(
     private fun clearReplies() {
         repliesJobs.values.forEach(Job::cancel)
         repliesJobs.clear()
-        repliesTokens.clear()
+        repliesTokens.keys.toList().forEach { key -> repliesTokens[key] = (repliesTokens[key] ?: 0) + 1 }
         _repliesStates.value = emptyMap()
     }
 
@@ -567,6 +780,7 @@ internal class PostDetailViewModel internal constructor(
 
     /** 刷新评论区并等待结果，确保刷新指示器覆盖整轮请求。 */
     private suspend fun refreshComments(targetId: String) {
+        val knownWrites = publishedComments.keys.toSet()
         commentsRequestedForId = targetId
         commentsToken += 1
         val token = commentsToken
@@ -580,7 +794,7 @@ internal class PostDetailViewModel internal constructor(
                 val hotSort = _uiState.value.sortByHot
                 _uiState.update { current ->
                     current.copy(
-                        comments = res.data.data,
+                        comments = mergePublishedComments(res.data.data, knownWrites),
                         commentsApprovalOnly = if (hotSort) {
                             res.data.approvalCommentsOnly
                         } else {

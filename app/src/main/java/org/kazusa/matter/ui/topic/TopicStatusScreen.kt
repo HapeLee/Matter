@@ -30,6 +30,7 @@ fun TopicStatusScreen(
     onPostClick: (WeiboStatusDto) -> Unit,
     onImageClick: (urls: List<String>, index: Int) -> Unit = { _, _ -> },
     onVideoClick: (url: String, title: String, streams: List<VideoStreamInfo>, coverUrl: String, mid: String) -> Unit = { _, _, _, _, _ -> },
+    onMentionClick: (String) -> Unit = {},
     onTopicClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -47,6 +48,7 @@ fun TopicStatusScreen(
         onPostClick = onPostClick,
         onImageClick = onImageClick,
         onVideoClick = onVideoClick,
+        onMentionClick = onMentionClick,
         onTopicClick = onTopicClick,
         onChipClick = onTopicClick,
         modifier = modifier

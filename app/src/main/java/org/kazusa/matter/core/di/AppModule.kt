@@ -29,6 +29,16 @@ import org.kazusa.matter.data.repository.UserRepository
 import org.kazusa.matter.data.repository.WeiboHotSearchRepository
 import org.kazusa.matter.data.repository.WeiboMessageRepository
 import org.kazusa.matter.data.repository.WeiboUserRepository
+import org.kazusa.matter.data.model.ReplyImageReader
+import org.kazusa.matter.core.media.AndroidReplyImageReader
+import org.kazusa.matter.data.repository.EmojiRepository
+import org.kazusa.matter.data.model.EmojiPackageStore
+import org.kazusa.matter.core.network.OnlineEmojiSource
+import org.kazusa.matter.core.network.WeiboEmojiApi
+import org.kazusa.matter.core.media.AndroidEmojiPackageStore
+import org.kazusa.matter.ui.detail.OnlineEmojiViewModel
+import java.io.File
+import org.kazusa.matter.data.repository.ReplyRepository
 import org.kazusa.matter.data.repository.LikeRepository
 import org.kazusa.matter.ui.detail.PostDetailViewModel
 import org.kazusa.matter.ui.group.GroupViewModel
@@ -54,6 +64,9 @@ val dataModule = module {
     single<Json> { KtorClientFactory.jsonConfig }
     single<HttpClient> { KtorClientFactory.createClient() } onClose { it?.close() }
     single { WeiboApiService(get(), get()) }
+    single<OnlineEmojiSource> { WeiboEmojiApi(get()) }
+    single<EmojiPackageStore> { AndroidEmojiPackageStore(File(androidContext().filesDir, "emoji-packs")) }
+    single { EmojiRepository(get(), get()) }
 
     single { MatterDatabase.getInstance(androidContext()) }
     single { get<MatterDatabase>().browsingHistoryDao() }
@@ -69,6 +82,8 @@ val dataModule = module {
     single { SearchHistoryRepository(get(), get()) }
     // 点赞的唯一事实来源：跨页面共享状态 + 取消/失败回滚都由它负责，换账号时由导航根清空
     single { LikeRepository(get<WeiboApiService>()) }
+    single<ReplyImageReader> { AndroidReplyImageReader(androidContext()) }
+    single { ReplyRepository(get<WeiboApiService>(), get<AuthPreferences>(), get<ReplyImageReader>()) }
     // 关注关系的唯一事实来源：用户列表与博主主页读同一份状态，换账号时同样由导航根清空
     single { FollowRepository(get<UserRepository>()) }
 
@@ -84,6 +99,7 @@ val dataModule = module {
 }
 
 val viewModelModule = module {
+    viewModel { OnlineEmojiViewModel(get()) }
     viewModel { LoginViewModel(get()) }
     viewModel { TimelineViewModel(get(), get()) }
     viewModel { GroupViewModel(get()) }
@@ -126,7 +142,8 @@ val viewModelModule = module {
             postId = parameters.get<String>(),
             apiService = get(),
             historyRepository = get(),
-            likeRepository = get()
+            likeRepository = get(),
+            replyRepository = get()
         )
     }
     // 「我的微博」：列表与分页由 ViewModel 持有，失败可重试
