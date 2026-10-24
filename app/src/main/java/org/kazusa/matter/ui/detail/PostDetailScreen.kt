@@ -32,6 +32,8 @@ import org.kazusa.matter.ui.navigation.weiboPostSubtitleSharedElement
 import org.kazusa.matter.ui.navigation.formatAvatarSharedKey
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -60,10 +62,12 @@ import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material.icons.outlined.Verified
 import androidx.compose.material.icons.outlined.Whatshot
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -72,6 +76,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -79,6 +84,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -129,6 +135,7 @@ import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
 import org.kazusa.matter.ui.components.ImmersiveTopBar
 import org.kazusa.matter.ui.components.LocalSnackbarHostState
+import org.kazusa.matter.ui.components.TopBarActionButton
 import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.components.TopBarTokens
 import org.kazusa.matter.ui.components.WeiboActionButton
@@ -188,6 +195,8 @@ fun PostDetailScreen(
     val attitudes = uiState.attitudes
     val isAttitudesLoading = uiState.isAttitudesLoading
     val sortByHot = uiState.sortByHot // true: 按热度, false: 按时间
+    // 删除入口只给当前登录账号自己的微博；游客 / 未登录 / 别人的微博都不出现
+    val canDeletePost = post != null && viewModel.isMyPost(post)
 
     // 点赞状态只有一份：共享仓库（信息流里点过赞时这里直接读到同一结果）
     val likeRepository = LocalLikeRepository.current
@@ -221,6 +230,15 @@ fun PostDetailScreen(
             )
         }
     }
+
+    // 删除微博成功后本页已无内容可展示，直接返回上一页
+    LaunchedEffect(viewModel) {
+        viewModel.postDeleted.collect {
+            onBackClick()
+        }
+    }
+
+    var showDeletePostDialog by remember { mutableStateOf(false) }
 
     // 子页签内容整块替换时淡入一次：切换页签、评论首屏到达、切换排序。
     // 翻页 / 展开楼中楼 / 下拉刷新不在这里面，滚动过程中新进组合的行也不会重新淡入。
@@ -276,6 +294,17 @@ fun PostDetailScreen(
                         onBackClick = onBackClick
                     )
                 },
+                actions = { scroll ->
+                    if (canDeletePost) {
+                        TopBarActionButton(
+                            imageVector = Icons.Outlined.Delete,
+                            contentDescription = "删除微博",
+                            scroll = scroll,
+                            backdrop = backdrop,
+                            onClick = { showDeletePostDialog = true }
+                        )
+                    }
+                }
             )
         },
         modifier = Modifier.fillMaxSize()
@@ -457,6 +486,9 @@ fun PostDetailScreen(
                                                 },
                                                 onLoadReplies = viewModel::loadCommentReplies,
                                                 onReply = viewModel::replyToComment,
+                                                // 长按删除只给自己的评论；判定与删除都在 ViewModel
+                                                isMyComment = viewModel::isMyComment,
+                                                onDeleteComment = viewModel::deleteComment,
                                                 postAuthorId = postAuthorId,
                                                 postAuthorName = postAuthorName,
                                                 onUserClick = onUserClick,
@@ -550,6 +582,28 @@ fun PostDetailScreen(
                 onDismiss = viewModel::dismissReplyComposer,
                 onDraftChange = viewModel::updateReplyDraft,
                 onSend = viewModel::submitReply
+            )
+        }
+
+        // 删除微博是不可逆操作：服务端确认删除后由 postDeleted 事件返回上一页
+        if (showDeletePostDialog && post != null) {
+            AlertDialog(
+                onDismissRequest = { showDeletePostDialog = false },
+                title = { Text("删除这条微博？") },
+                text = { Text("删除后将无法恢复。") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDeletePostDialog = false
+                        viewModel.deletePost()
+                    }) {
+                        Text("删除", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeletePostDialog = false }) {
+                        Text("取消")
+                    }
+                }
             )
         }
         }
@@ -1228,6 +1282,7 @@ private fun AttitudeItemRow(
 
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 internal fun CommentRow(
     comment: WeiboCommentDto,
     /** 点赞状态由 [LikeRepository] 统一提供，行内不再自行维护副本 */
@@ -1242,6 +1297,8 @@ internal fun CommentRow(
     likeEnabled: Boolean = true,
     /** 整行点击打开回复；头像、昵称、图片和点赞保留各自点击行为。 */
     onClick: () -> Unit = {},
+    /** 非空时整行支持长按（自己的评论删除入口）；正文区的长按仍由文本选择消费。 */
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val replyTarget = comment.replyComment?.user
@@ -1276,7 +1333,13 @@ internal fun CommentRow(
         modifier = modifier
             .fillMaxWidth()
             // 空 onClick 也保留 clickable：整行按下时有水波纹反馈（内部头像/昵称/点赞等会各自消费点击）
-            .clickable(onClick = onClick)
+            .then(
+                if (onLongClick != null) {
+                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                } else {
+                    Modifier.clickable(onClick = onClick)
+                }
+            )
             .padding(horizontal = if (isReply) 10.dp else 16.dp, vertical = if (isReply) 8.dp else 12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
