@@ -188,11 +188,4 @@ fun computeTargetEndBounds(screenBounds: Rect, imageRatio: Float?): Rect {
     }
 }
 
-/**
- * Android 14+ 预测性返回手势插值映射（参考 legado-with-MD3）：
- * 预览阶段最多缩回 45%，松手确认后顺滑收拢回信息流，划回屏幕边缘取消时自然弹回全屏。
- */
-fun computePredictiveMorphProgress(startProgress: Float, backProgress: Float): Float =
-    startProgress.coerceIn(0f, 1f) * (1f - 0.45f * backProgress.coerceIn(0f, 1f))
-
 

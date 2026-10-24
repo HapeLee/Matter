@@ -56,3 +56,6 @@ proguard/
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Local debug artifacts (screenshots / layout dumps)
+tmp_*
