@@ -10,6 +10,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.parameters
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
+import org.kazusa.matter.core.network.KtorClientFactory.jsonBody
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.model.UserPostsPage
 import org.kazusa.matter.core.session.SessionExpiredBus
@@ -90,7 +91,7 @@ internal class FavoritesApi(
             throw FavoritesException(response.status.value, "微博请求失败：HTTP ${response.status.value}")
         }
         val body = try {
-            KtorClientFactory.jsonConfig.parseToJsonElement(response.bodyAsText()).jsonObject
+            response.jsonBody().jsonObject
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {

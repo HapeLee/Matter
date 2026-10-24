@@ -16,6 +16,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import org.kazusa.matter.core.network.KtorClientFactory.jsonBody
 
 /** 微博网页端的评论图片协议：原始文件 bytes + CRC32；不以表单或 Base64 上传。 */
 internal class ReplyImageUploadApi(private val client: HttpClient, private val writes: WeiboWriteSession) {
@@ -41,7 +42,7 @@ internal class ReplyImageUploadApi(private val client: HttpClient, private val w
                 if (response.status != HttpStatusCode.OK) {
                     return@execute ApiResult.Error(code = response.status.value, message = "图片上传失败，请重试")
                 }
-                val root = KtorClientFactory.jsonConfig.parseToJsonElement(response.bodyAsText()) as? JsonObject
+                val root = response.jsonBody() as? JsonObject
                     ?: return@execute ApiResult.Error(message = "图片上传返回无效数据")
                 val message = (root["msg"] as? JsonPrimitive)?.contentOrNull
                     ?: (root["retmsg"] as? JsonPrimitive)?.contentOrNull

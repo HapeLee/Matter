@@ -7,6 +7,7 @@ import io.ktor.client.request.parameter
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.CancellationException
+import org.kazusa.matter.core.network.KtorClientFactory.jsonBody
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -112,7 +113,7 @@ internal class MessageApi(
             )
         }
         val element = try {
-            KtorClientFactory.jsonConfig.parseToJsonElement(response.bodyAsText())
+            response.jsonBody()
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
