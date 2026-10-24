@@ -10,6 +10,7 @@ import io.ktor.utils.io.readAvailable
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
+import org.kazusa.matter.core.network.KtorClientFactory.jsonBody
 import org.kazusa.matter.data.model.*
 
 interface OnlineEmojiSource {
@@ -23,7 +24,7 @@ class WeiboEmojiApi(private val client: HttpClient) : OnlineEmojiSource {
     override suspend fun catalog(): ApiResult<List<InstalledEmojiPackage>> = request {
         val response = client.get("https://api.weibo.com/2/emotions.json") { parameter("source", "7501641714") }
         check(response.status == HttpStatusCode.OK) { "无法获取微博表情，请重试" }
-        val list = KtorClientFactory.jsonConfig.parseToJsonElement(response.bodyAsText()) as? JsonArray
+        val list = response.jsonBody() as? JsonArray
             ?: error("微博表情目录格式异常")
         val groups = linkedMapOf<String, MutableList<OnlineEmoji>>()
         list.forEach { element ->
@@ -47,7 +48,7 @@ class WeiboEmojiApi(private val client: HttpClient) : OnlineEmojiSource {
         suspend fun fetch(type: Int): List<OnlineEmojiPackage> {
             val response = client.get("https://api.weibo.cn/2/expression/get") { parameter("type", type) }
             check(response.status == HttpStatusCode.OK) { "无法获取在线表情包，请重试" }
-            val root = KtorClientFactory.jsonConfig.parseToJsonElement(response.bodyAsText()).jsonObject
+            val root = response.jsonBody().jsonObject
             val list = root["packages"] as? JsonArray ?: error("在线表情目录格式异常")
             return list.mapNotNull { element ->
                 val item = element as? JsonObject ?: return@mapNotNull null

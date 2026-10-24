@@ -1,9 +1,11 @@
 package org.kazusa.matter.data.repository
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.core.util.WeiboTextFormatter
@@ -75,40 +77,49 @@ class BrowsingHistoryRepository(
         dao.clearAll()
     }
 
-    /** 记录一次「微博正文」浏览 */
+    /**
+     * 记录一次「微博正文」浏览。
+     *
+     * 摘要与 payload 的正则清洗、整条 DTO 的 JSON 序列化都在 IO 线程做：
+     * 这个方法紧跟详情请求成功后被调用，若在主线程执行会砸进页面转场动画中段。
+     */
     suspend fun recordPost(post: WeiboStatusDto, category: Int = BrowsingCategory.POST) {
         val targetId = post.idStr ?: post.mid ?: post.id?.toString()
         if (targetId.isNullOrBlank()) return
 
-        val username = post.user?.screenName?.takeIf { it.isNotBlank() }
+        withContext(Dispatchers.IO) {
+            val username = post.user?.screenName?.takeIf { it.isNotBlank() }
 
-        upsert(
-            statusId = targetId,
-            username = username,
-            // 摘要只存正文纯文本：昵称单独在 username 列，检索时两列都会命中，
-            // 避免列表里「昵称：正文」重复显示昵称。
-            totalText = WeiboTextFormatter.formatHtmlText(post.text).ifBlank { null },
-            payload = encode(post),
-            category = category
-        )
+            upsert(
+                statusId = targetId,
+                username = username,
+                // 摘要只存正文纯文本：昵称单独在 username 列，检索时两列都会命中，
+                // 避免列表里「昵称：正文」重复显示昵称。
+                totalText = WeiboTextFormatter.formatHtmlText(post.text).ifBlank { null },
+                payload = encode(post),
+                category = category
+            )
+        }
     }
 
-    /** 记录一次「博主主页」浏览 */
+    /** 记录一次「博主主页」浏览；序列化与 [recordPost] 一样放 IO 线程。 */
     suspend fun recordUser(user: WeiboUserDto, category: Int = BrowsingCategory.USER) {
         val targetId = user.idStr ?: user.id?.toString()
         if (targetId.isNullOrBlank()) return
         // getUserProfile 完全取不到资料时会返回「博主 xxx」占位对象，这种情况不写历史
         if (user.screenName.isBlank() || user.screenName.startsWith("博主 ")) return
 
-        val username = user.screenName.takeIf { it.isNotBlank() }
+        withContext(Dispatchers.IO) {
+            val username = user.screenName.takeIf { it.isNotBlank() }
 
-        upsert(
-            statusId = targetId,
-            username = username,
-            totalText = user.description?.trim()?.ifBlank { null },
-            payload = encode(user),
-            category = category
-        )
+            upsert(
+                statusId = targetId,
+                username = username,
+                totalText = user.description?.trim()?.ifBlank { null },
+                payload = encode(user),
+                category = category
+            )
+        }
     }
 
     private suspend fun upsert(

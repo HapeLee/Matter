@@ -36,7 +36,6 @@ import org.kazusa.matter.data.model.WeiboUserListPage
 import org.kazusa.matter.data.model.WeiboConfigResponse
 import org.kazusa.matter.data.model.WeiboGroupDto
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -52,6 +51,11 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.parameters
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.kazusa.matter.core.network.KtorClientFactory.bodyText
+import org.kazusa.matter.core.network.KtorClientFactory.decodeBody
+import org.kazusa.matter.core.network.KtorClientFactory.jsonBody
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -199,7 +203,7 @@ class WeiboApiService(
             ) {
                 header("Referer", "https://passport.weibo.com/visitor/visitor?entry=miniblog")
             }
-            val text = response.bodyAsText()
+            val text = response.bodyText()
             val tidRegex = Regex("\"tid\"\\s*:\\s*\"([^\"]+)\"")
             val tid = tidRegex.find(text)?.groupValues?.get(1).orEmpty()
             if (tid.isBlank()) return ""
@@ -213,7 +217,7 @@ class WeiboApiService(
                 parameter("cb", "cross_domain_action")
                 parameter("from", "weibo")
             }
-            val incarnateText = incarnateResp.bodyAsText()
+            val incarnateText = incarnateResp.bodyText()
             val subRegex = Regex("\"sub\"\\s*:\\s*\"([^\"]+)\"")
             val subpRegex = Regex("\"subp\"\\s*:\\s*\"([^\"]+)\"")
             val sub = subRegex.find(incarnateText)?.groupValues?.get(1).orEmpty()
@@ -242,11 +246,13 @@ class WeiboApiService(
                     cookieHeader(cookie)
                 }
             }
-            val rawText = response.bodyAsText()
+            val rawText = response.bodyText()
             // 响应体含 st / uid / user_token，任何前缀都不允许进日志
             android.util.Log.d("WeiboAuth", "verifyConfig status=${response.status}")
             if (response.status == HttpStatusCode.OK) {
-                val body = KtorClientFactory.jsonConfig.decodeFromString<WeiboConfigResponse>(rawText)
+                val body = withContext(Dispatchers.IO) {
+                    KtorClientFactory.jsonConfig.decodeFromString<WeiboConfigResponse>(rawText)
+                }
                 if (body.data?.login == true) {
                     ApiResult.Success(body)
                 } else {
@@ -291,10 +297,12 @@ class WeiboApiService(
                     parameter("max_id", maxId)
                 }
             }
-            val rawText = response.bodyAsText()
+            val rawText = response.bodyText()
             android.util.Log.d("TimelineApi", "friends response status=${response.status}, len=${rawText.length}")
             if (response.status == HttpStatusCode.OK) {
-                val body = KtorClientFactory.jsonConfig.decodeFromString<TimelineResponse>(rawText)
+                val body = withContext(Dispatchers.IO) {
+                    KtorClientFactory.jsonConfig.decodeFromString<TimelineResponse>(rawText)
+                }
                 if (body.ok == 1) {
                     ApiResult.Success(body)
                 } else {
@@ -344,10 +352,12 @@ class WeiboApiService(
                     parameter("max_id", maxId)
                 }
             }
-            val rawText = response.bodyAsText()
+            val rawText = response.bodyText()
             android.util.Log.d("TimelineApi", "group response status=${response.status}, len=${rawText.length}")
             if (response.status == HttpStatusCode.OK) {
-                val body = KtorClientFactory.jsonConfig.decodeFromString<TimelineResponse>(rawText)
+                val body = withContext(Dispatchers.IO) {
+                    KtorClientFactory.jsonConfig.decodeFromString<TimelineResponse>(rawText)
+                }
                 if (body.ok == 1) {
                     ApiResult.Success(body)
                 } else {
@@ -391,8 +401,7 @@ class WeiboApiService(
                 header("Referer", "https://weibo.com")
             }
             if (response.status == HttpStatusCode.OK) {
-                val rawText = response.bodyAsText()
-                val jsonRoot = KtorClientFactory.jsonConfig.parseToJsonElement(rawText).jsonObject
+                val jsonRoot = response.jsonBody().jsonObject
                 val okVal = jsonRoot["ok"]?.jsonPrimitive?.content?.toIntOrNull()
                 if (okVal == 1) {
                     val groupsArr = jsonRoot["groups"]?.jsonArray
@@ -460,7 +469,7 @@ class WeiboApiService(
                 }
             }
             if (response.status == HttpStatusCode.OK) {
-                val body = response.body<GroupListResponse>()
+                val body = response.decodeBody<GroupListResponse>()
                 val groups = body.lists.ifEmpty { body.data.orEmpty() }
                 if (groups.isNotEmpty()) {
                     val filtered = groups.filter { it.name != "全部关注" && it.title != "全部关注" && it.gid != "all" }
@@ -511,8 +520,7 @@ class WeiboApiService(
                 cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
-                val rawText = response.bodyAsText()
-                val jsonRoot = KtorClientFactory.jsonConfig.parseToJsonElement(rawText).jsonObject
+                val jsonRoot = response.jsonBody().jsonObject
                 val idStr = jsonRoot["idstr"]?.jsonPrimitive?.contentOrNull
                     ?: jsonRoot["id"]?.jsonPrimitive?.contentOrNull
                 val groupName = jsonRoot["name"]?.jsonPrimitive?.contentOrNull ?: name
@@ -545,8 +553,7 @@ class WeiboApiService(
                 header("Referer", "https://weibo.com/")
                 header("X-Requested-With", "XMLHttpRequest")
             }
-            val rawText = response.bodyAsText()
-            val jsonRoot = KtorClientFactory.jsonConfig.parseToJsonElement(rawText).jsonObject
+            val jsonRoot = response.jsonBody().jsonObject
             val ok = jsonRoot["ok"]?.jsonPrimitive?.intOrNull ?: 0
             val gid = jsonRoot["gid"]?.jsonPrimitive?.contentOrNull
                 ?: jsonRoot["id"]?.jsonPrimitive?.contentOrNull
@@ -617,8 +624,7 @@ class WeiboApiService(
                 header("Referer", "https://weibo.com/")
                 header("X-Requested-With", "XMLHttpRequest")
             }
-            val rawText = response.bodyAsText()
-            val jsonRoot = KtorClientFactory.jsonConfig.parseToJsonElement(rawText).jsonObject
+            val jsonRoot = response.jsonBody().jsonObject
             val ok = jsonRoot["ok"]?.jsonPrimitive?.intOrNull ?: 0
             if (ok == 1 || response.status == HttpStatusCode.OK) {
                 ApiResult.Success(Unit)
@@ -673,8 +679,7 @@ class WeiboApiService(
                 header("Referer", "https://weibo.com/")
                 header("X-Requested-With", "XMLHttpRequest")
             }
-            val rawText = response.bodyAsText()
-            val jsonRoot = KtorClientFactory.jsonConfig.parseToJsonElement(rawText).jsonObject
+            val jsonRoot = response.jsonBody().jsonObject
             val ok = jsonRoot["ok"]?.jsonPrimitive?.intOrNull ?: 0
             if (ok == 1 || response.status == HttpStatusCode.OK) {
                 ApiResult.Success(Unit)
@@ -767,9 +772,7 @@ class WeiboApiService(
                 cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
-                val rawText = response.bodyAsText()
-                val cardResp = KtorClientFactory.jsonConfig
-                    .decodeFromString<WeiboCardResponse>(rawText)
+                val cardResp = response.decodeBody<WeiboCardResponse>()
                 val board = cardResp.data?.toHotSearchBoard() ?: HotSearchBoard()
                 ApiResult.Success(board)
             } else {
@@ -806,9 +809,7 @@ class WeiboApiService(
                     message = "获取热门分类失败: HTTP ${response.status}"
                 )
             }
-            val root = KtorClientFactory.jsonConfig
-                .parseToJsonElement(response.bodyAsText())
-                .jsonObject
+            val root = response.jsonBody().jsonObject
             val ok = (root["ok"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
             if (ok != 1) {
                 reportSessionExpiredIfLoggedIn(effectiveCookie, ok)
@@ -896,9 +897,7 @@ class WeiboApiService(
                     message = "获取热门流失败: HTTP ${response.status}"
                 )
             }
-            val root = KtorClientFactory.jsonConfig
-                .parseToJsonElement(response.bodyAsText())
-                .jsonObject
+            val root = response.jsonBody().jsonObject
             val ok = (root["ok"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
             if (ok != 1) {
                 reportSessionExpiredIfLoggedIn(effectiveCookie, ok)
@@ -908,11 +907,13 @@ class WeiboApiService(
                 return ApiResult.Error(code = ok, message = msg)
             }
 
-            val posts = (root["statuses"] as? JsonArray).orEmpty().mapNotNull { element ->
-                runCatching {
-                    KtorClientFactory.jsonConfig.decodeFromJsonElement<WeiboStatusDto>(element)
-                }.getOrNull()
-            }.distinctBy { it.listKey }
+            val posts = withContext(Dispatchers.IO) {
+                (root["statuses"] as? JsonArray).orEmpty().mapNotNull { element ->
+                    runCatching {
+                        KtorClientFactory.jsonConfig.decodeFromJsonElement<WeiboStatusDto>(element)
+                    }.getOrNull()
+                }.distinctBy { it.listKey }
+            }
 
             val nextSinceId = readHotFeedSinceId(root["since_id"])
             val nextMaxId = (root["max_id"] as? JsonPrimitive)?.contentOrNull?.trim()
@@ -1007,9 +1008,7 @@ class WeiboApiService(
                 cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
-                val rawText = response.bodyAsText()
-                val cardResp = KtorClientFactory.jsonConfig
-                    .decodeFromString<org.kazusa.matter.data.model.WeiboCardResponse>(rawText)
+                val cardResp = response.decodeBody<org.kazusa.matter.data.model.WeiboCardResponse>()
                 val container = cardResp.data
                 val tabs = resolveSearchTabs(container)
                 // 首屏请求打的就是「默认栏」的 containerid（`100103type=1&q=…&t=1`）。
@@ -1226,8 +1225,7 @@ class WeiboApiService(
                 cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
-                val rawText = response.bodyAsText()
-                val resp = KtorClientFactory.jsonConfig.decodeFromString<org.kazusa.matter.data.model.WeiboDetailResponse>(rawText)
+                val resp = response.decodeBody<org.kazusa.matter.data.model.WeiboDetailResponse>()
                 resp.data?.let {
                     ApiResult.Success(it)
                 } ?: ApiResult.Error(message = "未获取到微博详情")
@@ -1268,8 +1266,7 @@ class WeiboApiService(
                     cookieHeader(effectiveCookie)
                 }
                 if (response.status == HttpStatusCode.OK) {
-                    val rawText = response.bodyAsText()
-                    val resp = KtorClientFactory.jsonConfig.decodeFromString<org.kazusa.matter.data.model.CommentsResponse>(rawText)
+                    val resp = response.decodeBody<org.kazusa.matter.data.model.CommentsResponse>()
                     when {
                         // 没有评论时服务端返回 ok=0 + "这里还没有内容"，按空列表处理
                         isWeiboEmptyListResponse(resp.ok, resp.msg, resp.data?.data?.size) ->
@@ -1291,8 +1288,7 @@ class WeiboApiService(
                     cookieHeader(effectiveCookie)
                 }
                 if (response.status == HttpStatusCode.OK) {
-                    val rawText = response.bodyAsText()
-                    val resp = KtorClientFactory.jsonConfig.decodeFromString<org.kazusa.matter.data.model.CommentsResponse>(rawText)
+                    val resp = response.decodeBody<org.kazusa.matter.data.model.CommentsResponse>()
                     when {
                         // 没有评论时服务端返回 ok=0 + "这里还没有内容"，按空列表处理
                         isWeiboEmptyListResponse(resp.ok, resp.msg, resp.data?.data?.size) ->
@@ -1332,7 +1328,7 @@ class WeiboApiService(
                 cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
-                decodeCommentReplies(response.bodyAsText())
+                withContext(Dispatchers.IO) { decodeCommentReplies(response.bodyAsText()) }
             } else {
                 ApiResult.Error(code = response.status.value, message = "HTTP ${response.status}")
             }
@@ -1364,8 +1360,7 @@ class WeiboApiService(
                 cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
-                val rawText = response.bodyAsText()
-                val resp = KtorClientFactory.jsonConfig.decodeFromString<org.kazusa.matter.data.model.RepostsResponse>(rawText)
+                val resp = response.decodeBody<org.kazusa.matter.data.model.RepostsResponse>()
                 when {
                     // 没有转发时服务端返回 ok=0 + "这里还没有内容"，按空列表处理
                     isWeiboEmptyListResponse(resp.ok, resp.msg, resp.data?.data?.size) ->
@@ -1404,8 +1399,7 @@ class WeiboApiService(
                 cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
-                val rawText = response.bodyAsText()
-                val resp = KtorClientFactory.jsonConfig.decodeFromString<org.kazusa.matter.data.model.AttitudesResponse>(rawText)
+                val resp = response.decodeBody<org.kazusa.matter.data.model.AttitudesResponse>()
                 when {
                     // 没有点赞时服务端返回 ok=0 + "这里还没有内容"，按空列表处理
                     isWeiboEmptyListResponse(resp.ok, resp.msg, resp.data?.data?.size) ->
@@ -1591,9 +1585,7 @@ class WeiboApiService(
         success: T
     ): ApiResult<T> {
         writeHttpError(response)?.let { return it }
-        val respJson = KtorClientFactory.jsonConfig
-            .parseToJsonElement(response.bodyAsText())
-            .jsonObject
+        val respJson = response.jsonBody().jsonObject
         if (writeOkFlag(respJson) == 1) return ApiResult.Success(success)
         return writeJsonError(respJson, failureMessage)
     }
@@ -1604,9 +1596,7 @@ class WeiboApiService(
         failureMessage: String
     ): ApiResult<org.kazusa.matter.data.model.WeiboCommentDto?> {
         writeHttpError(response)?.let { return it }
-        val respJson = KtorClientFactory.jsonConfig
-            .parseToJsonElement(response.bodyAsText())
-            .jsonObject
+        val respJson = response.jsonBody().jsonObject
         if (writeOkFlag(respJson) != 1) return writeJsonError(respJson, failureMessage)
         val created = (respJson["data"] as? JsonObject)?.let { data ->
             // 新建评论的字段与服务端列表不完全一致，解析失败只当作「没带回评论」，
@@ -1694,9 +1684,7 @@ class WeiboApiService(
                 "获取${action}凭据失败：HTTP ${bootstrap.status.value}"
             )
         }
-        val configElement = KtorClientFactory.jsonConfig
-            .parseToJsonElement(bootstrap.bodyAsText())
-            .jsonObject
+        val configElement = bootstrap.jsonBody().jsonObject
         val configData = configElement["data"]?.jsonObject
         if (configData?.get("login")?.jsonPrimitive?.booleanOrNull != true) {
             // /api/config 自身被限流时同样返回 ok=0 + 频控文案，
@@ -1931,8 +1919,7 @@ class WeiboApiService(
                         }
                     }
                     if (response.status == HttpStatusCode.OK) {
-                        val rawText = response.bodyAsText()
-                        val cardResp = KtorClientFactory.jsonConfig.decodeFromString<org.kazusa.matter.data.model.WeiboCardResponse>(rawText)
+                        val cardResp = response.decodeBody<org.kazusa.matter.data.model.WeiboCardResponse>()
                         if (cardResp.ok == 1) {
                             var user: org.kazusa.matter.data.model.WeiboUserDto? = cardResp.data?.userInfo
                             if (user == null) {
@@ -1970,8 +1957,7 @@ class WeiboApiService(
                         cookieHeader(effectiveCookie)
                     }
                     if (pcResponse.status == HttpStatusCode.OK) {
-                        val pcText = pcResponse.bodyAsText()
-                        val rootJson = KtorClientFactory.jsonConfig.parseToJsonElement(pcText).jsonObject
+                        val rootJson = pcResponse.jsonBody().jsonObject
                         val ok = rootJson["ok"]?.jsonPrimitive?.content?.toIntOrNull()
                         if (ok == 1) {
                             val userObj = rootJson["data"]?.jsonObject?.get("user")
@@ -2046,9 +2032,7 @@ class WeiboApiService(
                     }
                 }
                 if (response.status != HttpStatusCode.OK) return null
-                val root = KtorClientFactory.jsonConfig
-                    .parseToJsonElement(response.bodyAsText())
-                    .jsonObject
+                val root = response.jsonBody().jsonObject
                 val ok = (root["ok"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
                 if (ok != 1) return null
                 return root["data"] as? JsonObject
@@ -2113,9 +2097,7 @@ class WeiboApiService(
                 return ApiResult.Error(code = response.status.value, message = "获取相册失败 (HTTP ${response.status.value})")
             }
 
-            val root = KtorClientFactory.jsonConfig
-                .parseToJsonElement(response.bodyAsText())
-                .jsonObject
+            val root = response.jsonBody().jsonObject
             val ok = (root["ok"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
             if (ok != 1) {
                 val msg = (root["msg"] as? JsonPrimitive)?.contentOrNull
@@ -2191,9 +2173,7 @@ class WeiboApiService(
                 return ApiResult.Error(code = response.status.value, message = "获取相册图片失败 (HTTP ${response.status.value})")
             }
 
-            val root = KtorClientFactory.jsonConfig
-                .parseToJsonElement(response.bodyAsText())
-                .jsonObject
+            val root = response.jsonBody().jsonObject
             val ok = (root["ok"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
             if (ok != 1) {
                 val msg = (root["msg"] as? JsonPrimitive)?.contentOrNull
@@ -2284,9 +2264,7 @@ class WeiboApiService(
                 return ApiResult.Error(code = response.status.value, message = "获取视频失败 (HTTP ${response.status.value})")
             }
 
-            val root = KtorClientFactory.jsonConfig
-                .parseToJsonElement(response.bodyAsText())
-                .jsonObject
+            val root = response.jsonBody().jsonObject
             val ok = (root["ok"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
             if (ok != 1) {
                 val msg = (root["msg"] as? JsonPrimitive)?.contentOrNull
@@ -2297,12 +2275,14 @@ class WeiboApiService(
 
             val data = root["data"] as? JsonObject
                 ?: return ApiResult.Error(message = "视频数据为空")
-            val videos = (data["list"] as? JsonArray).orEmpty().mapNotNull { element ->
-                runCatching {
-                    KtorClientFactory.jsonConfig
-                        .decodeFromJsonElement<WeiboStatusDto>(element)
-                }.getOrNull()
-            }.distinctBy { it.listKey }
+            val videos = withContext(Dispatchers.IO) {
+                (data["list"] as? JsonArray).orEmpty().mapNotNull { element ->
+                    runCatching {
+                        KtorClientFactory.jsonConfig
+                            .decodeFromJsonElement<WeiboStatusDto>(element)
+                    }.getOrNull()
+                }.distinctBy { it.listKey }
+            }
 
             val nextCursor = (data["next_cursor"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
             val hasMore = videos.isNotEmpty() &&
@@ -2365,8 +2345,7 @@ class WeiboApiService(
                 return ApiResult.Error(code = response.status.value, message = "获取文章失败 (HTTP ${response.status.value})")
             }
 
-            val cardResp = KtorClientFactory.jsonConfig
-                .decodeFromString<WeiboCardResponse>(response.bodyAsText())
+            val cardResp = response.decodeBody<WeiboCardResponse>()
             if (cardResp.ok != 1) {
                 return ApiResult.Error(code = cardResp.ok, message = "获取文章失败 (ok: ${cardResp.ok})")
             }
@@ -2448,8 +2427,7 @@ class WeiboApiService(
                 }
             }
             if (response.status == HttpStatusCode.OK) {
-                val rawText = response.bodyAsText()
-                val cardResp = KtorClientFactory.jsonConfig.decodeFromString<org.kazusa.matter.data.model.WeiboCardResponse>(rawText)
+                val cardResp = response.decodeBody<org.kazusa.matter.data.model.WeiboCardResponse>()
                 if (cardResp.ok != 1) {
                     reportSessionExpiredIfLoggedIn(effectiveCookie, cardResp.ok)
                     val errorMsg = if (cardResp.ok == -100) {
@@ -2578,8 +2556,7 @@ class WeiboApiService(
                 )
             }
 
-            val cardResp = KtorClientFactory.jsonConfig
-                .decodeFromString<WeiboCardResponse>(response.bodyAsText())
+            val cardResp = response.decodeBody<WeiboCardResponse>()
             if (cardResp.ok != 1) {
                 reportSessionExpiredIfLoggedIn(effectiveCookie, cardResp.ok)
                 val message = if (cardResp.ok == -100) {
