@@ -2,6 +2,7 @@ package org.kazusa.matter.ui.group
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,6 +17,13 @@ class GroupViewModel(
 
     private val _uiState = MutableStateFlow(GroupUiState(isLoading = true))
     val uiState: StateFlow<GroupUiState> = _uiState.asStateFlow()
+
+    /**
+     * loadGroups 的在途任务与请求代次：新请求取消旧请求，
+     * 晚到的旧结果还要过代次校验，不允许覆盖新结果。
+     */
+    private var loadJob: Job? = null
+    private var loadGeneration = 0
 
     init {
         // 持续观察分组数据流（响应排序与隐藏/显示变更）
@@ -33,10 +41,14 @@ class GroupViewModel(
     }
 
     fun loadGroups(forceRefresh: Boolean = false) {
-        viewModelScope.launch {
+        loadJob?.cancel()
+        val generation = ++loadGeneration
+        loadJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             when (val result = groupRepository.getGroups(forceRefresh)) {
                 is ApiResult.Success -> {
+                    // 取消之外再校验代次：慢响应晚到时不覆盖新请求的结果
+                    if (generation != loadGeneration) return@launch
                     _uiState.update {
                         it.copy(
                             groups = result.data,
@@ -46,6 +58,7 @@ class GroupViewModel(
                     }
                 }
                 is ApiResult.Error -> {
+                    if (generation != loadGeneration) return@launch
                     _uiState.update {
                         it.copy(
                             isLoading = false,
