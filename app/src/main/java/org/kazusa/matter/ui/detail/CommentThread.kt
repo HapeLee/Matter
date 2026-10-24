@@ -15,10 +15,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,6 +76,10 @@ internal fun CommentThread(
     /** 请求下一页回复；请求与并发控制在详情 ViewModel 内完成。 */
     onLoadReplies: (WeiboCommentDto) -> Unit,
     onReply: (WeiboCommentDto, Long) -> Unit,
+    /** 当前会话是否拥有这条评论；只有自己的评论出现长按删除入口。 */
+    isMyComment: (WeiboCommentDto) -> Boolean = { false },
+    /** 长按删除确认后回调；rootId 非空表示删的是楼中楼回复。 */
+    onDeleteComment: (WeiboCommentDto, Long?) -> Unit = { _, _ -> },
     rootCommentId: Long? = comment.id,
     postAuthorId: Long?,
     postAuthorName: String?,
@@ -140,6 +146,10 @@ internal fun CommentThread(
 
     val isPostAuthor = (comment.user?.id != null && comment.user.id == postAuthorId) ||
         (!comment.user?.screenName.isNullOrBlank() && comment.user.screenName == postAuthorName)
+    // 长按删除只给自己的评论（需要拿到服务端 id 才能删）
+    val isMine = comment.id != null && isMyComment(comment)
+    var showDeleteConfirm by rememberSaveable(comment.id ?: comment.listKey) { mutableStateOf(false) }
+
     Column(modifier = modifier) {
         CommentRow(
             comment = comment,
@@ -152,8 +162,32 @@ internal fun CommentThread(
             onImageClick = onImageClick,
             onLikeClick = { toggleLike() },
             onClick = { rootCommentId?.let { onReply(comment, it) } },
+            onLongClick = if (isMine) {
+                { showDeleteConfirm = true }
+            } else null,
             likeEnabled = comment.id != null
         )
+        if (showDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                title = { Text("删除这条评论？") },
+                text = { Text("删除后将无法恢复。") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDeleteConfirm = false
+                        // 一级评论 rootId 传 null；楼中楼回复带上所属根评论，便于从对应楼中楼移除
+                        onDeleteComment(comment, if (isReply) rootCommentId else null)
+                    }) {
+                        Text("删除", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) {
+                        Text("取消")
+                    }
+                }
+            )
+        }
         if (state.replies.isNotEmpty() || canFetch || state.loading || state.error != null) {
             Column(
                 modifier = Modifier
@@ -175,6 +209,8 @@ internal fun CommentThread(
                             repliesProvider = repliesProvider,
                             onLoadReplies = onLoadReplies,
                             onReply = onReply,
+                            isMyComment = isMyComment,
+                            onDeleteComment = onDeleteComment,
                             rootCommentId = rootCommentId,
                             postAuthorId = postAuthorId,
                             postAuthorName = postAuthorName,

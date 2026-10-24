@@ -24,6 +24,8 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -33,6 +35,7 @@ import org.kazusa.matter.data.model.CommentsDataDto
 import org.kazusa.matter.data.model.RepostsDataDto
 import org.kazusa.matter.data.model.WeiboCommentDto
 import org.kazusa.matter.data.model.WeiboStatusDto
+import org.kazusa.matter.data.model.WeiboUserDto
 import org.kazusa.matter.data.repository.LikeRepository
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -572,6 +575,163 @@ class PostDetailViewModelTest {
         advanceUntilIdle()
         assertEquals("new", vm.replyPickerState.value.query)
         assertEquals(listOf("new"), vm.replyPickerState.value.suggestions.map { it.name })
+    }
+
+    @Test
+    fun deletingOwnCommentRemovesItAndStaleReadsCannotResurrectIt() = runTest {
+        val sessions = MutableStateFlow(ReplySession("1", "SUB=test", true))
+        var destroyed: Long? = null
+        val repository = ReplyRepository(sessions, publish = { _, _, _, _, _ -> ApiResult.Success(null) }, destroy = { _, _, commentId ->
+            destroyed = commentId
+            ApiResult.Success(Unit)
+        })
+        val vm = viewModel(
+            "detail-delete-comment",
+            sessions = sessions,
+            repository = repository,
+            source = FakeSource(
+                commentsResponse = { _, _ ->
+                    // 删除完成前发起的旧快照仍带着这条评论
+                    delay(1_000)
+                    ApiResult.Success(CommentsDataDto(data = listOf(WeiboCommentDto(id = 100, user = WeiboUserDto(id = 1)))))
+                }
+            )
+        )
+
+        vm.load()
+        runCurrent()
+        vm.deleteComment(WeiboCommentDto(id = 100, user = WeiboUserDto(id = 1)))
+        advanceUntilIdle()
+
+        assertEquals(100L, destroyed)
+        // 服务端确认删除后才移除；在途旧响应不能把评论复活
+        assertTrue(vm.uiState.value.comments.isEmpty())
+    }
+
+    @Test
+    fun deletingAReplyRemovesItFromItsRootThread() = runTest {
+        val sessions = MutableStateFlow(ReplySession("1", "SUB=test", true))
+        var destroyed: Long? = null
+        val repository = ReplyRepository(sessions, publish = { _, _, _, _, _ -> ApiResult.Success(null) }, destroy = { _, _, commentId ->
+            destroyed = commentId
+            ApiResult.Success(Unit)
+        })
+        val root = WeiboCommentDto(
+            id = 100,
+            user = WeiboUserDto(id = 1),
+            comments = listOf(WeiboCommentDto(id = 101, user = WeiboUserDto(id = 1)))
+        )
+        val vm = viewModel(
+            "detail-delete-reply",
+            sessions = sessions,
+            repository = repository,
+            source = FakeSource(commentsResponse = { _, _ -> ApiResult.Success(CommentsDataDto(data = listOf(root))) })
+        )
+
+        vm.load()
+        advanceUntilIdle()
+        vm.deleteComment(WeiboCommentDto(id = 101, user = WeiboUserDto(id = 1)), rootId = 100)
+        advanceUntilIdle()
+
+        assertEquals(101L, destroyed)
+        assertTrue(vm.commentRepliesOf(vm.uiState.value.comments.single()).replies.isEmpty())
+    }
+
+    @Test
+    fun commentsOfOthersAreNotDeletable() = runTest {
+        val sessions = MutableStateFlow(ReplySession("1", "SUB=test", true))
+        var destroyed: Long? = null
+        val repository = ReplyRepository(sessions, publish = { _, _, _, _, _ -> ApiResult.Success(null) }, destroy = { _, _, commentId ->
+            destroyed = commentId
+            ApiResult.Success(Unit)
+        })
+        val vm = viewModel(
+            "detail-delete-foreign",
+            sessions = sessions,
+            repository = repository,
+            source = FakeSource(commentsResponse = { _, _ ->
+                ApiResult.Success(CommentsDataDto(data = listOf(WeiboCommentDto(id = 100, user = WeiboUserDto(id = 2)))))
+            })
+        )
+
+        vm.load()
+        advanceUntilIdle()
+        vm.deleteComment(vm.uiState.value.comments.single())
+        advanceUntilIdle()
+
+        assertNull(destroyed)
+        assertEquals(listOf(100L), vm.uiState.value.comments.map { it.id })
+    }
+
+    @Test
+    fun deletingThePostNotifiesTheUiAndDropsTheCachedEntry() = runTest {
+        val sessions = MutableStateFlow(ReplySession("1", "SUB=test", true))
+        var destroyed = false
+        val repository = ReplyRepository(sessions, publish = { _, _, _, _, _ -> ApiResult.Success(null) }, destroy = { _, _, commentId ->
+            assertNull(commentId)
+            destroyed = true
+            ApiResult.Success(Unit)
+        })
+        val post = WeiboStatusDto(id = 777, user = WeiboUserDto(id = 1))
+        PostDetailCache.put(post)
+        try {
+            val vm = viewModel(
+                "detail-delete-post",
+                sessions = sessions,
+                repository = repository,
+                source = FakeSource(postResponse = { ApiResult.Success(post) })
+            )
+            vm.load()
+            advanceUntilIdle()
+            val deleted = mutableListOf<Unit>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                vm.postDeleted.collect { deleted += it }
+            }
+
+            vm.deletePost()
+            advanceUntilIdle()
+
+            assertTrue(destroyed)
+            assertEquals(listOf(Unit), deleted)
+            assertNull(PostDetailCache.get("777"))
+        } finally {
+            PostDetailCache.remove("777")
+        }
+    }
+
+    @Test
+    fun failedPostDeletionKeepsThePageAndShowsTheMessage() = runTest {
+        val sessions = MutableStateFlow(ReplySession("1", "SUB=test", true))
+        val repository = ReplyRepository(sessions, publish = { _, _, _, _, _ -> ApiResult.Success(null) }, destroy = { _, _, _ -> ApiResult.Error(message = "删除失败") })
+        val post = WeiboStatusDto(id = 778, user = WeiboUserDto(id = 1))
+        PostDetailCache.put(post)
+        try {
+            val vm = viewModel(
+                "detail-delete-post-failed",
+                sessions = sessions,
+                repository = repository,
+                source = FakeSource(postResponse = { ApiResult.Success(post) })
+            )
+            vm.load()
+            advanceUntilIdle()
+            val messages = mutableListOf<String>()
+            val deleted = mutableListOf<Unit>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                vm.messages.collect { messages += it }
+            }
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                vm.postDeleted.collect { deleted += it }
+            }
+
+            vm.deletePost()
+            advanceUntilIdle()
+
+            assertTrue(deleted.isEmpty())
+            assertEquals(listOf("删除失败"), messages)
+            assertNotNull(PostDetailCache.get("778"))
+        } finally {
+            PostDetailCache.remove("778")
+        }
     }
 
     private class FakeSource(

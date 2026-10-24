@@ -8,6 +8,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -125,7 +126,10 @@ internal data class PostDetailUiState(
     val isAttitudesLoading: Boolean = false,
     val attitudesPage: Int = 1,
     // ---- 页签 ----
-    val selectedTab: DetailSubTab = DetailSubTab.COMMENTS
+    val selectedTab: DetailSubTab = DetailSubTab.COMMENTS,
+    // ---- 会话 ----
+    /** 当前登录账号的 uid；游客或未登录为 null，界面据此决定是否出现删除入口。 */
+    val myUid: String? = null
 )
 
 /**
@@ -269,6 +273,80 @@ internal class PostDetailViewModel internal constructor(
         }
     }
 
+    /** 当前会话是否拥有这条评论；游客、未登录或资料缺失时一律 false。 */
+    fun isMyComment(comment: WeiboCommentDto): Boolean = isMineByUid(comment.user)
+
+    /** 当前会话是否拥有这条微博；自己的转发也算（删除即撤回转发）。 */
+    fun isMyPost(post: WeiboStatusDto): Boolean = isMineByUid(post.user)
+
+    private fun isMineByUid(user: WeiboUserDto?): Boolean {
+        val uid = _uiState.value.myUid ?: return false
+        val idStr = user?.idStr?.takeIf { it.isNotBlank() }
+        return idStr == uid || (idStr == null && user?.id?.toString() == uid)
+    }
+
+    /**
+     * 删除自己发表的评论。[rootId] 非空表示删的是楼中楼回复。
+     *
+     * 服务端确认后才更新本地：一级评论从列表移除、回复从所属根评论的楼中楼移除，
+     * 同时记录进已删除集合，让在途的旧列表响应不能把评论复活。
+     */
+    fun deleteComment(comment: WeiboCommentDto, rootId: Long? = null) {
+        val commentId = comment.id ?: return
+        val session = replySession ?: return
+        if (!isMyComment(comment)) return
+        viewModelScope.launch {
+            when (val result = replyRepository.deleteComment(session, targetId(), commentId)) {
+                is ApiResult.Success -> {
+                    publishedComments.remove(commentId)
+                    deletedComments += commentId
+                    if (rootId == null) {
+                        _uiState.update { it.copy(comments = it.comments.filterNot { c -> c.id == commentId }) }
+                        val key = commentId.toString()
+                        repliesTokens[key] = (repliesTokens[key] ?: 0) + 1
+                        repliesJobs.remove(key)?.cancel()
+                        _repliesStates.update { it - key }
+                    } else {
+                        publishedReplies[rootId]?.remove(commentId)
+                        deletedReplies.getOrPut(rootId) { mutableSetOf() } += commentId
+                        findComment(rootId)?.let { root ->
+                            val key = repliesKeyOf(root)
+                            _repliesStates.update { states ->
+                                val current = states[key] ?: initialCommentReplies(root)
+                                states + (key to current.copy(replies = current.replies.filterNot { it.id == commentId }))
+                            }
+                        }
+                    }
+                    messageChannel.trySend("评论已删除")
+                }
+                is ApiResult.Error -> messageChannel.trySend(result.message.ifBlank { "删除失败，请稍后重试" })
+                ApiResult.Loading -> Unit
+            }
+        }
+    }
+
+    /** 删除自己发表的微博；成功后发 [postDeleted] 事件，由界面返回上一页。 */
+    fun deletePost() {
+        val post = _uiState.value.post ?: return
+        val session = replySession ?: return
+        if (!isMyPost(post)) return
+        val target = targetIdOf(post)
+        viewModelScope.launch {
+            when (val result = replyRepository.deletePost(session, target)) {
+                is ApiResult.Success -> {
+                    // 缓存还留着这条微博会让下次进入时首帧渲染已删除的内容
+                    PostDetailCache.remove(target)
+                    post.idStr?.let(PostDetailCache::remove)
+                    post.mid?.let(PostDetailCache::remove)
+                    post.id?.toString()?.let(PostDetailCache::remove)
+                    postDeletedChannel.trySend(Unit)
+                }
+                is ApiResult.Error -> messageChannel.trySend(result.message.ifBlank { "删除失败，请稍后重试" })
+                ApiResult.Loading -> Unit
+            }
+        }
+    }
+
     private val _replyPickerState = MutableStateFlow(ReplyPickerState())
     val replyPickerState: StateFlow<ReplyPickerState> = _replyPickerState.asStateFlow()
     private var pickerJob: Job? = null
@@ -341,10 +419,22 @@ internal class PostDetailViewModel internal constructor(
     // 写入已成功、列表尚未确认的评论；旧列表响应不能抹掉它们。
     private val publishedComments = linkedMapOf<Long, WeiboCommentDto>()
     private val publishedReplies = mutableMapOf<Long, LinkedHashMap<Long, WeiboCommentDto>>()
+    // 已确认删除的评论 id：旧列表响应不能复活它们（与 publishedComments 对称）。
+    // 读取发起之前就完成的删除，在本次读取成功后解除跟踪；读取在途期间完成的删除
+    // 由旧快照带出，靠这里的集合过滤。
+    private val deletedComments = mutableSetOf<Long>()
+    private val deletedReplies = mutableMapOf<Long, MutableSet<Long>>()
+
+    /** 删除微博成功后通知界面返回；页面本身已没有可展示的内容。 */
+    private val postDeletedChannel = Channel<Unit>(Channel.BUFFERED)
+    val postDeleted: Flow<Unit> = postDeletedChannel.receiveAsFlow()
 
     init {
         viewModelScope.launch {
             replyRepository.sessions.collect { session ->
+                _uiState.update {
+                    it.copy(myUid = session.uid.takeIf { uid -> session.loggedIn && uid.isNotBlank() && uid != "guest" })
+                }
                 if (replySession != null && replySession != session) {
                     replyToken++
                     composerRevision++
@@ -355,6 +445,8 @@ internal class PostDetailViewModel internal constructor(
                     draftVersions.clear()
                     publishedComments.clear()
                     publishedReplies.clear()
+                    deletedComments.clear()
+                    deletedReplies.clear()
                     clearReplies()
                     _replyState.value = ReplyComposerState()
                     _uiState.update { it.copy(comments = emptyList()) }
@@ -505,6 +597,33 @@ internal class PostDetailViewModel internal constructor(
     private fun findComment(id: Long): WeiboCommentDto? =
         _uiState.value.comments.firstOrNull { it.id == id }
 
+    /**
+     * 从服务端评论快照里剔除已删除的评论，并解除「读取发起前已确认删除」的跟踪。
+     *
+     * 在途旧响应（删除完成前发起）可能仍带出被删评论，靠当前跟踪集合过滤；
+     * 本次读取发起之前就完成的删除，响应里不会再有它们，跟踪使命完成。
+     */
+    private fun dropDeletedComments(
+        incoming: List<WeiboCommentDto>,
+        knownDeletesAtStart: Set<Long>
+    ): List<WeiboCommentDto> {
+        deletedComments.removeAll(knownDeletesAtStart)
+        if (deletedComments.isEmpty()) return incoming
+        return incoming.filterNot { it.id in deletedComments }
+    }
+
+    /** 楼中楼回复版 [dropDeletedComments]：按所属根评论跟踪。 */
+    private fun dropDeletedReplies(
+        page: CommentsDataDto,
+        rootId: Long,
+        knownDeletesAtStart: Set<Long>
+    ): CommentsDataDto {
+        deletedReplies[rootId]?.removeAll(knownDeletesAtStart)
+        val deleted = deletedReplies[rootId].orEmpty()
+        if (deleted.isEmpty()) return page
+        return page.copy(data = page.data.filterNot { it.id in deleted })
+    }
+
     private fun mergePublishedComments(
         incoming: List<WeiboCommentDto>,
         knownAtRequestStart: Set<Long> = emptySet()
@@ -560,6 +679,7 @@ internal class PostDetailViewModel internal constructor(
 
     fun loadComments(targetPostId: String? = null, hotSort: Boolean = _uiState.value.sortByHot) {
         val knownWrites = publishedComments.keys.toSet()
+        val knownDeletes = deletedComments.toSet()
         val idToQuery = targetPostId ?: targetId()
         commentsRequestedForId = idToQuery
         commentsToken += 1
@@ -572,7 +692,10 @@ internal class PostDetailViewModel internal constructor(
                     is ApiResult.Success -> {
                         if (token != commentsToken) return@launch
                         _uiState.update { current ->
-                            val incoming = mergePublishedComments(res.data.data, knownWrites)
+                            val incoming = dropDeletedComments(
+                                mergePublishedComments(res.data.data, knownWrites),
+                                knownDeletes
+                            )
                             // 只有内容真的换了才触发淡入，否则重复拉同一份数据会闪一下
                             val changed = incoming.map { it.listKey } != current.comments.map { it.listKey }
                             val version = current.contentVersion
@@ -624,6 +747,7 @@ internal class PostDetailViewModel internal constructor(
         if (current.loading) return
         val token = (repliesTokens[key] ?: 0) + 1
         repliesTokens[key] = token
+        val knownDeletedReplies = deletedReplies[commentId]?.toSet().orEmpty()
         _repliesStates.update { it + (key to current.copy(loading = true, error = null)) }
         repliesJobs.remove(key)?.cancel()
         val postKey = targetId()
@@ -637,7 +761,8 @@ internal class PostDetailViewModel internal constructor(
                 )) {
                     is ApiResult.Success -> {
                         if (repliesTokens[key] != token) return@launch
-                        _repliesStates.update { it + (key to commentRepliesOf(comment).withPage(res.data, commentId)) }
+                        val page = dropDeletedReplies(res.data, commentId, knownDeletedReplies)
+                        _repliesStates.update { it + (key to commentRepliesOf(comment).withPage(page, commentId)) }
                     }
 
                     is ApiResult.Error -> {
@@ -781,6 +906,7 @@ internal class PostDetailViewModel internal constructor(
     /** 刷新评论区并等待结果，确保刷新指示器覆盖整轮请求。 */
     private suspend fun refreshComments(targetId: String) {
         val knownWrites = publishedComments.keys.toSet()
+        val knownDeletes = deletedComments.toSet()
         commentsRequestedForId = targetId
         commentsToken += 1
         val token = commentsToken
@@ -794,7 +920,10 @@ internal class PostDetailViewModel internal constructor(
                 val hotSort = _uiState.value.sortByHot
                 _uiState.update { current ->
                     current.copy(
-                        comments = mergePublishedComments(res.data.data, knownWrites),
+                        comments = dropDeletedComments(
+                            mergePublishedComments(res.data.data, knownWrites),
+                            knownDeletes
+                        ),
                         commentsApprovalOnly = if (hotSort) {
                             res.data.approvalCommentsOnly
                         } else {

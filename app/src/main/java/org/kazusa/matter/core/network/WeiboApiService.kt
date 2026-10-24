@@ -41,8 +41,12 @@ import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
 import io.ktor.http.decodeURLQueryComponent
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.parameters
@@ -1506,7 +1510,7 @@ class WeiboApiService(
                 return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
             }
             writeSession.execute(cookie = effectiveCookie, action = "回复") { mobileCredentials ->
-                val credentials = if (pictureId == null) mobileCredentials else desktopReplyCredentials(mobileCredentials)
+                val credentials = if (pictureId == null) mobileCredentials else desktopWriteCredentials(mobileCredentials)
                 val response = client.submitForm(
                     url = if (pictureId == null) "https://m.weibo.cn/api/comments/${if (commentId == null) "create" else "reply"}"
                         else "https://weibo.com/ajax/comments/${if (commentId == null) "create" else "reply"}",
@@ -1543,8 +1547,11 @@ class WeiboApiService(
         }
     }
 
-    /** 附图走网页评论协议，使用网页域自己的 XSRF Cookie，不混用移动端 st。 */
-    private suspend fun desktopReplyCredentials(base: WeiboWriteCredentials): WeiboWriteCredentials {
+    /**
+     * 网页域（weibo.com/ajax）写操作的凭据：使用网页评论协议、删除等网页端点时，
+     * 用网页域自己的 XSRF Cookie，不混用移动端 st。
+     */
+    private suspend fun desktopWriteCredentials(base: WeiboWriteCredentials): WeiboWriteCredentials {
         val cookies = linkedMapOf<String, String>()
         base.cookieHeader.split(';').forEach { part ->
             val name = part.substringBefore('=').trim()
@@ -1777,6 +1784,92 @@ class WeiboApiService(
             android.util.Log.e("WeiboApi", "updateFollowState failed", e)
             ApiResult.Error(message = e.localizedMessage ?: "关注操作异常", throwable = e)
         }
+    }
+
+    /**
+     * 删除自己发表的评论（楼中楼回复同样是评论，按 cid 删除）。
+     *
+     * 端点: POST https://m.weibo.cn/comments/destroy，表单 `cid` + `st`（服务端对评论
+     * 删除另有更紧的配额，触发后同样走 [WeiboWriteSession] 的本地冷却）。
+     */
+    suspend fun destroyComment(postId: String, cid: Long, cookie: String = ""): ApiResult<Unit> {
+        if (cid <= 0 || postId.isBlank()) return ApiResult.Error(message = "删除目标无效")
+        return destroyWrite(postId, cid.toString(), cookie)
+    }
+
+    /**
+     * 删除自己发表的微博（自己发的转发同理，删除即撤回该转发）。
+     *
+     * 端点: POST https://weibo.com/ajax/statuses/destroy，JSON 体 `{"id": ...}`。
+     * m.weibo.cn 移动端没有可查证的删微博端点，这里直接走网页渠道，
+     * 凭据用网页域自己的 XSRF 令牌（[desktopWriteCredentials]，与附图回复同一套）。
+     */
+    suspend fun destroyPost(id: String, cookie: String = ""): ApiResult<Unit> {
+        if (id.isBlank()) return ApiResult.Error(message = "删除目标无效")
+        return destroyWrite(id, cid = null, cookie = cookie)
+    }
+
+    private suspend fun destroyWrite(id: String, cid: String?, cookie: String): ApiResult<Unit> {
+        return try {
+            val effectiveCookie = requireSessionCookie(cookie)
+            if (effectiveCookie.isBlank()) {
+                return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
+            }
+            writeSession.execute(
+                cookie = effectiveCookie,
+                action = if (cid == null) "删除微博" else "删除评论"
+            ) { credentials ->
+                if (cid == null) {
+                    destroyViaDesktop(id, cid = null, base = credentials)
+                } else {
+                    val response = client.submitForm(
+                        url = "https://m.weibo.cn/comments/destroy",
+                        formParameters = parameters {
+                            append("cid", cid)
+                            append("st", credentials.token)
+                            append("_spr", "screen:1920x1080")
+                        }
+                    ) {
+                        cookieHeader(credentials.cookieHeader)
+                        header("X-XSRF-TOKEN", credentials.token)
+                        header("Origin", "https://m.weibo.cn")
+                        header("Referer", "https://m.weibo.cn/detail/$id")
+                        header("MWeibo-Pwa", "1")
+                        header("X-Requested-With", "XMLHttpRequest")
+                    }
+                    readWriteResponse(response, failureMessage = "删除失败", success = Unit)
+                }
+            }
+        } catch (e: WriteGateException) {
+            ApiResult.Error(code = e.code, message = e.message.orEmpty())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.e("WeiboApi", "destroyWrite failed", e)
+            ApiResult.Error(message = e.localizedMessage ?: "删除操作异常", throwable = e)
+        }
+    }
+
+    /** 网页渠道删除：JSON 体 + 网页域 XSRF 令牌；凭据取不到时抛 [WriteGateException]。 */
+    private suspend fun destroyViaDesktop(
+        id: String,
+        cid: String?,
+        base: WeiboWriteCredentials
+    ): ApiResult<Unit> {
+        val credentials = desktopWriteCredentials(base)
+        val response = client.post(
+            if (cid == null) "https://weibo.com/ajax/statuses/destroy"
+            else "https://weibo.com/ajax/comments/destroy"
+        ) {
+            contentType(ContentType.Application.Json)
+            setBody(JsonObject(mapOf((if (cid == null) "id" else "cid") to JsonPrimitive(cid ?: id))).toString())
+            header("X-XSRF-TOKEN", credentials.token)
+            cookieHeader(credentials.cookieHeader)
+            header("Origin", "https://weibo.com")
+            header("Referer", "https://weibo.com/")
+            header("X-Requested-With", "XMLHttpRequest")
+        }
+        return readWriteResponse(response, failureMessage = "删除失败", success = Unit)
     }
 
     private suspend fun resolveMentionUserId(name: String, cookie: String): ApiResult<String> =
