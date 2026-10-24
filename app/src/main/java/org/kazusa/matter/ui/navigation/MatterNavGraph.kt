@@ -39,6 +39,7 @@ import org.kazusa.matter.data.repository.SearchHistoryRepository
 import org.kazusa.matter.ui.theme.ThemePreferences
 import org.kazusa.matter.data.repository.FavoritesRepository
 import org.kazusa.matter.data.repository.FollowRepository
+import org.kazusa.matter.data.repository.GroupRepository
 import org.kazusa.matter.ui.detail.OnlineEmojiViewModel
 import org.kazusa.matter.core.util.LocalOnlineEmojiImages
 import org.kazusa.matter.data.repository.LikeRepository
@@ -92,6 +93,7 @@ fun MatterNavGraph() {
     val searchHistoryRepository = koinInject<SearchHistoryRepository>()
     val likeRepository = koinInject<LikeRepository>()
     val followRepository = koinInject<FollowRepository>()
+    val groupRepository = koinInject<GroupRepository>()
     val onlineEmojiViewModel: OnlineEmojiViewModel = koinViewModel()
     val onlineEmojiImages by onlineEmojiViewModel.images.collectAsStateWithLifecycle()
     val koin = getKoin()
@@ -102,11 +104,12 @@ fun MatterNavGraph() {
     val isOnboardingCompleted by authPreferences.isOnboardingCompletedFlow.collectAsStateWithLifecycle(initialValue = null)
     val coroutineScope = rememberCoroutineScope()
 
-    // 换账号时清空会话内的即时状态：点赞 / 关注覆盖与正文预存缓存都带着账号身份
+    // 换账号时清空会话内的即时状态：点赞 / 关注覆盖、正文预存缓存与分组缓存都带着账号身份
     LaunchedEffect(session?.uid) {
         likeRepository.clear()
         followRepository.clear()
         PostDetailCache.clear()
+        groupRepository.clear()
     }
 
     // 状态加载中保护，防止 DataStore 首次空流导致欢迎页闪现

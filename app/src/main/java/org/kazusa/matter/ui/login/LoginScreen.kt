@@ -35,10 +35,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -63,8 +63,8 @@ import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.theme.MatterShapeTokens
 import org.kazusa.matter.ui.theme.TextSecondary
 
-import androidx.compose.material3.ScrollableTabRow
-
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun LoginScreen(
@@ -103,7 +103,7 @@ fun LoginScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            ScrollableTabRow(
+            PrimaryScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
                 contentColor = MaterialTheme.colorScheme.primary,
@@ -135,15 +135,16 @@ fun LoginScreen(
                             webCookieStore.clearAll()
                             cookieStoreCleared = true
                         }
-                        // 离开登录页释放 WebView：仅把它从组合树摘掉不会销毁原生实例
-                        DisposableEffect(Unit) {
+                        // 离开登录页释放 WebView：仅把它从组合树摘掉不会销毁原生实例。
+                        // 以 WebView 实例为 key：每个实例由自己的 effect 负责销毁，替换不泄漏
+                        DisposableEffect(webViewRef) {
+                            val webView = webViewRef
                             onDispose {
-                                webViewRef?.apply {
+                                webView?.apply {
                                     stopLoading()
                                     loadUrl("about:blank")
                                     destroy()
                                 }
-                                webViewRef = null
                             }
                         }
 
@@ -156,7 +157,7 @@ fun LoginScreen(
                                             webViewRef = this
                                             settings.javaScriptEnabled = true
                                             settings.domStorageEnabled = true
-                                            settings.databaseEnabled = true
+                                            // WebSQL 的 databaseEnabled 已废弃且无实际效果；页面存储走 domStorage / IndexedDB
                                             settings.safeBrowsingEnabled = true
                                             // 与后续 API / CDN 请求保持一致：登录时拿到的会话
                                             // 与之后请求的 UA 不同，会被判成换了客户端

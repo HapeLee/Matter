@@ -36,6 +36,12 @@ class TimelineViewModel(
     private var lastRequestedPage = 0
     private var loadJob: kotlinx.coroutines.Job? = null
 
+    /**
+     * setGroup 的缓存加载任务。与 loadJob 分开管理：
+     * 切组时既要掐掉上一个分组的磁盘缓存加载，也要掐掉网络翻页，且两者互不误伤。
+     */
+    private var groupSwitchJob: kotlinx.coroutines.Job? = null
+
     init {
         // 恢复上一次记住的分组选择，并在读取完成后统一加载本地持久化缓存
         viewModelScope.launch {
@@ -52,7 +58,9 @@ class TimelineViewModel(
             val effectiveName = if (effectiveGid != null) savedName ?: "分组微博" else "全部关注"
 
             _uiState.update {
-                it.copy(currentGid = effectiveGid, currentGroupName = effectiveName)
+                // 恢复期间用户可能已手动切组：不再用持久化的旧选择覆盖
+                if (it.currentGid != null) it
+                else it.copy(currentGid = effectiveGid, currentGroupName = effectiveName)
             }
 
             // 读取本地持久化缓存（微博列表与精准视口位置）
@@ -67,7 +75,9 @@ class TimelineViewModel(
                 )
 
                 _uiState.update { state ->
-                    state.copy(
+                    // 缓存读取期间用户可能已切组：旧分组的缓存不允许写进新分组状态
+                    if (state.currentGid != effectiveGid) state
+                    else state.copy(
                         posts = posts,
                         page = cachedData.page,
                         hasMore = cachedData.hasMore,
@@ -78,7 +88,9 @@ class TimelineViewModel(
                         isRefreshing = false
                     )
                 }
-                scrollSnapshot = ScrollSnapshot(targetIndex, savedPos.offset)
+                if (_uiState.value.currentGid == effectiveGid) {
+                    scrollSnapshot = ScrollSnapshot(targetIndex, savedPos.offset)
+                }
                 // 用户要求："重新进入应用后保持最后浏览记忆位置，不需要主动更新微博，只在用户手动更新时更新"
                 // 因此有缓存时不主动触发 loadTimeline 网络请求！
             } else {
@@ -96,6 +108,9 @@ class TimelineViewModel(
             // 切组必须掐掉在途请求：否则上一个分组的翻页响应回来时会被写进新分组
             // （posts 混料、page 错位，并把这个错误状态盖进新分组的磁盘缓存）。
             loadJob?.cancel()
+            // 上一次切组的磁盘缓存加载同样要掐掉：连切两个分组时，
+            // 旧分组的缓存会晚到并写进新分组状态。
+            groupSwitchJob?.cancel()
             _uiState.update {
                 it.copy(
                     currentGid = effectiveGid,
@@ -110,7 +125,7 @@ class TimelineViewModel(
                 )
             }
             scrollSnapshot = ScrollSnapshot()
-            viewModelScope.launch {
+            groupSwitchJob = viewModelScope.launch {
                 authRepository.saveSelectedGroup(effectiveGid, name)
                 val cached = timelineRepository.loadCache(effectiveGid)
                 if (cached != null && cached.posts.isNotEmpty()) {
@@ -122,7 +137,9 @@ class TimelineViewModel(
                     )
 
                     _uiState.update { state ->
-                        state.copy(
+                        // 双保险：取消之外再校验分组身份，迟到的旧分组缓存不写新分组
+                        if (state.currentGid != effectiveGid) state
+                        else state.copy(
                             posts = posts,
                             page = cached.page,
                             hasMore = cached.hasMore,
@@ -132,7 +149,9 @@ class TimelineViewModel(
                             isLoading = false
                         )
                     }
-                    scrollSnapshot = ScrollSnapshot(targetIndex, savedPos.offset)
+                    if (_uiState.value.currentGid == effectiveGid) {
+                        scrollSnapshot = ScrollSnapshot(targetIndex, savedPos.offset)
+                    }
                 } else {
                     loadTimeline(isRefresh = true)
                 }
