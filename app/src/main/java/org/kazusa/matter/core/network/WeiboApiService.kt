@@ -45,6 +45,7 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.Parameters
 import io.ktor.http.contentType
 import io.ktor.http.decodeURLQueryComponent
 import io.ktor.http.HttpStatusCode
@@ -100,6 +101,14 @@ class WeiboApiService(
      * 三者共用同一个实例，是因为微博的写操作限流按账号计，分开做会各自把冷却期撑大。
      */
     private val writeSession = WeiboWriteSession(::fetchWriteCredentials)
+
+    /**
+     * 网页域写凭据（XSRF-TOKEN + 合并 Cookie）缓存。点赞 / 关注走网页端点后成为
+     * 最高频的写路径，不能每次都先 GET weibo.com/ 取令牌把请求量翻倍；
+     * 与 [writeSession] 的 st 缓存一样按来源 Cookie 失配即重取。
+     */
+    @Volatile
+    private var cachedDesktopCredentials: WeiboWriteCredentials? = null
 
     private val favoritesApi = FavoritesApi(client, writeSession, sessionExpiredBus)
     private val replyImageUploadApi = ReplyImageUploadApi(client, writeSession)
@@ -1419,16 +1428,20 @@ class WeiboApiService(
     }
 
     /**
-     * 对微博点赞或取消点赞
-     * 端点:
-     * - 点赞: POST https://m.weibo.cn/api/attitudes/create
-     * - 取消点赞: POST https://m.weibo.cn/api/attitudes/destroy
+     * 对微博或评论点赞 / 取消点赞。端点（weibo.com 网页端表单协议）：
+     * - 微博: POST https://weibo.com/ajax/statuses/setLike | cancelLike，参数 `id`
+     * - 评论: POST https://weibo.com/ajax/statuses/updateLike | destroyLike，
+     *   参数 `object_id` + `object_type=comment`
+     *
+     * m 站 `attitudes/create|destroy` 已被微博风控收紧（登录态连写直接回「操作频繁」），
+     * 2026-10 起改走 weibo.com SPA 自己在用的通道；仍共用 [WeiboWriteSession] 的
+     * 串行提交与频控冷却。
      */
     suspend fun setAttitude(
         id: String,
         isLike: Boolean,
         cookie: String = "",
-        /** 评论点赞时传所属微博 id，用于拼出合法的 Referer；微博点赞留空。 */
+        /** 评论点赞时传所属微博 id：非 null 即按评论端点（updateLike/destroyLike）提交。 */
         refererPostId: String? = null
     ): ApiResult<Boolean> {
         return try {
@@ -1436,31 +1449,29 @@ class WeiboApiService(
             if (effectiveCookie.isBlank()) {
                 return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
             }
-            val path = if (isLike) "create" else "destroy"
-            // 用评论 id 拼出来的 detail 链接并不存在，微博会据此判为异常请求，
-            // 所以评论点赞必须带上所属微博 id
-            val refererId = refererPostId?.takeIf { it.isNotBlank() } ?: id
+            val form = if (refererPostId == null) {
+                parameters { append("id", id) }
+            } else {
+                parameters {
+                    append("object_id", id)
+                    append("object_type", "comment")
+                }
+            }
             writeSession.execute(
                 cookie = effectiveCookie,
                 action = if (isLike) "点赞" else "取消点赞"
-            ) { credentials ->
-                val response = client.submitForm(
-                    url = "https://m.weibo.cn/api/attitudes/$path",
-                    formParameters = parameters {
-                        append("id", id)
-                        append("attitude", "heart")
-                        append("st", credentials.token)
-                    }
-                ) {
-                    cookieHeader(credentials.cookieHeader)
-                    header("X-XSRF-TOKEN", credentials.token)
-                    header("Origin", "https://m.weibo.cn")
-                    header("Referer", "https://m.weibo.cn/detail/$refererId")
-                    header("MWeibo-Pwa", "1")
-                    header("X-Requested-With", "XMLHttpRequest")
-                }
-                readWriteResponse(
-                    response = response,
+            ) { mobileCredentials ->
+                desktopFormWrite(
+                    url = "https://weibo.com/ajax/statuses/" +
+                        when {
+                            refererPostId == null && isLike -> "setLike"
+                            refererPostId == null -> "cancelLike"
+                            isLike -> "updateLike"
+                            else -> "destroyLike"
+                        },
+                    form = form,
+                    referer = "https://weibo.com/",
+                    mobileCredentials = mobileCredentials,
                     failureMessage = if (isLike) "点赞失败" else "取消点赞失败",
                     success = isLike
                 )
@@ -1542,10 +1553,14 @@ class WeiboApiService(
     }
 
     /**
-     * 网页域（weibo.com/ajax）写操作的凭据：使用网页评论协议、删除等网页端点时，
-     * 用网页域自己的 XSRF Cookie，不混用移动端 st。
+     * 网页域（weibo.com/ajax）写操作的凭据：点赞、关注/取关、删除等网页端点用网页域
+     * 自己的 XSRF Cookie，不混用移动端 st。按来源 Cookie 缓存复用（见
+     * [cachedDesktopCredentials]）。
      */
     private suspend fun desktopWriteCredentials(base: WeiboWriteCredentials): WeiboWriteCredentials {
+        cachedDesktopCredentials?.let { cached ->
+            if (cached.sourceCookie == base.sourceCookie) return cached
+        }
         val cookies = linkedMapOf<String, String>()
         base.cookieHeader.split(';').forEach { part ->
             val name = part.substringBefore('=').trim()
@@ -1569,6 +1584,51 @@ class WeiboApiService(
             ?: throw WriteGateException(401, "无法获取微博网页发布凭据，请重新登录后重试；所选图片已保留")
         return base.copy(cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" },
             token = csrf.decodeURLQueryComponent())
+            .also { cachedDesktopCredentials = it }
+    }
+
+    /**
+     * 把网页域响应的 `Set-Cookie` 合并回缓存凭据。微博几乎每个响应都可能轮换
+     * `XSRF-TOKEN`，要像浏览器 cookie jar 一样跟着更新，缓存令牌才不会悄悄过期。
+     */
+    private fun syncDesktopCredentials(credentials: WeiboWriteCredentials, response: HttpResponse) {
+        if (cachedDesktopCredentials !== credentials) return
+        val setCookies = response.headers.getAll("Set-Cookie").orEmpty()
+        if (setCookies.isEmpty()) return
+        val cookies = parseCookieHeader(credentials.cookieHeader)
+        setCookies.forEach { header ->
+            val pair = header.substringBefore(';')
+            if ('=' in pair) cookies[pair.substringBefore('=').trim()] = pair.substringAfter('=').trim()
+        }
+        val rotated = cookies["XSRF-TOKEN"]?.takeIf { it.isNotBlank() }
+        cachedDesktopCredentials = credentials.copy(
+            cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" },
+            token = rotated?.decodeURLQueryComponent() ?: credentials.token
+        )
+    }
+
+    /**
+     * 网页域表单写请求（点赞 / 关注 / 取关）。契约（2026-10 从 weibo.com SPA bundle
+     * 核实）：`application/x-www-form-urlencoded`，JSON 体会被服务端拒绝。
+     */
+    private suspend fun <T : Any> desktopFormWrite(
+        url: String,
+        form: Parameters,
+        referer: String,
+        mobileCredentials: WeiboWriteCredentials,
+        failureMessage: String,
+        success: T
+    ): ApiResult<T> {
+        val credentials = desktopWriteCredentials(mobileCredentials)
+        val response = client.submitForm(url = url, formParameters = form) {
+            cookieHeader(credentials.cookieHeader)
+            header("X-XSRF-TOKEN", credentials.token)
+            header("Origin", "https://weibo.com")
+            header("Referer", referer)
+            header("X-Requested-With", "XMLHttpRequest")
+        }
+        syncDesktopCredentials(credentials, response)
+        return readWriteResponse(response, failureMessage = failureMessage, success = success)
     }
 
     /**
@@ -1638,6 +1698,7 @@ class WeiboApiService(
             )
         }
         writeSession.invalidate()
+        cachedDesktopCredentials = null
         return ApiResult.Error(message = msg)
     }
 
@@ -1711,20 +1772,24 @@ class WeiboApiService(
     }
 
 
-    /** 关注用户。端点: POST https://m.weibo.cn/api/friendships/create */
+    /** 关注用户。端点: POST https://weibo.com/ajax/friendships/create，表单 `friend_uid` */
     suspend fun followUser(uid: String, cookie: String = ""): ApiResult<Unit> =
         updateFollowState(uid, follow = true, cookie = cookie)
 
-    /** 取消关注。端点: POST https://m.weibo.cn/api/friendships/destroy */
+    /**
+     * 取消关注。端点: POST https://weibo.com/ajax/friendships/destory，表单 `uid`
+     *
+     * `destory` 是微博上游自己的拼写（2026-10 从 weibo.com SPA bundle 核实，正确拼写的
+     * `destroy` 路由不存在）；m 站 `POST /api/friendships/destroy` 也已下线
+     * （实测返回 `errno 404` +「出错了: 链接…无效」）。
+     */
     suspend fun unfollowUser(uid: String, cookie: String = ""): ApiResult<Unit> =
         updateFollowState(uid, follow = false, cookie = cookie)
 
     /**
-     * 关注 / 取关共用实现。
-     *
-     * 移动端写操作需要 `st` 令牌（由 `/api/config` 下发）并同步 Set-Cookie；
-     * 与 [setAttitude] 共用同一个 [WeiboWriteSession]，因此凭据缓存、串行提交和
-     * 频控冷却对三者一致。
+     * 关注 / 取关共用实现：都走网页域表单协议（[desktopFormWrite]），与点赞、删微博
+     * 同一套网页 XSRF 凭据。仍共用 [WeiboWriteSession]：微博的写限流按账号计，
+     * 凭据缓存、串行提交和频控冷却对全部写操作一致。
      */
     private suspend fun updateFollowState(
         uid: String,
@@ -1740,26 +1805,18 @@ class WeiboApiService(
             if (effectiveCookie.isBlank()) {
                 return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
             }
-            val path = if (follow) "create" else "destroy"
             writeSession.execute(
                 cookie = effectiveCookie,
                 action = if (follow) "关注" else "取消关注"
-            ) { credentials ->
-                val response = client.submitForm(
-                    url = "https://m.weibo.cn/api/friendships/$path",
-                    formParameters = parameters {
-                        append("uid", targetUid)
-                        append("st", credentials.token)
-                    }
-                ) {
-                    cookieHeader(credentials.cookieHeader)
-                    header("X-XSRF-TOKEN", credentials.token)
-                    header("Origin", "https://m.weibo.cn")
-                    header("Referer", "https://m.weibo.cn/u/$targetUid")
-                    header("X-Requested-With", "XMLHttpRequest")
-                }
-                readWriteResponse(
-                    response = response,
+            ) { mobileCredentials ->
+                desktopFormWrite(
+                    url = if (follow) "https://weibo.com/ajax/friendships/create"
+                    else "https://weibo.com/ajax/friendships/destory",
+                    form = parameters {
+                        append(if (follow) "friend_uid" else "uid", targetUid)
+                    },
+                    referer = "https://weibo.com/u/$targetUid",
+                    mobileCredentials = mobileCredentials,
                     failureMessage = if (follow) "关注失败" else "取消关注失败",
                     success = Unit
                 )

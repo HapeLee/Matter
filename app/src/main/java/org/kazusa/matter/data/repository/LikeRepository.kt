@@ -136,8 +136,8 @@ class LikeRepository internal constructor(
     /**
      * 切换评论点赞；语义与 [togglePost] 一致。
      *
-     * [postId] 是评论所属微博的 id：写操作需要合法的 Referer，用评论 id 拼出来的
-     * `detail/<评论id>` 并不存在，容易被微博判为异常请求。
+     * [postId] 是评论所属微博的 id：写端点按目标类型区分，评论点赞必须带上它
+     * （`updateLike`/`destroyLike` 走 `object_id` + `object_type=comment`）。
      */
     suspend fun toggleComment(comment: WeiboCommentDto, postId: String? = null): String? {
         val id = comment.id ?: return "这条评论暂不支持点赞"
