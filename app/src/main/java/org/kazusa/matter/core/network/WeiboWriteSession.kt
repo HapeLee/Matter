@@ -35,8 +35,8 @@ internal object WeiboWriteErrors {
 /**
  * 移动端写操作的串行闸门与 `st` 令牌缓存。
  *
- * 微博的 `attitudes/create|destroy`、`statuses/createfav|destroyfav`、
- * `friendships/create|destroy` 都要求先 `GET /api/config` 取 `st`，且服务端按账号
+ * m 站的 `comments/create|reply`（回复）与收藏写操作仍要求先 `GET /api/config` 取 `st`
+ * （点赞与关注/取关已改走网页域表单协议，但仍复用本闸门串行与冷却），且服务端按账号
  * 对写操作限流：一旦触发，冷却期内**所有**写操作都返回「操作频繁，请稍后再试」。
  * 因此这里统一做三件事：
  *
