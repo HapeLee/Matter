@@ -2,6 +2,7 @@ package org.kazusa.matter.core.network
 
 import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.core.session.SessionExpiredBus
+import org.kazusa.matter.data.model.ChatSendResult
 import org.kazusa.matter.data.model.GroupListResponse
 import org.kazusa.matter.data.model.SearchResultItem
 import org.kazusa.matter.data.model.SearchResultKind
@@ -61,6 +62,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
@@ -101,6 +103,9 @@ class WeiboApiService(
      * 三者共用同一个实例，是因为微博的写操作限流按账号计，分开做会各自把冷却期撑大。
      */
     private val writeSession = WeiboWriteSession(::fetchWriteCredentials)
+
+    /** 私信图片的 init + 分块上传（协议与失败原因都在那一侧维护）。 */
+    private val chatImageUploader = ChatImageUploader(client)
 
     /**
      * 网页域写凭据（XSRF-TOKEN + 合并 Cookie）缓存。点赞 / 关注走网页端点后成为
@@ -1894,6 +1899,186 @@ class WeiboApiService(
             ApiResult.Error(message = e.localizedMessage ?: "删除操作异常", throwable = e)
         }
     }
+
+    /**
+     * 发送文本私信。
+     *
+     * 端点（2026-10 从 api.weibo.com/chat 私信 SPA（pcweibochat）bundle 核实）：
+     * `POST https://api.weibo.com/webim/2/direct_messages/new.json`，表单编码，纯 Cookie 鉴权
+     * （该 SPA 自身 `withCredentials:true` 且 `xsrfCookieName:null`，不依赖 st / XSRF）。
+     * 参数：`uid`、`text`、`media_type=0`、`extensions`（JSON 字符串：webchat 标识 + 客户端 id）、
+     * `return_detail=1`（响应带回消息明细，用于替换本地乐观插入的临时 id）。
+     *
+     * 与其他写操作共用 [WeiboWriteSession] 的串行提交与频控冷却；webim 不消费 `st`，
+     * 闸门凭据仅用于统一节流。参数契约未经登录态实测，真机验证出入时按 DEBUG 日志修正。
+     */
+    suspend fun sendChatMessage(peerUid: String, text: String, cookie: String = ""): ApiResult<ChatSendResult> =
+        sendChat(peerUid, image = null, text = text, cookie = cookie)
+
+    /**
+     * 发送图片私信：上传取 fid 后按 `media_type=1` 发送，正文沿用网页端固定文案「分享图片」。
+     *
+     * 上传两步：`fileplatform/init.json`（表单 extprops/length/name/type 换 fileToken）→
+     * `webim/uploadx.json`（multipart 分块，最后一块回 `fid`）。
+     * 协议细节见 [uploadChatImage]；图片展示地址见 `ChatMessage.imageUrl`。
+     */
+    suspend fun sendChatImage(peerUid: String, bytes: ByteArray, cookie: String = ""): ApiResult<ChatSendResult> =
+        sendChat(peerUid, image = bytes, text = "", cookie = cookie)
+
+    private suspend fun sendChat(
+        peerUid: String,
+        image: ByteArray?,
+        text: String,
+        cookie: String
+    ): ApiResult<ChatSendResult> {
+        return try {
+            val targetUid = peerUid.trim()
+            val content = text.trim()
+            if (targetUid.isBlank() || targetUid == "guest") {
+                return ApiResult.Error(code = 401, message = "请先登录后再操作")
+            }
+            if (content.isEmpty() && image == null) return ApiResult.Error(message = "私信内容不能为空")
+            val effectiveCookie = requireSessionCookie(cookie)
+            if (effectiveCookie.isBlank()) {
+                return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
+            }
+            writeSession.execute(cookie = effectiveCookie, action = "发送私信") { credentials ->
+                if (image != null) {
+                    // 已经在这个写闸门里，上传不能再取写锁（互斥锁不可重入）
+                    when (val upload = chatImageUploader.upload(credentials, targetUid, image)) {
+                        // 上传失败带着服务端原因：参数/风控/分块问题各不相同，不能一律「请稍后重试」
+                        is ChatImageUpload.Failed -> ApiResult.Error(message = upload.reason)
+                        is ChatImageUpload.Uploaded ->
+                            submitWebimMessage(targetUid, fid = upload.fid, text = "分享图片", cookie = effectiveCookie)
+                    }
+                } else {
+                    submitWebimMessage(targetUid, fid = null, text = content, cookie = effectiveCookie)
+                }
+            }
+        } catch (e: WriteGateException) {
+            ApiResult.Error(code = e.code, message = e.message.orEmpty())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.e("WeiboApi", "sendChat failed", e)
+            ApiResult.Error(message = sendExceptionMessage(e), throwable = e)
+        }
+    }
+
+    /**
+     * 发送抛异常时的可读文案：网络层异常的 `localizedMessage` 是英文类名/地址，
+     * 直接抛给用户等于没给信息；这里按异常类型给一句能指导操作的话，细节仍留在 throwable 里。
+     */
+    private fun sendExceptionMessage(e: Exception): String = when (e) {
+        is java.net.UnknownHostException -> "网络不可用，请检查网络后重试"
+        is java.net.SocketTimeoutException -> "网络超时，请检查网络后重试"
+        is javax.net.ssl.SSLException -> "安全连接失败，请检查网络或稍后重试"
+        is java.io.IOException -> "网络异常（${e.javaClass.simpleName}），请稍后重试"
+        else -> e.localizedMessage?.takeIf { it.isNotBlank() } ?: "私信发送异常"
+    }
+
+    /** `direct_messages/new.json` 提交与响应解析。 */
+    private suspend fun submitWebimMessage(
+        targetUid: String,
+        fid: String?,
+        text: String,
+        cookie: String
+    ): ApiResult<ChatSendResult> {
+        val extensions = JsonObject(
+            mapOf("webchat" to JsonPrimitive(1), "clientid" to JsonPrimitive(makeChatClientId()))
+        ).toString()
+        val response = client.submitForm(
+            url = "https://api.weibo.com/webim/2/direct_messages/new.json",
+            formParameters = parameters {
+                append("uid", targetUid)
+                append("text", text)
+                if (fid != null) append("fids", fid)
+                append("media_type", if (fid == null) "0" else "1")
+                append("extensions", extensions)
+                append("return_detail", "1")
+            }
+        ) {
+            cookieHeader(cookie)
+            header("Origin", "https://api.weibo.com")
+            header("Referer", "https://api.weibo.com/chat/")
+            header("X-Requested-With", "XMLHttpRequest")
+        }
+        // 带 fids 时要求服务端确实把图片挂上了：只回一条纯文本消息说明附件被丢掉，
+        // 这时必须报失败并回滚，不能让「分享图片」变成一条没有图的私信
+        return readWebimSendResponse(response, expectsImage = fid != null)
+    }
+
+    /**
+     * webim 写响应：`errno==0` / `ok==1` / `return_detail=1` 时直接把新建消息当响应体，三种都算成功。
+     *
+     * 关键点是「只有出现明确的失败信号才算失败」。不能像其他写接口那样复用 [writeOkFlag]：
+     * 它在 `ok` 缺省时返回 0，而 `return_detail=1` 的成功响应**没有** `ok` 字段，
+     * 于是「已经发出去」的私信会被报成失败 —— 本地回滚气泡并提示重试，随后轮询又把服务端那条拉回来。
+     * 失败形态为 `errno!=0` / `ok!=1` + 错误文案；频控文案进入与其他写操作一致的本地冷却。
+     */
+    private suspend fun readWebimSendResponse(
+        response: HttpResponse,
+        expectsImage: Boolean = false
+    ): ApiResult<ChatSendResult> {
+        writeHttpError(response)?.let { return it }
+        val respJson = response.jsonBody().jsonObject
+        val errno = respJson["errno"]?.jsonPrimitive?.intOrNull
+        val ok = respJson["ok"]?.jsonPrimitive?.let { it.intOrNull ?: it.contentOrNull?.toIntOrNull() }
+        val errorText = respJson.webimString("errmsg", "error", "error_description", "msg", "message")
+
+        // 明细可能在 data 里、data.status 里，也可能整个响应体就是这条新消息
+        val detail = (respJson["data"] as? JsonObject)
+            ?.let { (it["status"] as? JsonObject) ?: it }
+            ?: respJson
+        val id = detail.webimString("id", "idstr", "mid", "dmid")
+
+        // 状态字段优先；两者都缺省时看响应体本身：带回了新消息 id 就是 `return_detail` 形态的成功，
+        // 只有错误文案、没有任何消息身份才是失败
+        val explicitFailure = (errno != null && errno != 0) || (ok != null && ok != 1)
+        val ambiguousFailure = errno == null && ok == null && id == null && errorText != null
+
+        if (!explicitFailure && !ambiguousFailure) {
+            if (expectsImage && !detail.hasChatImageAttachment()) {
+                // 服务端回了成功但没有附件：消息其实已经发出去了，只是退化成一条纯文本，
+                // 这种「静默丢图」必须报出来，否则用户以为图发出去了
+                runCatching {
+                    android.util.Log.w("WeiboApi", "send lost attachment: ${detail.toString().take(400)}")
+                }
+                return ApiResult.Error(message = "图片发送失败：服务器未接住附件，请稍后重试")
+            }
+            return ApiResult.Success(
+                ChatSendResult(
+                    id = id,
+                    timestampMillis = parseChatTimestampMillis(
+                        detail.webimString("created_at", "time", "timestamp")
+                    )
+                )
+            )
+        }
+
+        val msg = errorText ?: "发送失败，请稍后重试"
+        if (WeiboWriteErrors.isRateLimited(msg)) {
+            writeSession.reportRateLimited()
+            cachedDesktopCredentials = null
+            return ApiResult.Error(
+                code = WeiboWriteErrors.CODE_RATE_LIMITED,
+                message = WeiboWriteErrors.RATE_LIMITED_MESSAGE
+            )
+        }
+        return ApiResult.Error(message = msg)
+    }
+
+    /** extensions 里的客户端标识：网页端用浏览器指纹，这里每次发送生成一次性随机 id 即可。 */
+    private fun makeChatClientId(): String =
+        java.util.UUID.randomUUID().toString().replace("-", "").take(16)
+
+    private fun JsonObject.webimString(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
+        (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+    }
+
+    /** 图片私信成功时应有的痕迹：`media_type=1` 或带回了 `attachment`。 */
+    private fun JsonObject.hasChatImageAttachment(): Boolean =
+        this["attachment"] is JsonObject || webimString("media_type")?.toIntOrNull() == 1
 
     /** 网页渠道删除：JSON 体 + 网页域 XSRF 令牌；凭据取不到时抛 [WriteGateException]。 */
     private suspend fun destroyViaDesktop(

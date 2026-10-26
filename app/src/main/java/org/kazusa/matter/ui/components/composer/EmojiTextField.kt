@@ -1,4 +1,4 @@
-package org.kazusa.matter.ui.detail
+package org.kazusa.matter.ui.components.composer
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -12,13 +12,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
@@ -28,14 +29,18 @@ import org.kazusa.matter.core.util.WeiboTextEntities
 import org.kazusa.matter.core.util.weiboEmojiImageModel
 import kotlin.math.roundToInt
 
+/** 微博文本输入的默认长度上限；正文评论与私信各自传入自己的上限。 */
+internal const val DEFAULT_COMPOSER_MAX_LENGTH = 2000
+
 /** 同步外部草稿时识别自身回显，避免较慢的回显覆盖较新的输入或清除输入法组合态。 */
-internal class ReplyDraftEditorState(initialText: String) {
+internal class EmojiDraftState(initialText: String) {
     val field = TextFieldState(initialText, TextRange(initialText.length))
     private var received = initialText
     private val pending = mutableListOf<String>()
     fun publish(): String = field.text.toString().also {
         if (it != received && pending.lastOrNull() != it) pending += it
     }
+
     fun receive(text: String) {
         if (text == received) return
         received = text
@@ -51,29 +56,52 @@ internal class ReplyDraftEditorState(initialText: String) {
             selection = TextRange(previous.start.coerceAtMost(length), previous.end.coerceAtMost(length))
         }
     }
+
+    /**
+     * 发送成功后强制清空，不走回显比对。
+     *
+     * 外部草稿可能本来就已经是空串（发送方在写清空之前从没把草稿同步出去），
+     * 这时 [receive] 会因为 `text == received` 直接返回，表现为「发送后文字没清掉」。
+     */
+    fun clear() {
+        received = ""
+        pending.clear()
+        if (field.text.isNotEmpty()) field.edit {
+            replace(0, length, "")
+            selection = TextRange.Zero
+        }
+    }
 }
 
-internal data class ReplyEmojiToken(val start: Int, val end: Int, val code: String, val image: String)
+internal data class EmojiToken(val start: Int, val end: Int, val code: String, val image: String)
 private val emojiCode = Regex("\\[[^\\[\\]\\s]{1,64}\\]")
-internal fun replyEmojiTokens(text: String, images: Map<String, String>): List<ReplyEmojiToken> =
+internal fun weiboEmojiTokens(text: String, images: Map<String, String>): List<EmojiToken> =
     emojiCode.findAll(text).mapNotNull { match ->
         weiboEmojiImageModel(match.value, images)?.let {
-            ReplyEmojiToken(match.range.first, match.range.last + 1, match.value, it)
+            EmojiToken(match.range.first, match.range.last + 1, match.value, it)
         }
     }.toList()
 
-internal fun limitReplyEmojiDraft(text: String, images: Map<String, String>): String {
-    val limited = limitReplyDraft(text)
-    val cut = replyEmojiTokens(text, images).firstOrNull { it.start < limited.length && it.end > limited.length }
+/** 按 [maxLength] 截断，且不把一枚表情 / UTF-16 代理对切成两半。 */
+internal fun limitEmojiDraft(text: String, images: Map<String, String>, maxLength: Int): String {
+    val end = if (text.length > maxLength && text[maxLength - 1].isHighSurrogate() &&
+        text[maxLength].isLowSurrogate()
+    ) {
+        maxLength - 1
+    } else {
+        maxLength
+    }
+    val limited = text.take(end)
+    val cut = weiboEmojiTokens(text, images).firstOrNull { it.start < limited.length && it.end > limited.length }
     return if (cut != null) text.take(cut.start) else limited
 }
 
 /** 输出变换只压缩视觉文本，复制、草稿及发送仍使用原始表情代码。 */
-internal class ReplyEmojiOutputTransformation(
+internal class EmojiOutputTransformation(
     private val images: Map<String, String>, private val entityColor: Color
 ) : OutputTransformation {
     override fun TextFieldBuffer.transformOutput() {
-        val tokens = replyEmojiTokens(toString(), images)
+        val tokens = weiboEmojiTokens(toString(), images)
         tokens.asReversed().forEach { replace(it.start, it.end, "\u3000") }
         var removed = 0
         tokens.forEach { token ->
@@ -87,9 +115,12 @@ internal class ReplyEmojiOutputTransformation(
 
 /** IME 删除一个原始码元时扩展至整枚表情；保留替换输入并让框架维护选区。 */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-internal class ReplyEmojiInputTransformation(private val images: Map<String, String>) : InputTransformation {
+internal class EmojiInputTransformation(
+    private val images: Map<String, String>,
+    private val maxLength: Int
+) : InputTransformation {
     override fun TextFieldBuffer.transformInput() {
-        val tokens = replyEmojiTokens(originalText.toString(), images)
+        val tokens = weiboEmojiTokens(originalText.toString(), images)
         val edits = (0 until changes.changeCount).map { changes.getRange(it) to changes.getOriginalRange(it) }
         edits.asReversed().forEach { (range, original) ->
             if (!original.collapsed) {
@@ -102,37 +133,48 @@ internal class ReplyEmojiInputTransformation(private val images: Map<String, Str
                 }
             }
         }
-        val limited = limitReplyEmojiDraft(toString(), images)
+        val limited = limitEmojiDraft(toString(), images, maxLength)
         if (limited.length < length) delete(limited.length, length)
     }
 }
 
-/** Compose 原生编辑器加表情绘制层；占位符、选区和自动滚动共用同一份文字排版。 */
+/**
+ * Compose 原生编辑器加表情绘制层；占位符、选区和自动滚动共用同一份文字排版。
+ *
+ * 输入 / 输出变换只影响视觉：草稿与真正发送的始终是 `[微笑]` 这样的原始表情代码。
+ * [maxLines] 控制可见行数（评论面板 8 行、私信输入胶囊 4 行），[maxLength] 是硬上限。
+ */
 @Composable
-internal fun ReplyEmojiEditor(
+internal fun WeiboEmojiTextField(
     state: TextFieldState,
     interactionSource: MutableInteractionSource,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    maxLines: Int = 8,
+    maxLength: Int = DEFAULT_COMPOSER_MAX_LENGTH,
+    textShadow: Shadow? = null
 ) {
     val images = LocalOnlineEmojiImages.current
     val color = MaterialTheme.colorScheme.primary
-    val output = remember(images, color) { ReplyEmojiOutputTransformation(images, color) }
-    val input = remember(images) { ReplyEmojiInputTransformation(images) }
+    val output = remember(images, color) { EmojiOutputTransformation(images, color) }
+    val input = remember(images, maxLength) { EmojiInputTransformation(images, maxLength) }
     val scroll = rememberScrollState()
     var viewportHeight by remember { mutableIntStateOf(0) }
     var layout by remember(state) { mutableStateOf<TextLayoutResult?>(null) }
     val density = LocalDensity.current
     val text = state.text.toString()
-    val tokens = remember(text, images) { replyEmojiTokens(text, images) }
+    val tokens = remember(text, images) { weiboEmojiTokens(text, images) }
     val visualText = remember(text, tokens) {
         StringBuilder(text).apply { tokens.asReversed().forEach { replace(it.start, it.end, "\u3000") } }.toString()
     }
     BasicTextField(
         state = state, modifier = modifier,
         interactionSource = interactionSource,
-        lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 8),
+        lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = maxLines),
         inputTransformation = input, outputTransformation = output,
-        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+        textStyle = MaterialTheme.typography.bodyLarge.copy(
+            color = MaterialTheme.colorScheme.onSurface,
+            shadow = textShadow
+        ),
         cursorBrush = SolidColor(color), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
         scrollState = scroll, onTextLayout = { layout = it() },
         decorator = { inner ->

@@ -40,7 +40,7 @@ import org.kazusa.matter.ui.theme.ThemePreferences
 import org.kazusa.matter.data.repository.FavoritesRepository
 import org.kazusa.matter.data.repository.FollowRepository
 import org.kazusa.matter.data.repository.GroupRepository
-import org.kazusa.matter.ui.detail.OnlineEmojiViewModel
+import org.kazusa.matter.ui.components.composer.OnlineEmojiViewModel
 import org.kazusa.matter.core.util.LocalOnlineEmojiImages
 import org.kazusa.matter.data.repository.LikeRepository
 import org.kazusa.matter.ui.components.LocalCommentLikeStates
@@ -438,7 +438,10 @@ fun MatterNavGraph() {
                                             ChatScreen(
                                                 peerUid = args.peerUid,
                                                 peerName = args.peerName,
-                                                onBackClick = { navigateBack() }
+                                                onBackClick = { navigateBack() },
+                                                onOpenImage = { url ->
+                                                    navigate(Screen.ImageViewer(initialIndex = 0, urls = listOf(url)))
+                                                }
                                             )
                                         }
 

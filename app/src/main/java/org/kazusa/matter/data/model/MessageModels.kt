@@ -58,14 +58,27 @@ data class MessageNoticePage(
     val hasMore: Boolean
 )
 
-/** 私信聊天记录中的一条（`https://m.weibo.cn/api/chat/list` 的 `msgs`）。 */
+/**
+ * 私信聊天记录中的一条（`https://m.weibo.cn/api/chat/list` 的 `msgs`）。
+ *
+ * 图片私信不会把地址拼在正文里，而是下发 `media_type=1` + `attachment` 对象：
+ * [imageUrl] 取自 `attachment.original_image.url`（地址里的 `source` 由服务端给出，不能自己拼）。
+ * 没有原图地址时退回缩略图地址，只有 fid 时按 mss 通道拼。
+ * 正文里的表情是 `<img alt="[代码]">`，解析成代码后由 [emojiImages] 提供官方图片地址兜底。
+ * [pending] 标记本地乐观插入、尚未被服务端确认的消息，气泡降透明度提示。
+ */
 data class ChatMessage(
     val id: String,
     val text: String,
     val fromMe: Boolean,
     /** 秒级时间戳已归一到毫秒；接口给的是文案时为 null。 */
     val timestampMillis: Long?,
-    val timeText: String?
+    val timeText: String?,
+    /** 图片私信原图地址；非空时气泡渲染图片。 */
+    val imageUrl: String? = null,
+    /** 正文表情代码 → 官方图片地址（`face.t.sinajs.cn`），本地资源缺失时兜底。 */
+    val emojiImages: Map<String, String> = emptyMap(),
+    val pending: Boolean = false
 ) {
     val key: String get() = id
 }
@@ -75,3 +88,20 @@ data class ChatMessagePage(
     /** 更早一页的 `max_id`；null 表示已经到最早一条。 */
     val nextMaxId: Long?
 )
+
+/** 发送私信成功后服务端确认的消息身份（id 可能缺省，仅用于替换本地乐观插入的临时 id）。 */
+data class ChatSendResult(
+    val id: String?,
+    val timestampMillis: Long?
+)
+
+/** webim（api.weibo.com/chat）体系的 appkey 与图片展示通道，契约从其 SPA bundle 核实。 */
+internal const val CHAT_WEBIM_SOURCE = "209678993"
+
+/** mss 图片读取通道与私有化 `source`（实测私信图片地址里的取值，见 [chatMssImageUrl]）。 */
+internal const val CHAT_MSS_GET = "https://attachment.api.weibo.com/2/mss/msget"
+internal const val CHAT_MSS_SOURCE = "2390714039"
+
+/** 只有 fid、没有现成地址时（本地乐观消息等）按 mss 通道拼一张原图地址。 */
+internal fun chatMssImageUrl(fid: String): String =
+    "$CHAT_MSS_GET?fid=$fid&imageType=origin&source=$CHAT_MSS_SOURCE"

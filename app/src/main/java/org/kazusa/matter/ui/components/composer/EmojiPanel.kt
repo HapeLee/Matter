@@ -1,4 +1,4 @@
-package org.kazusa.matter.ui.detail
+package org.kazusa.matter.ui.components.composer
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -60,7 +60,7 @@ import org.kazusa.matter.data.model.OnlineEmojiState
 import org.kazusa.matter.data.model.WeiboEmojis
 
 /** 仅用于面板展示；下载与缓存仍由 ViewModel / Repository 管理。 */
-internal data class ReplyEmojiGroup(
+internal data class WeiboEmojiGroup(
     val id: String,
     val label: String,
     val codes: List<String>,
@@ -69,32 +69,38 @@ internal data class ReplyEmojiGroup(
     val packageId: String? = null
 )
 
-internal fun replyEmojiGroups(online: OnlineEmojiState, recent: List<String>): List<ReplyEmojiGroup> {
+internal fun weiboEmojiGroups(online: OnlineEmojiState, recent: List<String>): List<WeiboEmojiGroup> {
     val installed = online.installed.associateBy { it.id }
     val hot = installed["com.sina.default"]
     val base = online.catalog.firstOrNull { it.id == "catalog.default" }
     return buildList {
-        add(ReplyEmojiGroup("recent", "最近使用", recent))
-        add(ReplyEmojiGroup("weibo", "微博表情",
+        add(WeiboEmojiGroup("recent", "最近使用", recent))
+        add(WeiboEmojiGroup("weibo", "微博表情",
             (hot?.emojis.orEmpty().map { it.code } + (base?.emojis?.map { it.code } ?: WeiboEmojis.weibo)).distinct(),
             representative = base?.emojis?.firstOrNull()?.code ?: "[微笑]"))
-        add(ReplyEmojiGroup("unicode", "Emoji", WeiboEmojis.unicode, representative = "😄"))
-        if (online.catalog.isEmpty()) add(ReplyEmojiGroup("other", "其他表情", WeiboEmojis.other, representative = "[哆啦A梦微笑]"))
+        add(WeiboEmojiGroup("unicode", "Emoji", WeiboEmojis.unicode, representative = "😄"))
+        if (online.catalog.isEmpty()) add(WeiboEmojiGroup("other", "其他表情", WeiboEmojis.other, representative = "[哆啦A梦微笑]"))
         online.catalog.filterNot { it.id == "catalog.default" }.forEach { group ->
-            add(ReplyEmojiGroup(group.id, group.title, group.emojis.map { it.code }, group.emojis.associate { it.code to it.image }))
+            add(WeiboEmojiGroup(group.id, group.title, group.emojis.map { it.code }, group.emojis.associate { it.code to it.image }))
         }
         val packages = (online.packages.map { it.id to it.title } + online.installed.map { it.id to it.title })
             .distinctBy { it.first }.filterNot { it.first == "com.sina.default" }
         packages.forEach { (id, title) ->
             val emojis = installed[id]?.emojis.orEmpty()
-            add(ReplyEmojiGroup("online:$id", title, emojis.map { it.code }, emojis.associate { it.code to it.image }, packageId = id))
+            add(WeiboEmojiGroup("online:$id", title, emojis.map { it.code }, emojis.associate { it.code to it.image }, packageId = id))
         }
     }
 }
 
+/**
+ * 微博表情面板：分组 tab + 滑动分页 + 表情网格。
+ *
+ * 只负责展示与点击回调；显隐、键盘互斥、最近使用与所选分组由调用方持有，
+ * 这样正文回复（sheet 内）与私信（输入胶囊下方）可以用同一份面板而各自决定挂载方式。
+ */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-internal fun ReplyEmojiPanel(
+internal fun WeiboEmojiPanel(
     recentEmojis: List<String>,
     online: OnlineEmojiState,
     selectedGroup: String,
@@ -106,7 +112,7 @@ internal fun ReplyEmojiPanel(
 ) {
     val onlineImages = LocalOnlineEmojiImages.current
     val groups = remember(online.catalog, online.packages, online.installed, recentEmojis) {
-        replyEmojiGroups(online, recentEmojis)
+        weiboEmojiGroups(online, recentEmojis)
     }
     val groupIds = groups.map { it.id }
     val pager = rememberPagerState(initialPage = groupIds.indexOf(selectedGroup).takeIf { it >= 0 } ?: 1,
@@ -133,7 +139,7 @@ internal fun ReplyEmojiPanel(
             tabList.animateScrollToItem(index)
         }
     }
-    Column(Modifier.fillMaxWidth().height(280.dp)) {
+    Column(Modifier.fillMaxWidth().height(EmojiPanelHeight)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             LazyRow(Modifier.weight(1f), state = tabList, contentPadding = PaddingValues(horizontal = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -212,3 +218,6 @@ internal fun ReplyEmojiPanel(
         }
     }
 }
+
+/** 面板固定高度：与正文回复一致，调用方用它做列表/输入区的让位。 */
+internal val EmojiPanelHeight = 280.dp

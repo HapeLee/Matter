@@ -19,17 +19,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.delete
@@ -78,7 +73,14 @@ import org.kazusa.matter.core.util.LocalOnlineEmojiImages
 import org.kazusa.matter.data.model.OnlineEmojiState
 import org.kazusa.matter.data.model.ReplyImageHandle
 import org.kazusa.matter.data.model.ReplyPickerKind
-import org.kazusa.matter.ui.effect.liquid.rememberLiquidSheetShape
+import org.kazusa.matter.ui.components.composer.ComposerEmojiState
+import org.kazusa.matter.ui.components.composer.ComposerSheet
+import org.kazusa.matter.ui.components.composer.ComposerToolButton
+import org.kazusa.matter.ui.components.composer.EmojiDraftState
+import org.kazusa.matter.ui.components.composer.WeiboEmojiPanel
+import org.kazusa.matter.ui.components.composer.WeiboEmojiTextField
+import org.kazusa.matter.ui.components.composer.limitEmojiDraft
+import org.kazusa.matter.ui.components.composer.rememberComposerEmojiState
 
 /** 输入区最小高度：与微博类客户端的评论面板一致，留出足够的书写空间。 */
 private val ReplySheetInputMinHeight = 104.dp
@@ -222,14 +224,13 @@ private fun ReplySheetPanel(
 ) {
     val focusRequester = remember { FocusRequester() }
     val haptic = LocalHapticFeedback.current
-    var showEmojiRow by remember(targetId) { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val emojiPanel = rememberComposerEmojiState(focusRequester, key = targetId)
     val editorInteractions = remember { MutableInteractionSource() }
     val editorFocused by editorInteractions.collectIsFocusedAsState()
-    LaunchedEffect(editorFocused) { if (editorFocused) showEmojiRow = false }
-    BackHandler(enabled = showEmojiRow) { showEmojiRow = false }
-    val draftEditor = remember(targetId) { ReplyDraftEditorState(draft) }
+    LaunchedEffect(editorFocused) { if (editorFocused) emojiPanel.onEditorFocused() }
+    val draftEditor = remember(targetId) { EmojiDraftState(draft) }
     val editor = draftEditor.field
     val emojiImages = LocalOnlineEmojiImages.current
     val canSend = (editor.text.isNotBlank() || attachment != null) && !isSending
@@ -248,7 +249,7 @@ private fun ReplySheetPanel(
                 if (index >= 0 && openTopic && preceding.substring(index + 1).none { it.isWhitespace() }) start = index
             }
             replace(start, selection.max, text)
-            val limited = limitReplyEmojiDraft(toString(), emojiImages)
+            val limited = limitEmojiDraft(toString(), emojiImages, MAX_REPLY_LENGTH)
             if (limited.length < length) delete(limited.length, length)
             selection = TextRange((start + text.length).coerceAtMost(length))
         }
@@ -256,7 +257,7 @@ private fun ReplySheetPanel(
     }
 
     fun openPicker(kind: ReplyPickerKind) {
-        showEmojiRow = false
+        emojiPanel.dismiss()
         focusManager.clearFocus()
         keyboardController?.hide()
         onOpenPicker(kind)
@@ -275,16 +276,8 @@ private fun ReplySheetPanel(
     // 面板进入组合（滑入动画开始时）就接管焦点，键盘随之上来
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            // 键盘与导航栏取并集：键盘弹起时输入区整体上移，收起时只留导航栏高度
-            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)),
-        // 与液态玻璃悬浮组件同款连续曲率（底部两角在屏幕 / 键盘外，取 0）
-        shape = rememberLiquidSheetShape(26.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 3.dp
-    ) {
+    // 外壳（圆角 + 键盘/导航栏避让）抽在 ComposerSheet 里，私信的表情面板复用同一层
+    ComposerSheet(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Box(
                 modifier = Modifier
@@ -298,9 +291,11 @@ private fun ReplySheetPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                ReplyEmojiEditor(
+                WeiboEmojiTextField(
                     state = editor,
                     interactionSource = editorInteractions,
+                    maxLines = 8,
+                    maxLength = MAX_REPLY_LENGTH,
                     modifier = Modifier.fillMaxWidth().heightIn(min = ReplySheetInputMinHeight).focusRequester(focusRequester)
                 )
             }
@@ -335,43 +330,34 @@ private fun ReplySheetPanel(
                     .padding(start = 8.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SheetToolButton(
-                    imageVector = if (showEmojiRow) Icons.Outlined.Keyboard else Icons.Outlined.EmojiEmotions,
+                ComposerToolButton(
+                    imageVector = if (emojiPanel.visible) Icons.Outlined.Keyboard else Icons.Outlined.EmojiEmotions,
                     contentDescription = "表情",
-                    active = showEmojiRow,
-                    onClick = {
-                        if (showEmojiRow) {
-                            showEmojiRow = false
-                            restoreKeyboard()
-                        } else {
-                            focusManager.clearFocus()
-                            keyboardController?.hide()
-                            showEmojiRow = true
-                        }
-                    }
+                    active = emojiPanel.visible,
+                    onClick = { emojiPanel.toggle() }
                 )
                 // 评论支持一张附图，使用平台照片选择器。
-                SheetToolButton(
+                ComposerToolButton(
                     imageVector = Icons.Outlined.Image,
                     contentDescription = if (attachment == null) "选择图片" else "更换图片",
                     enabled = !isSending,
                     onClick = {
-                        showEmojiRow = false
+                        emojiPanel.dismiss()
                         focusManager.clearFocus()
                         onPickImage()
                     }
                 )
-                SheetToolButton(
+                ComposerToolButton(
                     imageVector = Icons.Outlined.AlternateEmail,
                     contentDescription = "插入 @",
                     onClick = { openPicker(ReplyPickerKind.MENTION) }
                 )
-                SheetToolButton(
+                ComposerToolButton(
                     imageVector = Icons.Outlined.Tag,
                     contentDescription = "插入话题",
                     onClick = { openPicker(ReplyPickerKind.TOPIC) }
                 )
-                SheetToolButton(
+                ComposerToolButton(
                     imageVector = Icons.Outlined.AddCircleOutline,
                     contentDescription = "更多（暂未支持）",
                     enabled = false,
@@ -409,8 +395,8 @@ private fun ReplySheetPanel(
                     }
                 }
             }
-            AnimatedVisibility(visible = showEmojiRow) {
-                ReplyEmojiPanel(recentEmojis = recentEmojis, online = onlineEmojis,
+            AnimatedVisibility(visible = emojiPanel.visible) {
+                WeiboEmojiPanel(recentEmojis = recentEmojis, online = onlineEmojis,
                     selectedGroup = selectedEmojiGroup, onGroupChange = onEmojiGroupChange,
                     onOpenOnline = onOpenOnlineEmojis, onRefreshOnline = onRefreshOnlineEmojis,
                     onInstall = onInstallEmojiPackage, onEmojiClick = { insert(it); onEmojiUsed(it) })
@@ -429,30 +415,6 @@ private fun ReplySheetPanel(
             restoreKeyboard()
         }
     )
-}
-
-/** 工具条图标：禁用态只是变淡，不提供点击反馈。 */
-@Composable
-private fun SheetToolButton(
-    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    active: Boolean = false
-) {
-    val tint = when {
-        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-        active -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    IconButton(onClick = onClick, enabled = enabled) {
-        Icon(
-            imageVector = imageVector,
-            contentDescription = contentDescription,
-            tint = tint,
-            modifier = Modifier.size(20.dp)
-        )
-    }
 }
 
 /** 面板里的占位文案：与微博客户端一致，写成「回复@博主」。 */

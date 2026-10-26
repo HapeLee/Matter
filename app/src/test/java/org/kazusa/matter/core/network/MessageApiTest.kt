@@ -111,6 +111,142 @@ class MessageApiTest {
     }
 
     @Test
+    fun chatPageParsesDateToStringCreatedAt() {
+        // webim 私信接口的 created_at 是 java.util.Date.toString() 形态，
+        // 不能解析时会把整串日期原样显示在气泡里
+        val page = parseChatPage(
+            json(
+                """{"ok":1,"data":{"msgs":[
+                    {"id":201,"text":"晚点聊","sender_id":2,"created_at":"Mon Oct 26 20:14:45 +0800 2026"}
+                ]}}"""
+            ),
+            currentUid = "1",
+            peerUid = "2",
+            maxId = null,
+            count = 20
+        )
+
+        val message = page.messages.single()
+        assertEquals(
+            java.time.OffsetDateTime.parse("2026-10-26T20:14:45+08:00").toInstant().toEpochMilli(),
+            message.timestampMillis
+        )
+        // 解析出时间戳后不再保留原始文案
+        assertNull(message.timeText)
+    }
+
+    @Test
+    fun chatPageParsesImageAttachment() {
+        // 真实报文形态：图片私信没有内联地址，附件在 attachment 里
+        val page = parseChatPage(
+            json(
+                """{"ok":1,"data":{"msgs":[
+                    {"id":301,"text":"分享图片","sender_id":2,"created_at":"Mon Oct 26 21:44:45 +0800 2026",
+                     "media_type":1,
+                     "attachment":{"fid":5358386193630749,"fidstr":"5358386193630749",
+                       "original_image":{"url":"https://attachment.api.weibo.com/2/mss/msget?fid=5358386193630749&imageType=origin&source=2390714039","width":600,"height":480},
+                       "thumbnail":{"url":"https://attachment.api.weibo.com/2/mss/msget_thumbnail?fid=5358386193630749&high=240","width":240}}}
+                ]}}"""
+            ),
+            currentUid = "1",
+            peerUid = "2",
+            maxId = null,
+            count = 20
+        )
+
+        val message = page.messages.single()
+        // 图片气泡不再重复「分享图片」这行服务端固定文案
+        assertEquals("", message.text)
+        assertEquals(
+            "https://attachment.api.weibo.com/2/mss/msget?fid=5358386193630749&imageType=origin&source=2390714039",
+            message.imageUrl
+        )
+    }
+
+    @Test
+    fun chatPageUsesThumbnailWhenOriginalMissing() {
+        val page = parseChatPage(
+            json(
+                """{"ok":1,"data":{"msgs":[
+                    {"id":303,"sender_id":2,"created_at":1735689500,
+                     "attachment":{"fidstr":"9","thumbnail":{"url":"https://attachment.api.weibo.com/2/mss/msget_thumbnail?fid=9"}}}
+                ]}}"""
+            ),
+            currentUid = "1",
+            peerUid = "2",
+            maxId = null,
+            count = 20
+        )
+
+        assertEquals(
+            "https://attachment.api.weibo.com/2/mss/msget_thumbnail?fid=9",
+            page.messages.single().imageUrl
+        )
+    }
+
+    @Test
+    fun chatPageFallsBackToMssUrlWhenAttachmentHasOnlyFid() {
+        val page = parseChatPage(
+            json(
+                """{"ok":1,"data":{"msgs":[
+                    {"id":302,"text":"分享图片","sender_id":2,"created_at":1735689500,"attachment":{"fidstr":"5358386193630749"}}
+                ]}}"""
+            ),
+            currentUid = "1",
+            peerUid = "2",
+            maxId = null,
+            count = 20
+        )
+
+        assertEquals(
+            "https://attachment.api.weibo.com/2/mss/msget?fid=5358386193630749&imageType=origin&source=2390714039",
+            page.messages.single().imageUrl
+        )
+    }
+
+    @Test
+    fun chatPageRestoresEmojiFromImageTag() {
+        // 对方只发一个表情时，正文只有一个 <img>：按标签剥离会把整条消息清成空串
+        val page = parseChatPage(
+            json(
+                """{"ok":1,"data":{"msgs":[
+                    {"id":401,"sender_id":2,"created_at":"Mon Oct 26 21:45:06 +0800 2026",
+                     "text":"<span class=\"url-icon\"><img alt=\"[泪奔]\" src=\"https://face.t.sinajs.cn/t4/appstyle/expression/ext/normal/d6/2025_ShedTears_mobile.png\" style=\"width:1em; height:1em;\" /></span>"}
+                ]}}"""
+            ),
+            currentUid = "1",
+            peerUid = "2",
+            maxId = null,
+            count = 20
+        )
+
+        val message = page.messages.single()
+        assertEquals("[泪奔]", message.text)
+        assertEquals(
+            "https://face.t.sinajs.cn/t4/appstyle/expression/ext/normal/d6/2025_ShedTears_mobile.png",
+            message.emojiImages["[泪奔]"]
+        )
+    }
+
+    @Test
+    fun chatPageKeepsEmojiCodeBetweenText() {
+        val page = parseChatPage(
+            json(
+                """{"ok":1,"data":{"msgs":[
+                    {"id":402,"sender_id":2,"created_at":"Mon Oct 26 21:45:06 +0800 2026",
+                     "text":"笑死<br /><img alt=\"[哈哈]\" src=\"https://face.t.sinajs.cn/a.png\" />下次再说"}
+                ]}}"""
+            ),
+            currentUid = "1",
+            peerUid = "2",
+            maxId = null,
+            count = 20
+        )
+
+        assertEquals("笑死\n[哈哈]下次再说", page.messages.single().text)
+    }
+
+    @Test
     fun shortChatPageHasNoOlderCursor() {
         val page = parseChatPage(
             json("""{"ok":1,"data":{"msgs":[{"id":101,"text":"a","sender_id":2,"created_at":1735689500}]}}"""),

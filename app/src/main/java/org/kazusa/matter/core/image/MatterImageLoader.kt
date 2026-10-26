@@ -30,12 +30,19 @@ object MatterImageLoader {
      * 不再需要保留 [coil3.gif.GifDecoder] 退回分支。
      *
      * @param context Coil 的平台上下文；Android 上是 `Application` / `Activity`。
+     * @param sessionCookieProvider 会话 Cookie 快照：私信图片走 mss 通道，不带凭据一律 403。
+     *   只能同步取值（Coil 拦截器），所以由调用方提供快照而不是自己读 DataStore。
      */
-    fun create(context: PlatformContext): ImageLoader {
+    fun create(
+        context: PlatformContext,
+        sessionCookieProvider: () -> String = { "" }
+    ): ImageLoader {
+        // 复用同一份连接池与防盗链拦截器，只额外补一层 mss 附件通道的 Cookie
+        val client = WeiboImageClient.clientWithSessionCookie(sessionCookieProvider)
         return ImageLoader.Builder(context)
             .components {
                 // 图片请求统一走带 Referer / 浏览器 UA 且会对偶发 403 重试的 OkHttp 客户端
-                add(OkHttpNetworkFetcherFactory(callFactory = { WeiboImageClient.client }))
+                add(OkHttpNetworkFetcherFactory(callFactory = { client }))
                 // 动图解码：系统 ImageDecoder 保留原有帧时序
                 add(AnimatedImageDecoder.Factory())
             }

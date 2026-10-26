@@ -15,6 +15,7 @@ import org.junit.Before
 import org.junit.Test
 import org.kazusa.matter.core.network.ApiResult
 import org.kazusa.matter.data.model.ChatMessagePage
+import org.kazusa.matter.data.model.ChatSendResult
 import org.kazusa.matter.data.model.MessageConversation
 import org.kazusa.matter.data.model.MessageConversationPage
 import org.kazusa.matter.data.model.MessageNotice
@@ -35,13 +36,13 @@ class MessageCenterViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun conversation(uid: String) = MessageConversation(
+    private fun conversation(uid: String, unread: Int = 0) = MessageConversation(
         peerUid = uid,
         peerName = "用户$uid",
         peerAvatarUrl = "",
         preview = "",
         timeText = null,
-        unreadCount = 0
+        unreadCount = unread
     )
 
     private fun notice(id: String) = MessageNotice(
@@ -67,6 +68,10 @@ class MessageCenterViewModelTest {
         override suspend fun notices(tab: MessageTab, page: Int) = loadNotices(tab, page)
         override suspend fun history(peerUid: String, maxId: Long?): ApiResult<ChatMessagePage> =
             ApiResult.Error(message = "本用例不使用聊天记录")
+        override suspend fun send(peerUid: String, text: String): ApiResult<ChatSendResult> =
+            ApiResult.Error(message = "本用例不使用私信发送")
+        override suspend fun sendImage(peerUid: String, bytes: ByteArray): ApiResult<ChatSendResult> =
+            ApiResult.Error(message = "本用例不使用私信发送")
     }
 
     @Test
@@ -90,7 +95,7 @@ class MessageCenterViewModelTest {
         })
 
         val viewModel = MessageCenterViewModel(repository)
-        viewModel.loadIfNeeded(MessageTab.DIRECT)
+        viewModel.onContentVisible(MessageTab.DIRECT)
         advanceUntilIdle()
 
         viewModel.loadMore(MessageTab.DIRECT)
@@ -116,8 +121,8 @@ class MessageCenterViewModelTest {
         })
 
         val viewModel = MessageCenterViewModel(repository)
-        viewModel.loadIfNeeded(MessageTab.COMMENT)
-        viewModel.loadIfNeeded(MessageTab.LIKE)
+        viewModel.onContentVisible(MessageTab.COMMENT)
+        viewModel.onContentVisible(MessageTab.LIKE)
         advanceUntilIdle()
 
         assertEquals("评论加载失败", viewModel.uiState.value.comments.errorMessage)
@@ -128,27 +133,142 @@ class MessageCenterViewModelTest {
     }
 
     @Test
-    fun eachSectionLoadsOnlyOncePerEntry() = runTest {
-        var calls = 0
+    fun firstEntryLoadsFirstPageAndReturnOnlySyncs() = runTest {
+        var conversationCalls = 0
+        var noticeCalls = 0
         val repository = FakeRepository(
             loadConversations = {
-                calls += 1
+                conversationCalls += 1
                 ApiResult.Success(MessageConversationPage(emptyList(), hasMore = false))
             },
             loadNotices = { _, _ ->
-                calls += 1
+                noticeCalls += 1
                 ApiResult.Success(MessageNoticePage(emptyList(), hasMore = false))
             }
         )
 
         val viewModel = MessageCenterViewModel(repository)
-        viewModel.loadIfNeeded(MessageTab.DIRECT)
-        viewModel.loadIfNeeded(MessageTab.DIRECT)
-        viewModel.loadIfNeeded(MessageTab.MENTION)
-        viewModel.loadIfNeeded(MessageTab.MENTION)
+        viewModel.onContentVisible(MessageTab.DIRECT)
+        advanceUntilIdle()
+        // 首次进入只拉一次首屏，不重复打首页
+        assertEquals(1, conversationCalls)
+
+        // 再次出现（从会话页返回 / 切回私信分区）改为静默同步，不再整页重载
+        viewModel.onContentVisible(MessageTab.DIRECT)
+        advanceUntilIdle()
+        assertEquals(2, conversationCalls)
+        assertTrue(!viewModel.uiState.value.conversations.isInitialLoading)
+
+        viewModel.onContentVisible(MessageTab.MENTION)
+        viewModel.onContentVisible(MessageTab.MENTION)
+        advanceUntilIdle()
+        assertEquals(1, noticeCalls)
+    }
+
+    @Test
+    fun reenteringConversationsPicksUpServerUnread() = runTest {
+        var unread = 2
+        val pages = mutableListOf<Int>()
+        val repository = FakeRepository(loadConversations = { page ->
+            pages += page
+            ApiResult.Success(
+                MessageConversationPage(listOf(conversation("1", unread)), hasMore = false)
+            )
+        })
+
+        val viewModel = MessageCenterViewModel(repository)
+        viewModel.onContentVisible(MessageTab.DIRECT)
+        advanceUntilIdle()
+        assertEquals(2, viewModel.uiState.value.conversations.items.single().unreadCount)
+
+        // 在会话页读完，服务端把该会话的未读清零；返回列表应当同步到 0
+        unread = 0
+        viewModel.onContentVisible(MessageTab.DIRECT)
         advanceUntilIdle()
 
-        assertEquals(2, calls)
+        assertEquals(0, viewModel.uiState.value.conversations.items.single().unreadCount)
+        assertEquals(listOf(1, 1), pages)
+    }
+
+    @Test
+    fun markConversationReadClearsLocalBadgeImmediately() = runTest {
+        val repository = FakeRepository(loadConversations = {
+            ApiResult.Success(
+                MessageConversationPage(
+                    listOf(conversation("1", 3), conversation("2", 5)),
+                    hasMore = false
+                )
+            )
+        })
+
+        val viewModel = MessageCenterViewModel(repository)
+        viewModel.onContentVisible(MessageTab.DIRECT)
+        advanceUntilIdle()
+
+        // 不推进调度器：点开会话必须在跳转前同步生效，否则红点会跟着页面一起被带走
+        viewModel.markConversationRead("1")
+
+        val items = viewModel.uiState.value.conversations.items
+        assertEquals(0, items.first { it.peerUid == "1" }.unreadCount)
+        assertEquals(5, items.first { it.peerUid == "2" }.unreadCount)
+    }
+
+    @Test
+    fun syncKeepsAlreadyLoadedPagesAndTheirOrder() = runTest {
+        var unread = 1
+        val repository = FakeRepository(loadConversations = { page ->
+            when (page) {
+                1 -> ApiResult.Success(
+                    MessageConversationPage(listOf(conversation("1", unread)), hasMore = true)
+                )
+                else -> ApiResult.Success(
+                    MessageConversationPage(listOf(conversation("2")), hasMore = false)
+                )
+            }
+        })
+
+        val viewModel = MessageCenterViewModel(repository)
+        viewModel.onContentVisible(MessageTab.DIRECT)
+        advanceUntilIdle()
+        viewModel.loadMore(MessageTab.DIRECT)
+        advanceUntilIdle()
+        assertEquals(listOf("1", "2"), viewModel.uiState.value.conversations.items.map { it.peerUid })
+
+        unread = 0
+        viewModel.onContentVisible(MessageTab.DIRECT)
+        advanceUntilIdle()
+
+        val items = viewModel.uiState.value.conversations.items
+        assertEquals(listOf("1", "2"), items.map { it.peerUid })
+        assertEquals(0, items.first { it.peerUid == "1" }.unreadCount)
+    }
+
+    @Test
+    fun syncFailureKeepsListAndDoesNotSurfaceError() = runTest {
+        var failSync = false
+        val repository = FakeRepository(loadConversations = {
+            if (failSync) {
+                ApiResult.Error(message = "网络断开")
+            } else {
+                ApiResult.Success(
+                    MessageConversationPage(listOf(conversation("1", 2)), hasMore = false)
+                )
+            }
+        })
+
+        val viewModel = MessageCenterViewModel(repository)
+        viewModel.onContentVisible(MessageTab.DIRECT)
+        advanceUntilIdle()
+
+        failSync = true
+        viewModel.onContentVisible(MessageTab.DIRECT)
+        advanceUntilIdle()
+
+        val section = viewModel.uiState.value.conversations
+        assertEquals(listOf("1"), section.items.map { it.peerUid })
+        // 静默同步失败不该在列表上弹错误条，也不该卡在 loading
+        assertNull(section.errorMessage)
+        assertTrue(!section.isInitialLoading && !section.isRefreshing && !section.isLoadingMore)
     }
 
     @Test
@@ -160,7 +280,7 @@ class MessageCenterViewModelTest {
         )
 
         val viewModel = MessageCenterViewModel(repository)
-        viewModel.loadIfNeeded(MessageTab.DIRECT)
+        viewModel.onContentVisible(MessageTab.DIRECT)
         advanceUntilIdle()
 
         assertTrue(!viewModel.uiState.value.conversations.hasMore)

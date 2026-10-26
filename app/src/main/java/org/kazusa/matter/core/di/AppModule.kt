@@ -7,11 +7,14 @@ import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
 import org.koin.dsl.onClose
+import kotlinx.coroutines.flow.firstOrNull
+
 import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.core.datastore.MediaPreferences
 import org.kazusa.matter.core.datastore.UserSession
 import org.kazusa.matter.core.network.CookieFallbackSource
 import org.kazusa.matter.core.network.KtorClientFactory
+import org.kazusa.matter.core.network.ChatCometClient
 import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.data.cache.TimelineCacheManager
 import org.kazusa.matter.data.cache.TimelinePositionManager
@@ -42,7 +45,7 @@ import org.kazusa.matter.core.session.CredentialCipher
 import org.kazusa.matter.core.session.SessionExpiredBus
 import org.kazusa.matter.core.session.WebSessionCookieStore
 import org.kazusa.matter.core.media.AndroidEmojiPackageStore
-import org.kazusa.matter.ui.detail.OnlineEmojiViewModel
+import org.kazusa.matter.ui.components.composer.OnlineEmojiViewModel
 import java.io.File
 import org.kazusa.matter.data.repository.ReplyRepository
 import org.kazusa.matter.data.repository.LikeRepository
@@ -102,8 +105,9 @@ val dataModule = module {
     single<UserRepository> { WeiboUserRepository(get()) }
     single<HotSearchRepository> { WeiboHotSearchRepository(get()) }
 
-    // 私信域：独立协议（api.weibo.com/webim），与会话绑定的 Cookie 每次请求时重新读取
-    single<MessageRepository> { WeiboMessageRepository(get(), get(), get()) }
+    // 私信域：读走 m.weibo.cn 消息页接口，发送走 webim（api.weibo.com）写闸门，
+    // 与会话绑定的 Cookie 每次请求时重新读取
+    single<MessageRepository> { WeiboMessageRepository(get(), get(), get(), get()) }
 
     // 由导航根按会话请求并记忆；不能声明为应用单例，否则收藏状态会跨账号复用。
     factory { parameters -> FavoritesRepository(parameters.get<UserSession>(), get()) }
@@ -171,8 +175,16 @@ val viewModelModule = module {
         ChatViewModel(
             peerUid = parameters.get<String>(),
             peerName = parameters.get<String>(),
-            repository = get()
+            repository = get(),
+            cometClient = get()
         )
+    }
+    // CometD 长轮询按会话页成对创建/销毁（onCleared stop），不做应用级单例
+    factory {
+        val preferences = get<AuthPreferences>()
+        ChatCometClient(client = get(), sessionProvider = {
+            try { preferences.sessionFlow.firstOrNull() } catch (_: Exception) { null }
+        }) { message -> android.util.Log.d("ChatComet", message) }
     }
 }
 
