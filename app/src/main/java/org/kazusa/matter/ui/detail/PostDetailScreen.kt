@@ -114,6 +114,7 @@ import org.kazusa.matter.data.cache.UserAvatarCache
 import org.kazusa.matter.core.util.parseInteractionCount
 import org.kazusa.matter.data.model.WeiboCommentDto
 import org.kazusa.matter.data.model.WeiboStatusDto
+import org.kazusa.matter.ui.components.composer.OnlineEmojiViewModel
 import org.kazusa.matter.ui.components.AuthorBadgeTag
 import org.kazusa.matter.ui.components.BloggerSuffixTag
 import org.kazusa.matter.ui.components.EmptyMessage

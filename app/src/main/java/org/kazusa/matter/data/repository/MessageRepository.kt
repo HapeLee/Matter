@@ -7,8 +7,10 @@ import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.core.datastore.UserSession
 import org.kazusa.matter.core.network.ApiResult
 import org.kazusa.matter.core.network.MessageApi
+import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.core.session.SessionExpiredBus
 import org.kazusa.matter.data.model.ChatMessagePage
+import org.kazusa.matter.data.model.ChatSendResult
 import org.kazusa.matter.data.model.MessageConversationPage
 import org.kazusa.matter.data.model.MessageNoticePage
 import org.kazusa.matter.data.model.MessageTab
@@ -28,12 +30,19 @@ interface MessageRepository {
 
     /** 与 [peerUid] 的聊天记录；[maxId] 传上一页返回的 `nextMaxId` 往前翻。 */
     suspend fun history(peerUid: String, maxId: Long? = null): ApiResult<ChatMessagePage>
+
+    /** 发送文本私信；成功带回服务端确认的消息身份（供替换本地乐观插入的临时 id）。 */
+    suspend fun send(peerUid: String, text: String): ApiResult<ChatSendResult>
+
+    /** 发送图片私信（原图字节）。 */
+    suspend fun sendImage(peerUid: String, bytes: ByteArray): ApiResult<ChatSendResult>
 }
 
 class WeiboMessageRepository(
     private val authPreferences: AuthPreferences,
     client: HttpClient,
-    sessionExpiredBus: SessionExpiredBus? = null
+    sessionExpiredBus: SessionExpiredBus? = null,
+    private val apiService: WeiboApiService
 ) : MessageRepository {
 
     private val api = MessageApi(client, sessionExpiredBus)
@@ -56,6 +65,17 @@ class WeiboMessageRepository(
             peerUid = peerUid,
             maxId = maxId
         )
+    }
+
+    override suspend fun send(peerUid: String, text: String): ApiResult<ChatSendResult> {
+        // 发送前捕获会话：请求期间换账号时，旧账号的 cookie 不能继续用于新会话
+        val session = currentSession() ?: return notLoggedIn()
+        return apiService.sendChatMessage(peerUid, text, cookie = session.cookieHeader)
+    }
+
+    override suspend fun sendImage(peerUid: String, bytes: ByteArray): ApiResult<ChatSendResult> {
+        val session = currentSession() ?: return notLoggedIn()
+        return apiService.sendChatImage(peerUid, bytes, cookie = session.cookieHeader)
     }
 
     private suspend fun currentSession(): UserSession? {

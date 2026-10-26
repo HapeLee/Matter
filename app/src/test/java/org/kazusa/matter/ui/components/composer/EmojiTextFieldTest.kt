@@ -1,4 +1,4 @@
-package org.kazusa.matter.ui.detail
+package org.kazusa.matter.ui.components.composer
 
 import android.app.Application
 import androidx.compose.foundation.text.input.TextFieldState
@@ -8,22 +8,23 @@ import androidx.compose.ui.text.TextRange
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.kazusa.matter.ui.detail.MAX_REPLY_LENGTH
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
-class ReplyEmojiEditorTest {
+class EmojiTextFieldTest {
     private val images = mapOf("[在线]" to "https://face.t.sinajs.cn/online.png")
 
     @Test fun visualOutputMixesLocalOnlineAndUnicodeButRetainsUnknownCodes() {
         val raw = "你好[微笑][在线]😄\n@博主 #话题# [未知表情]"
         val source = TextFieldState(raw)
         val display = TextFieldState(source.text.toString())
-        display.edit { with(ReplyEmojiOutputTransformation(images, Color.Blue)) { transformOutput() } }
+        display.edit { with(EmojiOutputTransformation(images, Color.Blue)) { transformOutput() } }
         assertEquals("你好\u3000\u3000😄\n@博主 #话题# [未知表情]", display.text.toString())
         assertEquals(raw, source.text.toString())
-        assertEquals(listOf("[微笑]", "[在线]"), replyEmojiTokens(raw, images).map { it.code })
+        assertEquals(listOf("[微笑]", "[在线]"), weiboEmojiTokens(raw, images).map { it.code })
     }
 
     private fun edit(raw: String, start: Int, end: Int, replacement: String = ""): TextFieldState {
@@ -31,7 +32,7 @@ class ReplyEmojiEditorTest {
         field.edit {
             replace(start, end, replacement)
             selection = TextRange(start + replacement.length)
-            with(ReplyEmojiInputTransformation(images)) { transformInput() }
+            with(EmojiInputTransformation(images, MAX_REPLY_LENGTH)) { transformInput() }
         }
         return field
     }
@@ -59,14 +60,29 @@ class ReplyEmojiEditorTest {
 
     @Test fun lengthLimitDoesNotLeaveHalfAnEmojiOrSurrogatePair() {
         val prefix = "甲".repeat(MAX_REPLY_LENGTH - 2)
-        assertEquals(prefix, limitReplyEmojiDraft(prefix + "[在线]", images))
-        assertEquals("甲".repeat(MAX_REPLY_LENGTH - 1), limitReplyEmojiDraft("甲".repeat(MAX_REPLY_LENGTH - 1) + "😄", images))
+        assertEquals(prefix, limitEmojiDraft(prefix + "[在线]", images, MAX_REPLY_LENGTH))
+        assertEquals(
+            "甲".repeat(MAX_REPLY_LENGTH - 1),
+            limitEmojiDraft("甲".repeat(MAX_REPLY_LENGTH - 1) + "😄", images, MAX_REPLY_LENGTH)
+        )
         val field = edit(prefix, prefix.length, prefix.length, "[在线]")
         assertEquals(prefix, field.text.toString())
     }
 
+    @Test fun clearRemovesTypedTextEvenWhenExternalDraftWasEmpty() {
+        val editor = EmojiDraftState("")
+        editor.field.edit { append("你好[微笑]") }
+        editor.publish()
+        editor.clear()
+        assertEquals("", editor.field.text.toString())
+
+        // 清空后外部再回填同一段文本（发送失败）仍然能恢复
+        editor.receive("你好")
+        assertEquals("你好", editor.field.text.toString())
+    }
+
     @Test fun delayedDraftEchoDoesNotOverwriteNewerTypingOrMoveSelection() {
-        val editor = ReplyDraftEditorState("")
+        val editor = EmojiDraftState("")
         editor.field.edit { append("甲") }
         assertEquals("甲", editor.publish())
         editor.field.edit { append("乙[微笑]"); selection = TextRange(2) }

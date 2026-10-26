@@ -73,6 +73,7 @@ internal class MessageCenterViewModel(
     private var conversationPage = 1
     private var conversationToken = 0
     private var conversationJob: Job? = null
+    private var conversationSyncJob: Job? = null
     private var conversationStarted = false
 
     private val noticePages = mutableMapOf<MessageTab, Int>()
@@ -84,14 +85,44 @@ internal class MessageCenterViewModel(
         _uiState.update { it.copy(tab = tab) }
     }
 
-    fun loadIfNeeded(tab: MessageTab) {
+    /**
+     * 页面内容出现：首次进入拉首屏，之后再次出现（切回私信分区、从会话页返回）只做静默同步。
+     *
+     * 会话的未读状态由服务端持有：拉取聊天记录时服务端把该会话标为已读，本工程没有任何
+     * 「标记已读」写接口。因此去会话里读完再回到本页时必须重新取一次首页，否则列表会一直
+     * 停在第一次进入时的未读数上。
+     */
+    fun onContentVisible(tab: MessageTab) {
         if (tab == MessageTab.DIRECT) {
-            if (conversationStarted) return
-            conversationStarted = true
-            loadConversations(page = 1, refresh = false)
+            if (!conversationStarted) {
+                conversationStarted = true
+                loadConversations(page = 1, refresh = false)
+            } else {
+                syncConversations()
+            }
         } else {
             if (!noticeStarted.add(tab)) return
             loadNotices(tab = tab, page = 1, refresh = false)
+        }
+    }
+
+    /**
+     * 点开会话时的即时反馈：先把本地未读清零，不等一次网络往返。
+     *
+     * 这里只改本地展示，服务端值仍是真相 —— 返回列表时的静默同步会用服务端数据覆盖它，
+     * 所以聊天记录没真正拉起来（服务端没标已读）时，红点会在返回后重新出现。
+     */
+    fun markConversationRead(peerUid: String) {
+        _uiState.update { state ->
+            val items = state.conversations.items
+            if (items.none { it.peerUid == peerUid && it.unreadCount > 0 }) return@update state
+            state.copy(
+                conversations = state.conversations.copy(
+                    items = items.map { item ->
+                        if (item.peerUid == peerUid) item.copy(unreadCount = 0) else item
+                    }
+                )
+            )
         }
     }
 
@@ -124,8 +155,41 @@ internal class MessageCenterViewModel(
         }
     }
 
+    /**
+     * 静默同步私信首页：不显示 loading、不动分页游标，失败也不覆盖已有列表。
+     *
+     * 服务端按时间倒序返回首页，这里把首页结果放在最前、其余已加载的会话按原顺序接在后面，
+     * 已读状态会被更新，同时不丢掉用户翻过的页。
+     */
+    private fun syncConversations() {
+        // 已有请求在飞时不叠加：首屏 / 下拉刷新 / 翻页返回的数据本身就带最新未读
+        if (conversationJob?.isActive == true || conversationSyncJob?.isActive == true) return
+        val token = conversationToken
+        conversationSyncJob = viewModelScope.launch {
+            when (val result = repository.conversations(page = 1)) {
+                is ApiResult.Success -> {
+                    // 期间发生过刷新 / 翻页，这份快照已经过期
+                    if (token != conversationToken) return@launch
+                    val fresh = result.data.conversations
+                    _uiState.update { current ->
+                        val freshKeys = fresh.mapTo(mutableSetOf()) { it.key }
+                        val rest = current.conversations.items.filterNot { it.key in freshKeys }
+                        current.copy(
+                            conversations = current.conversations.copy(items = fresh + rest)
+                        )
+                    }
+                }
+
+                // 静默失败：保留旧列表，用户仍可下拉刷新重试
+                is ApiResult.Error -> Unit
+                ApiResult.Loading -> Unit
+            }
+        }
+    }
+
     private fun loadConversations(page: Int, refresh: Boolean) {
         conversationJob?.cancel()
+        conversationSyncJob?.cancel()
         conversationToken += 1
         val token = conversationToken
         val firstPage = refresh || page <= 1

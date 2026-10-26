@@ -10,6 +10,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,13 +26,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -70,11 +70,13 @@ import org.kazusa.matter.data.model.MessageNotice
 import org.kazusa.matter.data.model.MessageTab
 import org.kazusa.matter.ui.components.EmptyMessage
 import org.kazusa.matter.ui.components.ImmersiveTopBar
+import org.kazusa.matter.ui.components.MatterCard
 import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
 import org.kazusa.matter.ui.effect.liquid.LiquidGlassMorphMenu
 import org.kazusa.matter.ui.effect.rememberScreenBackdrop
 import org.kazusa.matter.ui.media.morph.MORPH_SETTLE_SPEC
+import org.kazusa.matter.ui.theme.MatterShapeTokens
 import org.koin.compose.viewmodel.koinViewModel
 
 /**
@@ -113,7 +115,9 @@ fun MessagesScreen(
         label = "MessageCategoryMenuMorph"
     )
 
-    LaunchedEffect(uiState.tab, viewModel) { viewModel.loadIfNeeded(uiState.tab) }
+    // NavDisplay 只组合栈顶条目：从会话页返回时本页会重新进入组合，这个 effect 随之重跑。
+    // 首次进入拉首屏，再次出现则静默同步首页，让服务端已清的未读在列表上生效。
+    LaunchedEffect(uiState.tab, viewModel) { viewModel.onContentVisible(uiState.tab) }
 
     Scaffold(
         topBar = {
@@ -146,7 +150,11 @@ fun MessagesScreen(
                     onRefresh = { viewModel.refresh(MessageTab.DIRECT) },
                     onLoadMore = { viewModel.loadMore(MessageTab.DIRECT) },
                     onRetry = { viewModel.retry(MessageTab.DIRECT) },
-                    onConversationClick = onConversationClick,
+                    onConversationClick = { conversation ->
+                        // 立即清掉本地未读，返回列表时再用服务端数据校正
+                        viewModel.markConversationRead(conversation.peerUid)
+                        onConversationClick(conversation)
+                    },
                     topPadding = padding.calculateTopPadding(),
                     bottomPadding = padding.calculateBottomPadding()
                 )
@@ -247,9 +255,12 @@ private fun ConversationList(
                 .fillMaxSize()
                 .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
             contentPadding = PaddingValues(
-                top = topPadding,
+                start = MESSAGE_LIST_INSET,
+                top = topPadding + 8.dp,
+                end = MESSAGE_LIST_INSET,
                 bottom = bottomPadding + FLOATING_MENU_CLEARANCE
-            )
+            ),
+            verticalArrangement = Arrangement.spacedBy(MESSAGE_CARD_GAP)
         ) {
             if (section.items.isEmpty()) {
                 item(key = "empty") {
@@ -264,18 +275,15 @@ private fun ConversationList(
                 }
             }
 
-            itemsIndexed(
+            items(
                 items = section.items,
-                key = { _, it -> it.key },
-                contentType = { _, _ -> "conversation" }
-            ) { index, conversation ->
-                ConversationRow(
+                key = { it.key },
+                contentType = { "conversation" }
+            ) { conversation ->
+                ConversationCard(
                     conversation = conversation,
                     onClick = { onConversationClick(conversation) }
                 )
-                if (index < section.items.lastIndex) {
-                    ListDivider()
-                }
             }
 
             loadMoreFooter(
@@ -327,9 +335,12 @@ private fun NoticeList(
                 .fillMaxSize()
                 .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
             contentPadding = PaddingValues(
-                top = topPadding,
+                start = MESSAGE_LIST_INSET,
+                top = topPadding + 8.dp,
+                end = MESSAGE_LIST_INSET,
                 bottom = bottomPadding + FLOATING_MENU_CLEARANCE
-            )
+            ),
+            verticalArrangement = Arrangement.spacedBy(MESSAGE_CARD_GAP)
         ) {
             if (section.items.isEmpty()) {
                 item(key = "empty") {
@@ -344,15 +355,12 @@ private fun NoticeList(
                 }
             }
 
-            itemsIndexed(
+            items(
                 items = section.items,
-                key = { _, it -> it.key },
-                contentType = { _, _ -> "notice" }
-            ) { index, notice ->
-                NoticeRow(notice = notice, onClick = { onNoticeClick(notice) })
-                if (index < section.items.lastIndex) {
-                    ListDivider()
-                }
+                key = { it.key },
+                contentType = { "notice" }
+            ) { notice ->
+                NoticeCard(notice = notice, onClick = { onNoticeClick(notice) })
             }
 
             loadMoreFooter(
@@ -440,54 +448,66 @@ private fun InfiniteScrollEffect(
     }
 }
 
+/**
+ * 单条私信会话卡片。
+ *
+ * 用 [MatterCard] 承载整行：列表背景留在主题 surface 上，卡片自身带 16dp 圆角与
+ * `surfaceContainer` 底色，行与行之间只靠间距分隔，不再画分隔线。
+ */
 @Composable
-private fun ConversationRow(
+private fun ConversationCard(
     conversation: MessageConversation,
     onClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+    MatterCard(
+        onClick = onClick,
+        shape = MatterShapeTokens.listItem,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        MessageAvatar(url = conversation.peerAvatarUrl, name = conversation.peerName)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MessageAvatar(url = conversation.peerAvatarUrl, name = conversation.peerName)
 
-        Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = conversation.peerName,
-                    style = MaterialTheme.typography.bodyLargeEmphasized,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                conversation.timeText?.let { time ->
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = time,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = conversation.peerName,
+                        style = MaterialTheme.typography.bodyLargeEmphasized,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
-                }
-            }
-            Spacer(modifier = Modifier.height(2.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = conversation.preview.ifBlank { "点击查看会话" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                if (conversation.unreadCount > 0) {
                     Spacer(modifier = Modifier.width(8.dp))
-                    UnreadBadge(count = conversation.unreadCount)
+                    conversation.timeText?.let { time ->
+                        Text(
+                            text = time,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = conversation.preview.ifBlank { "点击查看会话" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (conversation.unreadCount > 0) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        UnreadBadge(count = conversation.unreadCount)
+                    }
                 }
             }
         }
@@ -495,65 +515,71 @@ private fun ConversationRow(
 }
 
 @Composable
-private fun NoticeRow(
+private fun NoticeCard(
     notice: MessageNotice,
     onClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.Top
+    MatterCard(
+        onClick = onClick,
+        shape = MatterShapeTokens.listItem,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        MessageAvatar(url = notice.peerAvatarUrl, name = notice.peerName)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            MessageAvatar(url = notice.peerAvatarUrl, name = notice.peerName)
 
-        Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = notice.peerName.ifBlank { "微博用户" },
-                    style = MaterialTheme.typography.bodyLargeEmphasized,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                notice.timeText?.let { time ->
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = time,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = notice.peerName.ifBlank { "微博用户" },
+                        style = MaterialTheme.typography.bodyLargeEmphasized,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    notice.timeText?.let { time ->
+                        Text(
+                            text = time,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
-            }
-            if (notice.text.isNotBlank()) {
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = notice.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            notice.sourceText?.let { source ->
-                Spacer(modifier = Modifier.height(6.dp))
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                if (notice.text.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = source,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
+                        text = notice.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 3,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+                notice.sourceText?.let { source ->
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = source,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -612,20 +638,11 @@ private fun UnreadBadge(count: Int) {
 /** 列表底部要空出悬浮按钮（56dp）+ 外边距，最后一项才不会被挡住。 */
 private val FLOATING_MENU_CLEARANCE = 88.dp
 
-/**
- * 消息列表行之间的分隔线。
- *
- * 左缩进与正文对齐：列表左右内边距 16dp + 头像 44dp + 头像与文字间距 12dp = 72dp，
- * 这样分隔线从文字下方起笔，而不是从屏幕最左起，视觉更贴合消息列表惯例。
- */
-@Composable
-private fun ListDivider() {
-    HorizontalDivider(
-        modifier = Modifier.padding(start = 72.dp, end = 16.dp),
-        thickness = 1.dp,
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-    )
-}
+/** 卡片列表的左右留白，与「浏览记录」「收藏」等卡片列表保持同一套边距。 */
+private val MESSAGE_LIST_INSET = 16.dp
+
+/** 卡片之间的垂直间距；卡片自己负责圆角与底色，不再画分隔线。 */
+private val MESSAGE_CARD_GAP = 10.dp
 
 private const val DEFAULT_AVATAR =
     "https://tvax1.sinaimg.cn/default/images/default_avatar_male_180.gif"

@@ -15,6 +15,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import org.kazusa.matter.data.model.ChatMessage
 import org.kazusa.matter.data.model.ChatMessagePage
+import org.kazusa.matter.data.model.chatMssImageUrl
 import org.kazusa.matter.data.model.MessageConversation
 import org.kazusa.matter.data.model.MessageConversationPage
 import org.kazusa.matter.data.model.MessageNotice
@@ -262,14 +263,59 @@ private fun JsonObject.toChatMessage(currentUid: String): ChatMessage? {
     val timestamp = timestampMillis()
     // 时间戳能解析时不再保留原始文案，避免把时间戳数字当日期展示
     val rawTime = string("created_at", "time_text")
+    // 正文里的表情是 <img alt="[代码]">，不还原就会被当成标签清掉、整条消息变成空气泡
+    val (text, emojiImages) = chatText(string("text", "content").orEmpty())
+    // 图片私信：media_type=1 时附件在 attachment 里（fid + 现成的原图/缩略图地址）
+    val attachment = firstObject("attachment", "data_info")
+    val fid = attachment?.string("fidstr", "fid") ?: chatAttachmentFid()
+    val original = attachment?.firstObject("original_image")
+    val thumbnail = attachment?.firstObject("thumbnail")
+    val imageUrl = original?.string("url") ?: thumbnail?.string("url") ?: fid?.let(::chatMssImageUrl)
     return ChatMessage(
         id = id,
-        text = htmlToText(string("text", "content").orEmpty()),
+        // 图片私信的正文是服务端固定文案「分享图片」，气泡里已经有图，再打一行文字是重复信息
+        text = if (imageUrl == null) text else "",
         fromMe = fromMe,
         timestampMillis = timestamp,
-        timeText = if (timestamp == null) rawTime else null
+        timeText = if (timestamp == null) rawTime else null,
+        imageUrl = imageUrl,
+        emojiImages = emojiImages
     )
 }
+
+/** `fids` 数组里可能直接给 id，也可能给 `{fid: …}`；两种都认。 */
+private fun JsonObject.chatAttachmentFid(): String? {
+    string("fid")?.let { return it }
+    val fids = this["fids"] as? JsonArray ?: return null
+    return fids.firstOrNull()?.asObjectOrNull()?.string("fidstr", "fid")
+        ?: fids.firstOrNull()?.let { (it as? JsonPrimitive)?.contentOrNull }
+}
+
+/**
+ * 私信正文解析：`<img>` 表情还原成 `[代码]`，并收集这些代码的官方图片地址。
+ *
+ * 微博私信的表情不是代码文本，而是 `<span class="url-icon"><img alt="[泪奔]" src="…">`：
+ * 只按标签剥离会让「只发表情」的私信变成空白气泡，混排文本里表情则会整块消失。
+ */
+private fun chatText(raw: String): Pair<String, Map<String, String>> {
+    if (raw.isBlank()) return "" to emptyMap()
+    val emojiImages = LinkedHashMap<String, String>()
+    val withCodes = IMG_TAG_PATTERN.replace(raw) { match ->
+        val tag = match.value
+        val alt = htmlAttribute(tag, "alt")
+        val code = alt?.takeIf { it.length > 2 && it.startsWith("[") && it.endsWith("]") }
+        if (code == null) {
+            alt.orEmpty()
+        } else {
+            htmlAttribute(tag, "src")?.let { src -> emojiImages.putIfAbsent(code, unescapeHtml(src)) }
+            code
+        }
+    }
+    return htmlToText(withCodes) to emojiImages
+}
+
+private fun htmlAttribute(tag: String, name: String): String? =
+    Regex("""\b$name\s*=\s*"([^"]*)"""", RegexOption.IGNORE_CASE).find(tag)?.groupValues?.get(1)
 
 /** `data` 可能是数组，也可能是 `{data:[...]}`；两种都认。 */
 private fun JsonObject.dataArray(): JsonArray? {
@@ -281,31 +327,24 @@ private fun JsonObject.dataArray(): JsonArray? {
     return null
 }
 
-private fun JsonObject.timestampMillis(): Long? {
-    val text = firstPrimitive("created_at", "timestamp", "time", "date")
-        ?.contentOrNull?.takeIf { it.isNotBlank() } ?: return null
-    val value = text.toLongOrNull() ?: return null
-    return when {
-        value >= 1_000_000_000_000L -> value
-        value >= 1_000_000_000L -> value * 1000
-        else -> null
-    }
-}
+private fun JsonObject.timestampMillis(): Long? =
+    parseChatTimestampMillis(
+        firstPrimitive("created_at", "timestamp", "time", "date")?.contentOrNull
+    )
 
 /** 微博正文是 HTML：`<br>` 转换行，其余标签直接去掉，再做一次常见实体反转义。 */
 private fun htmlToText(raw: String): String {
     if (raw.isBlank()) return ""
-    return raw
-        .replace(BR_PATTERN, "\n")
-        .replace(TAG_PATTERN, "")
-        .replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .trim()
+    return unescapeHtml(raw.replace(BR_PATTERN, "\n").replace(TAG_PATTERN, "")).trim()
 }
+
+private fun unescapeHtml(raw: String): String = raw
+    .replace("&nbsp;", " ")
+    .replace("&amp;", "&")
+    .replace("&lt;", "<")
+    .replace("&gt;", ">")
+    .replace("&quot;", "\"")
+    .replace("&#39;", "'")
 
 private fun JsonObject.firstObject(vararg keys: String): JsonObject? {
     keys.forEach { key ->
@@ -341,6 +380,7 @@ private fun JsonObject.messageText(fallback: String): String =
 private fun kotlinx.serialization.json.JsonElement?.asObjectOrNull(): JsonObject? = this as? JsonObject
 
 private val BR_PATTERN = Regex("<br\\s*/?>", RegexOption.IGNORE_CASE)
+private val IMG_TAG_PATTERN = Regex("<img\\b[^>]*>", RegexOption.IGNORE_CASE)
 private val TAG_PATTERN = Regex("<[^>]+>")
 private val SCHEME_UID_PATTERN = Regex("[?&]uid=(\\d+)")
 private val STATUS_ID_PATTERN = Regex("/(?:status|detail)/(\\d+)")
