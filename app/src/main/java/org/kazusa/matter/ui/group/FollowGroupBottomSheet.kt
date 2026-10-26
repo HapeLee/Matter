@@ -20,13 +20,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -160,17 +155,9 @@ fun FollowGroupBottomSheet(
                         // 其它启用的分组（按用户自定义排序）
                         items(otherGroups, key = { it.identifier }) { group ->
                             val isSelected = activeGid == group.identifier
-                            val icon = when {
-                                group.identifier == "special" || group.displayName.contains("特别关注") -> Icons.Default.Star
-                                group.identifier == "friends" || group.displayName.contains("互相关注") -> Icons.Default.Group
-                                group.displayName.contains("悄悄") -> Icons.Default.VisibilityOff
-                                group.identifier == "original" || group.displayName.contains("原创") -> Icons.Default.Create
-                                else -> Icons.Default.Folder
-                            }
-
                             GroupSheetItem(
                                 title = group.displayName,
-                                icon = icon,
+                                icon = group.groupIcon(),
                                 isSelected = isSelected,
                                 memberCount = if (group.memberCount > 0) group.memberCount else null,
                                 onClick = {

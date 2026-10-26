@@ -118,6 +118,10 @@ android {
     }
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        // 业务代码里的 android.util.Log 在 JVM 单测里没有实现，默认会直接抛
+        // "Method w in android.util.Log not mocked"，把「打了日志的失败分支」全部挡在测试外。
+        // 日志不是被测行为，返回默认值即可。
+        unitTests.isReturnDefaultValues = true
     }
 }
 

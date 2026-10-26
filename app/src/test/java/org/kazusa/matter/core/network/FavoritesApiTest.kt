@@ -9,6 +9,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.*
 import org.junit.Test
 import org.kazusa.matter.core.datastore.UserSession
@@ -18,16 +21,19 @@ import org.kazusa.matter.data.repository.favoriteId
 
 class FavoritesApiTest {
     @Test
-    fun readsMobileCardsAndUsesServerPageEvenForShortPages() = runBlocking {
+    fun readsWebFavoritesListAndFollowsTotalPage() = runBlocking {
         val client = cookieAwareClient { request ->
-            assertEquals("230259", request.url.parameters["containerid"])
-            assertEquals("0", request.url.parameters["openApp"])
+            assertEquals("/ajax/favorites/all_fav", request.url.encodedPath)
+            assertEquals("weibo.com", request.url.host)
             assertEquals("2", request.url.parameters["page"])
-            respond("""{"ok":1,"data":{"cardlistInfo":{"total":755,"page":3},"cards":[
-                {"card_type":9,"mblog":{"id":"123","text":"saved"}},
-                {"card_type":11,"card_group":[{"card_type":9,"mblog":{"id":"124"}}]},
-                {"card_type":9,"mblog":{"id":"123"}}
-            ]}}""")
+            assertEquals("0", request.url.parameters["tid"])
+            assertEquals("true", request.url.parameters["with_total"])
+            respond("""{"ok":1,"data":[
+                {"id":"123","text":"saved"},
+                {"id":"124"},
+                {"id":"123"},
+                {"deleted":true,"id":"125"}
+            ],"count":10,"total_number":755,"total_page":3}""")
         }
         try {
             val result = WeiboApiService(client).getFavorites("SUB=test", 2) as ApiResult.Success
@@ -38,13 +44,12 @@ class FavoritesApiTest {
     }
 
     @Test
-    fun emptyCardsEndPaginationButLoginFailureIsAnError() = runBlocking {
+    fun emptyFavoritesEndPaginationButLoginFailureIsAnError() = runBlocking {
         for ((response, success) in listOf(
-            """{"ok":1,"data":{"cards":[],"cardlistInfo":{"page":9}}}""" to true,
-            """{"ok":0,"msg":"这里还没有内容","data":{"cards":[]}}""" to true,
+            """{"ok":1,"data":[],"total_page":0}""" to true,
             """{"ok":0,"msg":"这里还没有内容"}""" to true,
-            """{"ok":0,"msg":"请先登录"}""" to false,
-            """{"ok":1,"data":{}}""" to false
+            """{"ok":1}""" to true,
+            """{"ok":0,"msg":"请先登录"}""" to false
         )) {
             val client = cookieAwareClient { respond(response) }
             try {
@@ -56,30 +61,41 @@ class FavoritesApiTest {
     }
 
     @Test
-    fun writesUseFreshTokenCookiesAndDifferentMobileActionPaths() = runBlocking {
+    fun writesGoThroughWebFavoritesEndpointsWithXsrfToken() = runBlocking {
         for (favorite in listOf(true, false)) {
             var requests = 0
             val client = cookieAwareClient { request ->
                 requests++
-                if (requests == 1) {
-                    assertEquals("/api/config", request.url.encodedPath)
-                    respond("""{"ok":1,"data":{"login":true,"st":"fresh-token"}}""",
-                        headers = headersOf(HttpHeaders.SetCookie, "XSRF-TOKEN=fresh-token; Path=/"))
-                } else {
-                    assertEquals(HttpMethod.Post, request.method)
-                    assertEquals("/api/statuses/" + if (favorite) "createfav" else "destroyfav", request.url.encodedPath)
-                    val form = (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString().parseUrlEncodedParameters()
-                    assertEquals("123", form["id"])
-                    assertEquals("fresh-token", form["st"])
-                    assertEquals("fresh-token", request.headers["X-XSRF-TOKEN"])
-                    assertTrue(request.headers[HttpHeaders.Cookie]!!.contains("SUB=test"))
-                    assertTrue(request.headers[HttpHeaders.Cookie]!!.contains("XSRF-TOKEN=fresh-token"))
-                    assertFalse(request.headers[HttpHeaders.Cookie]!!.contains("stale-token"))
-                    respond("""{"ok":1}""")
+                when {
+                    request.url.encodedPath == "/api/config" -> {
+                        assertEquals("m.weibo.cn", request.url.host)
+                        respond("""{"ok":1,"data":{"login":true,"st":"fresh-token"}}""")
+                    }
+                    request.method == HttpMethod.Get -> {
+                        // 网页域没带 XSRF-TOKEN 时先 GET weibo.com/ 取令牌
+                        assertEquals("weibo.com", request.url.host)
+                        respond("", headers = headersOf(HttpHeaders.SetCookie, "XSRF-TOKEN=fresh-token; Path=/"))
+                    }
+                    else -> {
+                        assertEquals(HttpMethod.Post, request.method)
+                        assertEquals("weibo.com", request.url.host)
+                        assertEquals(
+                            "/ajax/statuses/" + if (favorite) "createFavorites" else "destoryFavorites",
+                            request.url.encodedPath
+                        )
+                        val body = (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+                        val json = Json.parseToJsonElement(body).jsonObject
+                        assertEquals(listOf("id"), json.keys.toList())
+                        assertEquals("123", json["id"]?.jsonPrimitive?.content)
+                        assertEquals("fresh-token", request.headers["X-XSRF-TOKEN"])
+                        assertTrue(request.headers[HttpHeaders.Cookie]!!.contains("SUB=test"))
+                        assertTrue(request.headers[HttpHeaders.Cookie]!!.contains("XSRF-TOKEN=fresh-token"))
+                        respond("""{"ok":1,"status":{"id":"123"}}""")
+                    }
                 }
             }
             try {
-                assertTrue(WeiboApiService(client).setFavorite("SUB=test; XSRF-TOKEN=stale-token", "123", favorite) is ApiResult.Success)
+                assertTrue(WeiboApiService(client).setFavorite("SUB=test", "123", favorite) is ApiResult.Success)
                 assertEquals(2, requests)
             } finally { client.close() }
         }
@@ -89,8 +105,13 @@ class FavoritesApiTest {
     fun failedWritesDoNotChangeFavoriteStateAndCanBeRetried() = runBlocking {
         var writes = 0
         val client = cookieAwareClient { request ->
-            if (request.method == HttpMethod.Get) respond("""{"ok":1,"data":{"login":true,"st":"token"}}""")
-            else { writes++; respond("""{"ok":0,"msg":"操作失败"}""") }
+            when {
+                request.url.encodedPath == "/api/config" ->
+                    respond("""{"ok":1,"data":{"login":true,"st":"token"}}""")
+                request.method == HttpMethod.Get ->
+                    respond("", headers = headersOf(HttpHeaders.SetCookie, "XSRF-TOKEN=token; Path=/"))
+                else -> { writes++; respond("""{"ok":0,"msg":"操作失败"}""") }
+            }
         }
         try {
             val repository = FavoritesRepository(UserSession(uid = "1", sub = "test", isLoggedIn = true), WeiboApiService(client))
@@ -117,12 +138,17 @@ class FavoritesApiTest {
         val release = CompletableDeferred<Unit>()
         val actions = mutableListOf<String>()
         val client = cookieAwareClient { request ->
-            if (request.method == HttpMethod.Get) respond("""{"ok":1,"data":{"login":true,"st":"token"}}""")
-            else {
-                actions += request.url.encodedPath
-                writing.complete(Unit)
-                release.await()
-                respond("""{"ok":1}""")
+            when {
+                request.url.encodedPath == "/api/config" ->
+                    respond("""{"ok":1,"data":{"login":true,"st":"token"}}""")
+                request.method == HttpMethod.Get ->
+                    respond("", headers = headersOf(HttpHeaders.SetCookie, "XSRF-TOKEN=token; Path=/"))
+                else -> {
+                    actions += request.url.encodedPath
+                    writing.complete(Unit)
+                    release.await()
+                    respond("""{"ok":1}""")
+                }
             }
         }
         try {
@@ -136,7 +162,10 @@ class FavoritesApiTest {
             assertEquals(true, (first.await() as ApiResult.Success).data)
             assertEquals(true, repository.state.value.overrides["123"])
             assertEquals(false, (repository.toggle(post) as ApiResult.Success).data)
-            assertEquals(listOf("/api/statuses/createfav", "/api/statuses/destroyfav"), actions)
+            assertEquals(
+                listOf("/ajax/statuses/createFavorites", "/ajax/statuses/destoryFavorites"),
+                actions
+            )
             assertTrue(repository.state.value.pending.isEmpty())
         } finally { release.complete(Unit); client.close() }
     }

@@ -12,7 +12,8 @@ import org.kazusa.matter.data.model.WeiboGroupDto
 
 class GroupRepository internal constructor(
     private val currentSession: suspend () -> UserSession,
-    private val fetchGroups: suspend (cookie: String) -> ApiResult<List<WeiboGroupDto>>,
+    /** 第二个参数是「强制刷新」：为 true 时不允许命中数据源里的共用缓存。 */
+    private val fetchGroups: suspend (cookie: String, forceRefresh: Boolean) -> ApiResult<List<WeiboGroupDto>>,
     private val createRemoteGroup: suspend (
         name: String,
         description: String,
@@ -86,7 +87,7 @@ class GroupRepository internal constructor(
 
         val cookie = session.cookieHeader
         val generation = ++fetchGeneration
-        return when (val result = fetchGroups(cookie)) {
+        return when (val result = fetchGroups(cookie, forceRefresh)) {
             is ApiResult.Success -> {
                 // 请求在途期间可能换了账号：写缓存前再校验一次会话身份
                 if (currentSession().uid != session.uid) {

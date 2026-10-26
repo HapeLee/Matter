@@ -20,7 +20,7 @@ class GroupRepositoryTest {
     private fun group(gid: String) = WeiboGroupDto(gid = gid, name = gid, visible = 1)
 
     private fun repository(
-        fetchGroups: suspend (String) -> ApiResult<List<WeiboGroupDto>>
+        fetchGroups: suspend (String, Boolean) -> ApiResult<List<WeiboGroupDto>>
     ) = GroupRepository(
         currentSession = { UserSession(uid = currentUid) },
         fetchGroups = fetchGroups,
@@ -37,7 +37,7 @@ class GroupRepositoryTest {
     @Test
     fun 同账号内缓存命中不再重复请求() = runTest {
         var fetchCalls = 0
-        val repository = repository(fetchGroups = { _ ->
+        val repository = repository(fetchGroups = { _, _ ->
             fetchCalls += 1
             ApiResult.Success(listOf(group("all"), group("friends")))
         })
@@ -55,7 +55,7 @@ class GroupRepositoryTest {
     @Test
     fun 换号后旧账号缓存失效并重新拉取() = runTest {
         var fetchCalls = 0
-        val repository = repository(fetchGroups = { _ ->
+        val repository = repository(fetchGroups = { _, _ ->
             fetchCalls += 1
             ApiResult.Success(listOf(group("result-$fetchCalls")))
         })
@@ -72,7 +72,7 @@ class GroupRepositoryTest {
     fun 在途请求完成后不得把旧账号分组写回缓存() = runTest {
         val gate = CompletableDeferred<Unit>()
         var fetchCalls = 0
-        val repository = repository(fetchGroups = { _ ->
+        val repository = repository(fetchGroups = { _, _ ->
             fetchCalls += 1
             if (fetchCalls == 1) gate.await()
             ApiResult.Success(listOf(group("result-$fetchCalls")))
@@ -95,7 +95,7 @@ class GroupRepositoryTest {
     @Test
     fun 换号后请求失败不回落旧账号缓存() = runTest {
         var failRemote = false
-        val repository = repository(fetchGroups = { _ ->
+        val repository = repository(fetchGroups = { _, _ ->
             if (failRemote) ApiResult.Error(message = "网络断开")
             else ApiResult.Success(listOf(group("A")))
         })
@@ -111,7 +111,7 @@ class GroupRepositoryTest {
     fun 迟到的旧请求不覆盖新请求写入的缓存() = runTest {
         val gate = CompletableDeferred<Unit>()
         var fetchCalls = 0
-        val repository = repository(fetchGroups = { _ ->
+        val repository = repository(fetchGroups = { _, _ ->
             // 进入时先捕获本次序号：gate 恢复后再读计数器已经变了
             val call = ++fetchCalls
             if (call == 1) gate.await()
@@ -133,7 +133,7 @@ class GroupRepositoryTest {
     @Test
     fun clear清空缓存下次重新拉取() = runTest {
         var fetchCalls = 0
-        val repository = repository(fetchGroups = { _ ->
+        val repository = repository(fetchGroups = { _, _ ->
             fetchCalls += 1
             ApiResult.Success(listOf(group("all")))
         })
@@ -144,5 +144,20 @@ class GroupRepositoryTest {
         assertTrue(repository.groupsFlow.first().isEmpty())
         repository.getGroups()
         assertEquals(2, fetchCalls)
+    }
+
+    @Test
+    fun 重新加载把强制刷新透传给数据源() = runTest {
+        val forceFlags = mutableListOf<Boolean>()
+        val repository = repository(fetchGroups = { _, force ->
+            forceFlags += force
+            ApiResult.Success(listOf(group("all"), group("100091024125180916")))
+        })
+
+        repository.getGroups()          // 缓存为空：回源，非强制
+        repository.getGroups()          // 仓库缓存命中：不请求
+        repository.getGroups(forceRefresh = true)
+
+        assertEquals(listOf(false, true), forceFlags)
     }
 }

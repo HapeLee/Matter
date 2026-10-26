@@ -52,7 +52,7 @@ class ChatSendApiTest {
             install(CookieAuth)
         }
         try {
-            val result = WeiboApiService(client).sendChatMessage("123", "你好，这是一条私信", cookie = "SUB=test")
+            val result = WeiboApiService(client).sendChatMessage("123", "你好，这是一条私信", cookie = "SUB=test; XSRF-TOKEN=token")
             assertTrue(result is ApiResult.Success)
             assertEquals("777", (result as ApiResult.Success).data.id)
             assertEquals("123", form?.get("uid"))
@@ -78,7 +78,7 @@ class ChatSendApiTest {
             install(CookieAuth)
         }
         try {
-            val result = WeiboApiService(client).sendChatMessage("123", "hi", cookie = "SUB=test")
+            val result = WeiboApiService(client).sendChatMessage("123", "hi", cookie = "SUB=test; XSRF-TOKEN=token")
             assertTrue(result is ApiResult.Success)
             val sent = (result as ApiResult.Success).data
             assertEquals("8", sent.id)
@@ -104,7 +104,7 @@ class ChatSendApiTest {
             install(CookieAuth)
         }
         try {
-            val result = WeiboApiService(client).sendChatMessage("123", "hi", cookie = "SUB=test")
+            val result = WeiboApiService(client).sendChatMessage("123", "hi", cookie = "SUB=test; XSRF-TOKEN=token")
             assertTrue(result is ApiResult.Success)
             val sent = (result as ApiResult.Success).data
             assertEquals("9001", sent.id)
@@ -128,7 +128,7 @@ class ChatSendApiTest {
             install(CookieAuth)
         }
         try {
-            val result = WeiboApiService(client).sendChatMessage("123", "hi", cookie = "SUB=test")
+            val result = WeiboApiService(client).sendChatMessage("123", "hi", cookie = "SUB=test; XSRF-TOKEN=token")
             assertTrue(result is ApiResult.Success)
             assertEquals("42", (result as ApiResult.Success).data.id)
         } finally { client.close() }
@@ -147,7 +147,7 @@ class ChatSendApiTest {
             install(CookieAuth)
         }
         try {
-            val result = WeiboApiService(client).sendChatMessage("123", "hi", cookie = "SUB=test")
+            val result = WeiboApiService(client).sendChatMessage("123", "hi", cookie = "SUB=test; XSRF-TOKEN=token")
             assertTrue(result is ApiResult.Error)
             assertEquals("发送失败，请稍后再试", (result as ApiResult.Error).message)
         } finally { client.close() }
@@ -170,11 +170,11 @@ class ChatSendApiTest {
         }
         try {
             val api = WeiboApiService(client)
-            val first = api.sendChatMessage("123", "hi", cookie = "SUB=test")
+            val first = api.sendChatMessage("123", "hi", cookie = "SUB=test; XSRF-TOKEN=token")
             assertTrue(first is ApiResult.Error && first.code == 429)
             assertEquals("操作频繁，请稍后再试", (first as ApiResult.Error).message)
 
-            val second = api.sendChatMessage("123", "again", cookie = "SUB=test")
+            val second = api.sendChatMessage("123", "again", cookie = "SUB=test; XSRF-TOKEN=token")
             assertTrue(second is ApiResult.Error && second.code == 429)
             assertEquals(1, sends)
         } finally { client.close() }
@@ -227,13 +227,12 @@ class ChatSendApiTest {
             install(CookieAuth)
         }
         try {
-            val result = WeiboApiService(client).sendChatImage("123", image, cookie = "SUB=test")
+            val result = WeiboApiService(client).sendChatImage("123", image, cookie = "SUB=test; XSRF-TOKEN=token")
             assertTrue(result is ApiResult.Success)
             assertEquals("900", (result as ApiResult.Success).data.id)
             // 引导 st → 初始化上传 → 分块上传 → 发送
             assertEquals(
                 listOf(
-                    "GET m.weibo.cn/api/config",
                     "POST api.weibo.com/webim/fileplatform/init.json",
                     "POST api.weibo.com/webim/uploadx.json",
                     "POST api.weibo.com/webim/2/direct_messages/new.json"
@@ -273,14 +272,14 @@ class ChatSendApiTest {
             install(CookieAuth)
         }
         try {
-            val result = WeiboApiService(client).sendChatImage("123", image, cookie = "SUB=test")
+            val result = WeiboApiService(client).sendChatImage("123", image, cookie = "SUB=test; XSRF-TOKEN=token")
             assertTrue(result is ApiResult.Error)
             // 失败原因要能看出是哪一步、由服务端什么原因拒绝
             val message = (result as ApiResult.Error).message
             assertTrue(message.contains("parse chunks error!"))
             assertTrue(message.contains("20099"))
             assertEquals(
-                listOf("/api/config", "/webim/fileplatform/init.json", "/webim/uploadx.json"),
+                listOf("/webim/fileplatform/init.json", "/webim/uploadx.json"),
                 requests
             )
         } finally { client.close() }
@@ -303,13 +302,13 @@ class ChatSendApiTest {
             install(CookieAuth)
         }
         try {
-            val result = WeiboApiService(client).sendChatImage("123", image, cookie = "SUB=test")
+            val result = WeiboApiService(client).sendChatImage("123", image, cookie = "SUB=test; XSRF-TOKEN=token")
             assertTrue(result is ApiResult.Error)
             // 网关错误必须原样透出：只有「上传失败」等于没有诊断信息
             val message = (result as ApiResult.Error).message
             assertTrue(message.contains("remote service error!"))
             assertTrue(message.contains("10003"))
-            assertEquals(listOf("/api/config", "/webim/fileplatform/init.json"), requests)
+            assertEquals(listOf("/webim/fileplatform/init.json"), requests)
         } finally { client.close() }
     }
 
@@ -330,7 +329,7 @@ class ChatSendApiTest {
             install(CookieAuth)
         }
         try {
-            val result = WeiboApiService(client).sendChatImage("123", image, cookie = "SUB=test")
+            val result = WeiboApiService(client).sendChatImage("123", image, cookie = "SUB=test; XSRF-TOKEN=token")
             assertTrue(result is ApiResult.Error)
             assertEquals("图片发送失败：服务器未接住附件，请稍后重试", (result as ApiResult.Error).message)
         } finally { client.close() }

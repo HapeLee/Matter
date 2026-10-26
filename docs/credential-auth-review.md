@@ -225,22 +225,32 @@ class AuthPreferences(private val context: Context) {
 - 读取时用 `sub`/`subp` 覆盖 `rawCookie` 里的同名项 —— **这是正确的「权威凭据」设计**，能挡住 `rawCookie` 里的过期/游客 SUB。
 - 但 `sub`/`subp` 本身的来源有问题（见 §2.4「串号风险」）。
 
-### 2.3 网络层鉴权注入：分散
+### 2.3 网络层鉴权注入：已收敛到端点层
 
-- 技术栈是 **Ktor + OkHttp 引擎**，不是 OkHttp 拦截器。`defaultRequest` 只设 UA/Accept/`X-Requested-With`。
-- Cookie 由**每个 API 方法手动塞**：
+- 技术栈是 **Ktor + OkHttp 引擎**。`defaultRequest` 统一设 UA/Accept/`X-Requested-With`，
+  Cookie 由 `CookieInjection.kt` 的 `CookieAuth` 插件按域名兜底注入（`WEIBO_CONTENT_HOSTS` 四个域）。
+- 端点与凭据语义集中在 `WeiboEndpoint.kt`：
+  - `WeiboHost`：`WEB` / `MOBILE` / `OPEN_API` / `PASSPORT`，业务方法只写路径，host 与默认 `Referer` 由这里给出；
+  - `WeiboAuth`：`Session(cookie)`（读）/ `Write(credentials)`（网页域写，Cookie + `X-XSRF-TOKEN` + `Origin` 三件套）/ `Guest`（交给插件兜底）；
+  - `weiboGet` / `weiboPostForm` / `weiboPostJson`：统一入口，调用点不再手写 host、XSRF 三件套与重复头。
+- 一次请求现在长这样：
 
-```395:401:app/src/main/java/org/kazusa/matter/core/network/WeiboApiService.kt
-            val response = client.get("https://m.weibo.cn/feed/friends") {
-                if (cookie.isNotBlank()) {
-                    header("Cookie", cookie)
-                }
-                header("Referer", "https://m.weibo.cn/")
-                header("MWeibo-Pwa", "1")
+```436:443:app/src/main/java/org/kazusa/matter/core/network/WeiboApiService.kt
+            val response = client.weiboGet(
+                endpoint = webEndpoint(
+                    path = route.path,
+                    auth = WeiboAuth.Session(effectiveCookie),
+                    referer = "https://weibo.com/mygroups?gid=$gid"
+                )
+            ) {
+                parameter("list_id", gid)
 ```
 
-- 全仓 `header("Cookie"` 出现 **40+ 次**，分布在 `WeiboApiService` / `MessageApi` / `FavoritesApi`。
-- **风险**：新增接口时忘记带 Cookie → 服务端按游客处理 → 返回 `-100` 或空数据，且错误被误判为「接口不可用」。这是**漏鉴权**的典型来源。
+- **收益**：`WeiboApiService` 里 29 个请求点全部走端点层，XSRF 三件套只写一次；
+  主页类读接口共用的「432 → 换游客凭据重试」脚手架收敛进 `weiboGetWithVisitorRetry`。
+- **仍然要注意**：`WeiboAuth.Session("")` 会被当作游客——新增读接口时若把「登录接口」误声明成
+  `Session(空)`，服务端按游客处理返回 `-100`，错误仍会被误判为「接口不可用」。
+  这一层已经把风险从「忘塞 Cookie」降到「声明错凭据类型」，但声明仍需人对着语义写。
 - **没有**自实现 `sig`/`md5`/`hmac`（正确，H5 端不需要）。
 
 ### 2.4 四条登录链路
@@ -254,16 +264,10 @@ class AuthPreferences(private val context: Context) {
 
 **代码证据（密码链路）**：
 
-```330:341:app/src/main/java/org/kazusa/matter/core/network/WeiboApiService.kt
-            val response = client.submitForm(
-                url = "https://login.sina.com.cn/sso/v2/login",
-                formParameters = parameters {
-                    append("entry", "wapsso")
-                    append("username", username)
-                    append("password", password)
-```
-
-全仓 `prelogin` / `pubkey` / `rsa` **0 命中**，说明这条链路从未完成过完整的 SSO 握手。
+> 直连的密码 / 短信链路代码已不存在。现在登录只剩 WebView 授权
+> （`LoginScreen.kt:239` 打开 `passport.weibo.com/sso/signin`），全仓
+> `sso/v2/login` / `prelogin` / `pubkey` 均 0 命中——说明这条链路从未完成过
+> 完整的 SSO 握手，最终选择直接下线，而不是补齐它。
 
 **串号风险（真实缺陷）**：`loginWithCookie` 保存的 `rawCookie` 是**未去重**的整串，而 `sub`/`subp` 来自 `parseCookie()` 的 `map`——后写覆盖先写：
 
@@ -379,7 +383,7 @@ class AuthPreferences(private val context: Context) {
 | 通道 | 端点 | 鉴权要素 | Matter 能否用 |
 |---|---|---|---|
 | **① H5 / PWA** | `m.weibo.cn`、`weibo.com/ajax` | Cookie `SUB`/`SUBP` + 写操作 `st` / `X-XSRF-TOKEN` + `Referer` + `MWeibo-Pwa` | ✅ **当前路线** |
-| ② 开放平台 | `api.weibo.com/2/*` | `access_token` 参数（OAuth2） | ⚠️ 需注册 appkey；Matter 用 Cookie 访问 `friendships/groups.json` 属边缘用法，可能随时失效 |
+| ② 开放平台 | `api.weibo.com/2/*` | `access_token` 参数（OAuth2） | ❌ 需注册 appkey。实测带网页 Cookie 访问 `friendships/groups.json` 返回 403 `auth by Null spi`，分组读写已全部改走 `weibo.com/ajax/feed` |
 | ③ 官方私有 | `api.weibo.cn/2/*` | `aid` + `gsid` + `s` + `cum` + `X-Validator` + `X-Shanhai-Pass`（**native 签名**） | ❌ 不可用（需逆向 so） |
 | ④ passport 游客 | `passport.weibo.com/visitor/genvisitor` | 无凭据换游客 `SUB` | ✅ 仅作 432 兜底 |
 
@@ -454,7 +458,7 @@ One 的实现（`defpackage/r3f.java:96-141`）对上述 errno 全部做了 swit
 
 | 编号 | 问题 | 修法 |
 |---|---|---|
-| A1 | Cookie 注入分散 | 在 `KtorClientFactory.createClient()` 里装一个自定义 plugin（或 `HttpSend` 拦截）：按 `host in {m.weibo.cn, weibo.com, api.weibo.com, passport.weibo.com}` 注入 `Cookie`，业务方法不再手写；同时保留 `login.weibo.cn` 出口给游客 client |
+| A1 | Cookie 注入分散 | ✅ 已完成。`CookieInjection.kt` 的 `CookieAuth` 插件按 `WEIBO_CONTENT_HOSTS` 兜底注入；业务方法统一走 `WeiboEndpoint.kt` 的 `weiboGet` / `weiboPostForm` / `weiboPostJson`，凭据类型在 `WeiboAuth` 里显式声明 |
 | A2 | `-100` 无收口 | 新增 `SessionExpiredBus`（`SharedFlow<Unit>`）；所有 `ok == -100` / `login != true` 处 `emit`；导航根订阅后统一清内存态 + 跳登录页 + `Toast/提示`。文案从各页面收敛为 1 份 |
 | A3 | 静默游客降级 | `getEffectiveCookie()` 拆成两条路径：`requireSession = true` 的接口**不再**回落游客（失败就报失效）；只有明确公开的接口走游客 |
 | A4 | 启动不探活 | App 进前台时打一次 `/api/config`（复用 `verifyConfig`），`login != true` 直接置 `SessionExpired` |
@@ -526,7 +530,7 @@ One 的实现（`defpackage/r3f.java:96-141`）对上述 errno 全部做了 swit
 ## 7. 需要实测确认的项（本报告未验证）
 
 1. **短信/密码登录是否真的不可用**：结论基于「全仓无 `prelogin`/`pubkey`」的静态推断，未真机验证；若实测可用，则 T11 降级为 P2。
-2. `api.weibo.com/2/friendships/groups.json` 用 Cookie 鉴权的成功率（该接口设计上要 `access_token`）。
+2. ~~`api.weibo.com/2/friendships/groups.json` 用 Cookie 鉴权的成功率~~ 已实测：403 `auth by Null spi`，该分支已从分组读 / 写 / 排序中删除。
 3. `-100` 之外是否还存在 `errno 21332/21327` 出现在 H5 接口（One 的样本来自 `api.weibo.cn/2/`，H5 端通常只有 `-100`）。
 4. `st` 的有效期与「同一 Cookie 换 IP 后是否失效」——决定 `WeiboWriteSession` 的缓存是否够稳。
 5. WebView Cookies 数据库在 Android 14+ 的落盘位置与备份包含情况（不同 OEM 有差异）。
@@ -559,6 +563,8 @@ Matter 的鉴权**路线选对了**（H5 Cookie，不做 native 签名逆向）�
 | 登出有两条路径：`ProfileScreen` 直调 `AuthPreferences`、`TimelineViewModel` 走 `AuthRepository.logout()` | 调用点确认 |
 | 换号内存态清理已存在于 `MatterNavGraph.kt:99-103` | 源码确认 |
 | `-100` 仅产出 UI 文案，无任何登出/重试副作用 | 源码确认 |
+| 网页分榜接口为 `GET /ajax/statuses/{entertainment,social,technology,life,sport,acg}`（带游客 SUB 即可用，纯匿名 `ok=-100`），热榜 `hot_band` 匿名可用，「我的」`mineBand` 需 SUB；`/ajax/statuses/` 下无同城榜端点 | 2026-10-27 实测 |
+| 热搜保留 m 站：m 站一次 `container/getIndex` 提供 channels + sections + entries + 同城榜，网页端均缺 | 2026-10-27 实测对比 |
 
 ## 10. 关键文件清单
 
@@ -567,7 +573,9 @@ Matter 的鉴权**路线选对了**（H5 Cookie，不做 native 签名逆向）�
 | 凭据存储 | `core/datastore/AuthPreferences.kt` | 唯一读写入口（明文 DataStore） |
 | 凭据模型 | `core/datastore/UserSession.kt` | `cookieHeader` 权威凭据拼装 |
 | 登录编排 | `data/repository/AuthRepository.kt` | 四条登录链路的落地与登出 |
-| 鉴权注入 | `core/network/WeiboApiService.kt`（2400+ 行） | Cookie 逐请求注入、`st` 获取、`-100` 判定 |
+| 鉴权注入 | `core/network/WeiboEndpoint.kt` | `WeiboHost` / `WeiboAuth` / `WeiboEndpoint` 与 `weiboGet` / `weiboPostForm` / `weiboPostJson` 统一入口 |
+| Cookie 兜底 | `core/network/CookieInjection.kt` | `CookieAuth` 插件按 `WEIBO_CONTENT_HOSTS` 注入 Cookie（游客凭据仍由 `getEffectiveCookie` 显式触发） |
+| 端点与解析 | `core/network/WeiboApiService.kt`（2400+ 行） | 业务接口、`-100` 判定、432 游客重试 |
 | 写操作闸门 | `core/network/WeiboWriteSession.kt` | `st` 缓存 + 串行 + 频控冷却（质量最好的一段，改造时勿动语义） |
 | 网络装配 | `core/network/KtorClientFactory.kt` | UA / 日志 / 超时 |
 | 私信鉴权 | `core/network/MessageApi.kt` | 独立 host、独立错误翻译 |
@@ -584,5 +592,6 @@ Matter 的鉴权**路线选对了**（H5 Cookie，不做 native 签名逆向）�
 | 2026-10-24 | 初版 | 静态审计（Matter 主源码 + `D:/Project/One` jadx 反编译产物对照），未修改业务代码 |
 | 2026-10-24 | 增加「交接卡」 | 拆出 T1~T12 可执行分片、编号对照、改动指引、验证命令、已确认事实；供后续会话直接执行 |
 | 2026-10-24 | T1~T12 全部落地（12 个独立提交 db9fc6b…b761e99） | 每片一提交一验证：`./gradlew.bat :app:testDebugUnitTest` 全绿（223+ 用例，新增 AuthCookieSanitizerTest / AuthPreferencesTest / SessionExpiredBusTest / CookieInjectionTest / MessageApiTest 总线用例），`assembleDebug` 通过，merged manifest 实测 `allowBackup="false"`。**未验证（无真机）**：§6 中依赖设备的项目——logcat 全流程检查、登出后 `run-as` 检查 WebView Cookies、换号 A→B→A 三次 verifyConfig、datastore 密文 `run-as` 检查、KeystoreCredentialCipher 真机加解密（单测用假 Cipher 覆盖了 AuthPreferences 侧语义）。实现与报告的差异：① T2 连带删掉了时间线两处响应 `preview=`（完成定义要求 logcat 无 `preview=`）；② T4 的「旧账号 SUB 在前只保留新账号」由「登录页创建 WebView 前 removeAllCookies + 去重取首个非空值」共同保证（去重规则按关键改动指引的『同名以高优先级域为先』实现）；③ T5 的兜底注入只覆盖微博内容域且不主动请求游客凭据（避免插件内递归），游客获取仍由 `getEffectiveCookie` 显式触发；④ T7 探活加了 5 分钟节流；⑤ Ktor 3.6.0 的自定义插件 API 在 `io.ktor.client.plugins.api`。 |
+| 2026-10-27 | 新增端点层 `WeiboEndpoint.kt`（`WeiboHost` / `WeiboAuth` / `weiboGet` / `weiboPostForm` / `weiboPostJson`），`WeiboApiService` 全部 29 个请求点迁移；主页类读接口共用的「432 → 换游客凭据重试」脚手架收敛进 `weiboGetWithVisitorRetry`。同时删除评论改走 `weibo.com/ajax/statuses/destroyComment`（表单 + 详情页 Referer + 网页域 XSRF），m 站残留 7 处（登录校验、热搜、搜索、点赞列表、博主动态、关注/粉丝容器）。实测记录：网页分榜 `ajax/statuses/<榜名>` 需 SUB（游客可）、`hot_band` 匿名可、无同城榜端点 → 热搜保留 m 站。验证：`./gradlew.bat :app:testDebugUnitTest` 全绿（322 用例）。**未验证**：端点层无真机回归；`hot_band` 兜底方案仅记录未实现。 |
 
 > 维护约定：每完成一片，更新交接卡任务板的状态列，并在「变更记录」追加一行（改了哪些文件、跑了什么验证、未验证什么）。不要把未执行的测试写成已通过。

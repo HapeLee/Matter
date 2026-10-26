@@ -1,34 +1,40 @@
 ﻿package org.kazusa.matter.core.network
 
-import org.kazusa.matter.data.model.CommentsResponse
+import org.kazusa.matter.data.model.CommentsDataDto
 import org.junit.Assert.*
 import org.junit.Test
 
+/**
+ * 评论 DTO 的容错与扁平页解析。
+ *
+ * 网页端 `ajax/statuses/buildComments` 的一级评论、楼中楼都返回 `{ok, data:[...], total_number, max_id}`，
+ * 所以这里直接按 [CommentsDataDto] 校验扁平结构。
+ */
 class CommentRepliesResponseTest {
     @Test
     fun absentReplySentinelsDoNotHideTheMainCommentPage() {
-        val response = KtorClientFactory.jsonConfig.decodeFromString<CommentsResponse>(
-            """{"ok":1,"data":{"data":[
+        val page = KtorClientFactory.jsonConfig.decodeFromString<CommentsDataDto>(
+            """{"data":[
                 {"id":1,"text":"主评论","comments":false,"reply_comment":false,"reply_original_text":false,"source":false,"region_name":false},
                 {"id":2,"text":"另一条","comments":null,"reply_comment":null},
                 {"id":3,"text":"对象占位","comments":{},"reply_comment":[]}
-            ]}}"""
+            ]}"""
         )
-        assertEquals(listOf(1L, 2L, 3L), response.data!!.data.map { it.id })
-        assertTrue(response.data.data.all { it.comments.isEmpty() && it.replyComment == null })
-        assertNull(response.data.data.first().replyOriginalText)
-        assertNull(response.data.data.first().source)
-        assertNull(response.data.data.first().regionName)
+        assertEquals(listOf(1L, 2L, 3L), page.data.map { it.id })
+        assertTrue(page.data.all { it.comments.isEmpty() && it.replyComment == null })
+        assertNull(page.data.first().replyOriginalText)
+        assertNull(page.data.first().source)
+        assertNull(page.data.first().regionName)
     }
 
     @Test
     fun malformedPreviewDoesNotHideItsParentOrValidSiblingReplies() {
-        val response = KtorClientFactory.jsonConfig.decodeFromString<CommentsResponse>(
-            """{"ok":1,"data":{"data":[{"id":100,"text":"主评论","comments":[
+        val page = KtorClientFactory.jsonConfig.decodeFromString<CommentsDataDto>(
+            """{"data":[{"id":100,"text":"主评论","comments":[
                 {"id":101,"text":"保留这条"},false,{"id":102,"text":{}},{"id":103,"text":"保留下一条"}
-            ],"reply_comment":{"text":{}}}]}}"""
+            ],"reply_comment":{"text":{}}}]}"""
         )
-        val root = response.data!!.data.single()
+        val root = page.data.single()
         assertEquals("主评论", root.text)
         assertEquals(listOf(101L, 103L), root.comments.map { it.id })
         assertNull(root.replyComment)
@@ -36,10 +42,9 @@ class CommentRepliesResponseTest {
 
     @Test
     fun embeddedRepliesRetainNestedRepliesAndReplyTarget() {
-        val response = KtorClientFactory.jsonConfig.decodeFromString<CommentsResponse>(
+        val page = KtorClientFactory.jsonConfig.decodeFromString<CommentsDataDto>(
             """{
-                "ok": 1,
-                "data": {"data": [{
+                "data": [{
                     "id": "100", "text": "主评论", "total_number": "4", "max_id": "99",
                     "source": "来自广东", "region_name": "广东",
                     "comments": [{
@@ -48,10 +53,10 @@ class CommentRepliesResponseTest {
                         "reply_comment": {"id": "100", "user": {"id": 1, "screen_name": "甲"}},
                         "comments": [{"id": "102", "text": "更深一层", "comments": null}]
                     }]
-                }]}
+                }]
             }"""
         )
-        val root = response.data!!.data.single()
+        val root = page.data.single()
         assertEquals(4, root.totalNumber)
         assertEquals(99L, root.maxId)
         assertEquals("广东", root.regionName)

@@ -5,7 +5,6 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.CancellationException
 import org.kazusa.matter.core.network.KtorClientFactory.jsonBody
 import kotlinx.serialization.json.JsonArray

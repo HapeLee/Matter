@@ -46,14 +46,13 @@ class TimelineViewModel(
         // 恢复上一次记住的分组选择，并在读取完成后统一加载本地持久化缓存
         viewModelScope.launch {
             val (savedGid, savedName) = authRepository.lastGroupFlow.first()
-            val effectiveGid = if (!savedGid.isNullOrBlank() && savedGid != "all") {
-                if (savedGid == "special") {
-                    authRepository.saveSelectedGroup(null, null)
-                    null
-                } else {
-                    savedGid
-                }
-            } else null
+            // 只有网页端分组 id（纯数字）才是有效选择；早期版本存下的 `special` 之类
+            // 虚拟 id 在服务端并不存在，读到就直接丢弃，避免恢复成一个必然失败的分组。
+            val effectiveGid = savedGid
+                ?.takeIf { it.isNotBlank() && it != "all" && it.all(Char::isDigit) }
+            if (!savedGid.isNullOrBlank() && savedGid != "all" && effectiveGid == null) {
+                authRepository.saveSelectedGroup(null, null)
+            }
 
             val effectiveName = if (effectiveGid != null) savedName ?: "分组微博" else "全部关注"
 

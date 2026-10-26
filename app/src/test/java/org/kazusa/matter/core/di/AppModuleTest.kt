@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModelStore
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
+import io.ktor.http.headersOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -45,8 +48,14 @@ class AppModuleTest {
     @Test
     fun favoriteFactoriesNeverShareAccountState() = runTest {
         val client = HttpClient(MockEngine { request ->
-            respond(if (request.url.encodedPath == "/api/config")
-                """{"ok":1,"data":{"login":true,"st":"token"}}""" else """{"ok":1}""")
+            when {
+                request.url.encodedPath == "/api/config" ->
+                    respond("""{"ok":1,"data":{"login":true,"st":"token"}}""")
+                // 收藏写入走网页域，先 GET weibo.com/ 换 XSRF 令牌
+                request.method == HttpMethod.Get ->
+                    respond("", headers = headersOf(HttpHeaders.SetCookie, "XSRF-TOKEN=token; Path=/"))
+                else -> respond("""{"ok":1}""")
+            }
         })
         val app = koinApplication {
             modules(appModule, module { single { WeiboApiService(client) } })
