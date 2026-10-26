@@ -46,7 +46,7 @@ class GroupViewModelTest {
     private fun group(gid: String) = WeiboGroupDto(gid = gid, name = gid, visible = 1)
 
     private fun repository(
-        fetchGroups: suspend (String) -> ApiResult<List<WeiboGroupDto>>
+        fetchGroups: suspend (String, Boolean) -> ApiResult<List<WeiboGroupDto>>
     ) = GroupRepository(
         currentSession = { UserSession(uid = "userA") },
         fetchGroups = fetchGroups,
@@ -66,7 +66,7 @@ class GroupViewModelTest {
         var calls = 0
         val vm = keep(
             GroupViewModel(
-                repository(fetchGroups = { _ ->
+                repository(fetchGroups = { _, _ ->
                     calls += 1
                     if (calls == 1) gate.await()
                     ApiResult.Success(listOf(group("result-$calls")))
@@ -94,7 +94,7 @@ class GroupViewModelTest {
     fun 首次加载失败展示错误() = runTest {
         val vm = keep(
             GroupViewModel(
-                repository(fetchGroups = { _ -> ApiResult.Error(message = "网络断开") })
+                repository(fetchGroups = { _, _ -> ApiResult.Error(message = "网络断开") })
             )
         )
 

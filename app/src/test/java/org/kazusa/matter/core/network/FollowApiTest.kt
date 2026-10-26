@@ -47,7 +47,7 @@ class FollowApiTest {
             assertEquals("abc", xsrf)
             // 取移动端 st 的引导请求 → 网页域取 XSRF 令牌 → 表单提交关注
             assertEquals(
-                listOf("GET m.weibo.cn/api/config", "GET weibo.com/", "POST weibo.com/ajax/friendships/create"),
+                listOf("GET weibo.com/", "POST weibo.com/ajax/friendships/create"),
                 requests
             )
         } finally { client.close() }
@@ -78,7 +78,7 @@ class FollowApiTest {
             assertEquals("123", form?.get("uid"))
             assertEquals("abc", xsrf)
             assertEquals(
-                listOf("GET m.weibo.cn/api/config", "GET weibo.com/", "POST weibo.com/ajax/friendships/destory"),
+                listOf("GET weibo.com/", "POST weibo.com/ajax/friendships/destory"),
                 requests
             )
         } finally { client.close() }

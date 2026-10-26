@@ -52,10 +52,9 @@ class AttitudeApiTest {
             assertTrue(api.setAttitude("1", true, cookie = "SUB=test") is ApiResult.Success)
             assertTrue(api.setAttitude("2", true, cookie = "SUB=test") is ApiResult.Success)
 
-            // 一次点赞只有一个写请求：st 与网页 XSRF 都只在首次取一次
+            // 一次点赞只有一个写请求：网页 XSRF 令牌只在首次取一次
             assertEquals(
                 listOf(
-                    "GET m.weibo.cn/api/config",
                     "GET weibo.com/",
                     "POST weibo.com/ajax/statuses/setLike",
                     "POST weibo.com/ajax/statuses/setLike"
@@ -125,7 +124,7 @@ class AttitudeApiTest {
                     // 首次引导与点赞响应各轮换一次令牌：abc → xyz
                     respond(
                         """{"ok":1}""",
-                        headers = headersOf("Set-Cookie", "XSRF-TOKEN=${if (requests.size == 2) "abc" else "zzz"}; Path=/")
+                        headers = headersOf("Set-Cookie", "XSRF-TOKEN=${if (requests.size == 1) "abc" else "zzz"}; Path=/")
                     )
                 request.url.encodedPath == "/ajax/statuses/setLike" -> {
                     xsrf = request.headers["X-XSRF-TOKEN"]
@@ -169,16 +168,16 @@ class AttitudeApiTest {
     }
 
     @Test
-    fun rateLimitedConfigIsNotReportedAsExpiredLogin() = runBlocking {
+    fun missingXsrfTokenAsksForRelogin() = runBlocking {
         val client = HttpClient(MockEngine {
-            respond("""{"ok":0,"msg":"操作频繁，请稍后再试"}""")
+            respond("""{"ok":1}""")
         })
         try {
             val result = WeiboApiService(client).setAttitude("1", true, cookie = "SUB=test")
 
-            // /api/config 被限流时不能提示「登录已失效」，否则用户会去重新登录而不是等待
-            assertTrue(result is ApiResult.Error && result.code == 429)
-            assertEquals("操作频繁，请稍后再试", (result as ApiResult.Error).message)
+            // 拿不到网页 XSRF 令牌时提示重新登录，而不是提交一个必然失败的写请求
+            assertTrue(result is ApiResult.Error && result.code == 401)
+            assertTrue((result as ApiResult.Error).message.contains("重新登录"))
         } finally { client.close() }
     }
 

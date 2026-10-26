@@ -19,8 +19,10 @@ class MentionProfileApiTest {
                 {"card_type":10,"user":{"id":"123","screen_name":"目标博主"}}
             ]}]}}""")
             else {
-                assertEquals("100505123", container)
-                respond("""{"ok":1,"data":{"userInfo":{"id":"123","screen_name":"目标博主"}}}""")
+                // 解析出 uid 后走网页端资料接口
+                assertEquals("/ajax/profile/info", request.url.encodedPath)
+                assertEquals("123", request.url.parameters["uid"])
+                respond("""{"ok":1,"data":{"user":{"id":123,"screen_name":"目标博主"}}}""")
             }
         })
         try {

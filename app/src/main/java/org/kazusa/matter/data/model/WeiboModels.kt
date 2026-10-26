@@ -1103,14 +1103,6 @@ fun WeiboCardlistInfoDto.toHotSearchChannels(): List<HotSearchChannel> =
     }
 
 // 微博评论模型
-@Serializable
-data class CommentsResponse(
-    val ok: Int = 1,
-    /** 无内容时服务端返回 ok=0 + msg="这里还没有内容"，不能当成加载失败 */
-    val msg: String? = null,
-    val data: CommentsDataDto? = null
-)
-
 /**
  * 评论区的「评论管理」配置，位于评论响应的 `data.status.comment_manage_info`。
  *
@@ -1239,13 +1231,6 @@ private fun WeiboCommentPicDto.bestDisplayUrl(): String? {
     return url.withWeiboImageSize(WeiboImageSize.LARGE)
 }
 
-// 微博单条详情响应
-@Serializable
-data class WeiboDetailResponse(
-    val ok: Int = 1,
-    val data: WeiboStatusDto? = null
-)
-
 // 关注 / 粉丝列表一页（移动端 container 接口）
 @Immutable
 data class WeiboUserListPage(
@@ -1276,15 +1261,7 @@ data class UserTimelineResult(
     val hasMore: Boolean = true
 )
 
-// 微博转发列表响应
-@Serializable
-data class RepostsResponse(
-    val ok: Int = 1,
-    /** 无内容时服务端返回 ok=0 + msg="这里还没有内容"，不能当成加载失败 */
-    val msg: String? = null,
-    val data: RepostsDataDto? = null
-)
-
+// 微博转发列表（网页端与 m 站共用这一份数据结构，信封在解析层拆）
 @Serializable
 data class RepostsDataDto(
     val data: List<WeiboStatusDto> = emptyList(),

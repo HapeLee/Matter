@@ -1,13 +1,10 @@
 package org.kazusa.matter.core.network
 
 import io.ktor.client.HttpClient
-import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsText
-import io.ktor.http.parameters
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
 import org.kazusa.matter.core.network.KtorClientFactory.jsonBody
@@ -15,19 +12,41 @@ import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.model.UserPostsPage
 import org.kazusa.matter.core.session.SessionExpiredBus
 
-/** 与移动网页端保持一致，复用 Matter 的 m.weibo.cn Cookie 会话。 */
+/**
+ * 赞过与收藏的读取，以及收藏的写入。
+ *
+ * 收藏写入是账号级写操作，和点赞 / 关注受同一套风控，所以与网页端保持一致走
+ * `weibo.com/ajax/statuses` 系列，不再用 m 站的 `statuses/createfav`；收藏列表也一并读 web，
+ * 保持「同一资源同一套接口」。`赞过` 是没有写入的只读列表，仍用 m 站 `likes/byme`。
+ */
 internal class FavoritesApi(
     private val client: HttpClient,
-    private val writeSession: WeiboWriteSession,
-    private val sessionExpiredBus: SessionExpiredBus? = null
+    private val sessionExpiredBus: SessionExpiredBus? = null,
+    /**
+     * 网页域 JSON 写：由 [WeiboApiService] 注入，内含网页 XSRF 凭据、
+     * 与点赞 / 关注共用的串行提交和频控冷却。
+     */
+    private val desktopJsonWrite: suspend (
+        cookie: String,
+        action: String,
+        path: String,
+        body: JsonObject,
+        failureMessage: String
+    ) -> ApiResult<Unit>
 ) {
+    /**
+     * 收藏列表。
+     * 端点: `GET https://weibo.com/ajax/favorites/all_fav?page=&tid=0&with_total=true`
+     * 响应 `data` 是微博数组（夹带 `deleted` 占位项），`total_page` 决定是否还有下一页。
+     */
     suspend fun getFavorites(cookie: String, page: Int): ApiResult<UserPostsPage> = request {
-        val response = client.get("https://m.weibo.cn/api/container/getIndex") {
+        val response = client.get("https://weibo.com/ajax/favorites/all_fav") {
             cookieHeader(cookie)
-            header("Referer", "https://m.weibo.cn/collect")
-            parameter("containerid", "230259")
-            parameter("openApp", "0")
+            header("Referer", "https://weibo.com/")
+            header("X-Requested-With", "XMLHttpRequest")
             parameter("page", page)
+            parameter("tid", 0)
+            parameter("with_total", true)
         }
         decodeFavoritesPage(readResponse(response, allowEmpty = true), page)
     }
@@ -41,49 +60,20 @@ internal class FavoritesApi(
         decodeLikedPostsPage(readResponse(response, allowEmpty = true), page)
     }
 
-    suspend fun setFavorite(cookie: String, id: String, favorite: Boolean): ApiResult<Unit> = request {
-        val path = if (favorite) "createfav" else "destroyfav"
-        // 与点赞、关注共用凭据缓存、串行提交和频控冷却：微博按账号对写操作限流，
-        // 各写各的会让一次频控把三个入口全部拖进冷却。
-        writeSession.execute(
-            cookie = cookie,
-            action = if (favorite) "收藏" else "取消收藏"
-        ) { credentials ->
-            val response = client.submitForm(
-                url = "https://m.weibo.cn/api/statuses/$path",
-                formParameters = parameters {
-                    append("id", id)
-                    append("st", credentials.token)
-                }
-            ) {
-                cookieHeader(credentials.cookieHeader)
-                header("X-XSRF-TOKEN", credentials.token)
-                header("Origin", "https://m.weibo.cn")
-                header("Referer", "https://m.weibo.cn/")
-                header("X-Requested-With", "XMLHttpRequest")
-            }
-            if (response.status.value == WeiboWriteErrors.CODE_RATE_LIMITED) {
-                writeSession.reportRateLimited()
-                throw FavoritesException(
-                    WeiboWriteErrors.CODE_RATE_LIMITED,
-                    WeiboWriteErrors.RATE_LIMITED_MESSAGE
-                )
-            }
-            val body = readResponse(response)
-            if (body["ok"]?.jsonPrimitive?.content != "1") {
-                val message = body.errorMessage("收藏操作失败，请重试")
-                if (WeiboWriteErrors.isRateLimited(message)) {
-                    writeSession.reportRateLimited()
-                    throw FavoritesException(
-                        WeiboWriteErrors.CODE_RATE_LIMITED,
-                        WeiboWriteErrors.RATE_LIMITED_MESSAGE
-                    )
-                }
-                // 多为 st 失效：丢掉缓存凭据，下次重新获取
-                writeSession.invalidate()
-                throw FavoritesException(null, message)
-            }
-        }
+    /**
+     * 收藏 / 取消收藏。
+     * 端点: `POST https://weibo.com/ajax/statuses/createFavorites` / `destoryFavorites`
+     * （`destory` 是服务端路由本身的拼写）。请求体是 JSON `{"id": mid}`。
+     */
+    suspend fun setFavorite(cookie: String, id: String, favorite: Boolean): ApiResult<Unit> {
+        if (id.isBlank()) return ApiResult.Error(message = "收藏目标无效")
+        return desktopJsonWrite(
+            cookie,
+            if (favorite) "收藏" else "取消收藏",
+            if (favorite) "/ajax/statuses/createFavorites" else "/ajax/statuses/destoryFavorites",
+            JsonObject(mapOf("id" to JsonPrimitive(id))),
+            if (favorite) "收藏失败" else "取消收藏失败"
+        )
     }
 
     private suspend fun readResponse(response: HttpResponse, allowEmpty: Boolean = false): JsonObject {
@@ -133,29 +123,34 @@ private fun JsonObject.errorMessage(fallback: String): String =
     } ?: fallback
 
 internal fun decodeFavoritesPage(body: JsonObject, page: Int): UserPostsPage {
-    // 接口在列表末尾可能返回 ok=0 + msg=这里还没有内容，而不是空 cards。
-    if (body["ok"]?.jsonPrimitive?.content == "0" &&
-        body["msg"]?.jsonPrimitive?.contentOrNull == "这里还没有内容") {
-        return UserPostsPage(emptyList(), null)
+    // 网页端：`data` 直接是微博数组，`total_page` 在顶层
+    val rows = when (val data = body["data"]) {
+        is JsonArray -> data
+        is JsonObject -> (data["data"] as? JsonArray) ?: (data["statuses"] as? JsonArray)
+            ?: JsonArray(emptyList())
+        else -> JsonArray(emptyList())
     }
-    val container = body["data"] as? JsonObject
-        ?: throw IllegalArgumentException("收藏列表缺少数据")
-    val rows = (container["cards"] as? JsonArray)
-        ?: throw IllegalArgumentException("收藏列表缺少数据")
-    fun collect(cards: JsonArray): List<WeiboStatusDto> = cards.flatMap { row ->
-        val item = row as? JsonObject ?: return@flatMap emptyList()
-        val status = item["mblog"] as? JsonObject
-        when {
-            status != null -> listOf(KtorClientFactory.jsonConfig
-                .decodeFromJsonElement<WeiboStatusDto>(status).copy(isFavorited = true))
-            item["card_group"] is JsonArray -> collect(item["card_group"]!!.jsonArray)
-            else -> emptyList()
-        }
+    val posts = rows.mapNotNull { row ->
+        val item = row as? JsonObject ?: return@mapNotNull null
+        // 已取消收藏的微博留在列表里当占位（网页端显示成「取消收藏」的记录），不是正文
+        val deleted = item["deleted"]?.jsonPrimitive?.booleanOrNull
+            ?: (item["deleted"]?.jsonPrimitive?.intOrNull == 1)
+        if (deleted) return@mapNotNull null
+        val status = item["status"] as? JsonObject ?: item["mblog"] as? JsonObject ?: item
+        runCatching {
+            KtorClientFactory.jsonConfig.decodeFromJsonElement<WeiboStatusDto>(status)
+                .copy(isFavorited = true)
+        }.getOrNull()
+    }.distinctBy { it.listKey }
+    val totalPage = (body["total_page"] as? JsonPrimitive)?.intOrNull
+        ?: ((body["data"] as? JsonObject)?.get("total_page") as? JsonPrimitive)?.intOrNull
+    val nextPage = when {
+        rows.isEmpty() -> null
+        totalPage != null -> (page + 1).takeIf { page < totalPage }
+        // 没有 total_page 时按「翻到空页为止」处理，避免把末页当终点漏掉尾页
+        else -> page + 1
     }
-    val posts = collect(rows).distinctBy { it.listKey }
-    val info = container["cardlistInfo"] as? JsonObject
-    val nextPage = info?.get("page")?.jsonPrimitive?.intOrNull
-    return UserPostsPage(posts, if (rows.isEmpty()) null else nextPage?.takeIf { it > page })
+    return UserPostsPage(posts, nextPage)
 }
 
 internal fun decodeLikedPostsPage(body: JsonObject, page: Int): UserPostsPage {

@@ -5,15 +5,16 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * 写操作（点赞 / 收藏 / 关注）所需的凭据。
+ * 写操作（点赞 / 收藏 / 关注 / 评论 / 删除 / 私信）所需的凭据。
  *
- * `st` 由 `/api/config` 下发，并且与同一响应里的 Cookie（含 `Set-Cookie` 新增项）配套，
- * 所以两者必须成对缓存、成对使用。
+ * 写路径已全部收敛到网页域：`token` 是 cookie 里的 `XSRF-TOKEN`（发请求时作
+ * `X-XSRF-TOKEN` 头），`cookieHeader` 是与之配套的合并 Cookie（含轮换后的令牌）。
+ * 两者必须成对缓存、成对使用。
  */
 internal data class WeiboWriteCredentials(
     /** 生成 [token] 时使用的会话 Cookie，用于判断缓存是否仍然适用。 */
     val sourceCookie: String,
-    /** 合并过 `/api/config` 响应 `Set-Cookie` 的 Cookie 头。 */
+    /** 合并过网页域 `Set-Cookie` 的 Cookie 头。 */
     val cookieHeader: String,
     val token: String
 )
@@ -33,15 +34,14 @@ internal object WeiboWriteErrors {
 }
 
 /**
- * 移动端写操作的串行闸门与 `st` 令牌缓存。
+ * 写操作的串行闸门与网页凭据缓存。
  *
- * m 站的 `comments/create|reply`（回复）与收藏写操作仍要求先 `GET /api/config` 取 `st`
- * （点赞与关注/取关已改走网页域表单协议，但仍复用本闸门串行与冷却），且服务端按账号
- * 对写操作限流：一旦触发，冷却期内**所有**写操作都返回「操作频繁，请稍后再试」。
+ * 所有写路径都已走 `weibo.com`（凭据是 `XSRF-TOKEN`，见 [WeiboWriteCredentials]），
+ * 但服务端按账号对写操作限流：一旦触发，冷却期内**所有**写操作都返回「操作频繁，请稍后再试」。
  * 因此这里统一做三件事：
  *
- * 1. 缓存 `st` 与配套 Cookie：一次点赞只发一个请求，不再每次都打 `/api/config`，
- *    避免把账号在写路径上的请求量放大一倍；鉴权失败或换账号时由调用方 [invalidate]；
+ * 1. 缓存凭据与配套 Cookie：一次写操作只发目标请求，令牌按来源 Cookie 复用，
+ *    鉴权失败或换账号时由调用方 [invalidate]；
  * 2. [execute] 串行执行所有写操作，并保证两次提交至少间隔 [minWriteIntervalMillis]，
  *    连点多张卡片不会再瞬时并发多个写请求；
  * 3. 识别频控后进入 [cooldownMillis] 冷却，期间直接拒绝而不是继续给服务端记账，

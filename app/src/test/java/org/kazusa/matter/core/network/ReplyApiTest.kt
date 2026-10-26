@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.content.OutgoingContent
+import io.ktor.http.headersOf
 import io.ktor.http.parseQueryString
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -16,16 +17,18 @@ class ReplyApiTest {
             val paths = mutableListOf<String>()
             val client = HttpClient(MockEngine { request ->
                 paths += request.url.encodedPath
-                if (request.url.encodedPath == "/api/config") {
-                    respond("""{"ok":1,"data":{"login":true,"st":"token"}}""")
+                if (request.url.host == "weibo.com" && request.url.encodedPath == "/") {
+                    respond("""{"ok":1}""", headers = headersOf("Set-Cookie", "XSRF-TOKEN=abc; Path=/"))
                 } else {
-                    assertEquals("/api/comments/${if (commentId == null) "create" else "reply"}", request.url.encodedPath)
+                    assertEquals("/ajax/comments/${if (commentId == null) "create" else "reply"}", request.url.encodedPath)
                     val form = parseQueryString((request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString())
                     assertEquals("99", form["mid"])
                     assertEquals(commentId?.toString(), form["cid"])
-                    assertEquals("正文 & #话题# @用户 😀", form["content"])
-                    assertEquals("token", form["st"])
-                    assertEquals("https://m.weibo.cn/detail/99", request.headers["Referer"])
+                    assertEquals("正文 & #话题# @用户 😀", form["comment"])
+                    // 网页路径用 XSRF 令牌，不再带 m 站的 st
+                    assertNull(form["st"])
+                    assertEquals("abc", request.headers["X-XSRF-TOKEN"])
+                    assertEquals("https://weibo.com/detail/99", request.headers["Referer"])
                     respond("""{"ok":1,"data":{"id":"123","text":"正文"}}""")
                 }
             })
@@ -42,9 +45,9 @@ class ReplyApiTest {
     fun successfulWriteWithoutUsableCommentDoesNotBecomeAFailure() = runBlocking {
         for (payload in listOf("null", "{}", "{\"id\":\"bad\"}")) {
             val client = HttpClient(MockEngine { request ->
-                respond(if (request.url.encodedPath == "/api/config")
-                    """{"ok":1,"data":{"login":true,"st":"token"}}"""
-                else """{"ok":1,"data":$payload}""")
+                if (request.url.host == "weibo.com" && request.url.encodedPath == "/")
+                    respond("""{"ok":1}""", headers = headersOf("Set-Cookie", "XSRF-TOKEN=abc; Path=/"))
+                else respond("""{"ok":1,"data":$payload}""")
             })
             try {
                 val result = WeiboApiService(client).createComment("99", "内容", "SUB=test")
@@ -61,7 +64,6 @@ class ReplyApiTest {
         var writes = 0
         val client = HttpClient(MockEngine { request ->
             when (request.url.encodedPath) {
-                "/api/config" -> respond("""{"ok":1,"data":{"login":true,"st":"mobile-token"}}""")
                 "/interface/upload.php" -> {
                     uploads++
                     assertEquals("miniblog", request.url.parameters["ent"])

@@ -1,80 +1,127 @@
 package org.kazusa.matter.core.network
 
-import org.kazusa.matter.core.datastore.AuthPreferences
-import org.kazusa.matter.core.session.SessionExpiredBus
-import org.kazusa.matter.data.model.ChatSendResult
-import org.kazusa.matter.data.model.GroupListResponse
-import org.kazusa.matter.data.model.SearchResultItem
-import org.kazusa.matter.data.model.SearchResultKind
 import android.net.Uri
-import org.kazusa.matter.data.model.WeiboCardContainerDto
-import org.kazusa.matter.data.model.WeiboCardDto
-import org.kazusa.matter.data.model.DEFAULT_HOT_SEARCH_CONTAINER_ID
-import org.kazusa.matter.data.model.HotFeedCategory
-import org.kazusa.matter.data.model.HotFeedPage
-import org.kazusa.matter.data.model.HotSearchBoard
-import org.kazusa.matter.data.model.HotSearchChannel
-import org.kazusa.matter.data.model.WeiboCardResponse
-import org.kazusa.matter.data.model.WeiboSearchChannelDto
-import org.kazusa.matter.data.model.WeiboSearchTabDto
-import org.kazusa.matter.data.model.toHotSearchBoard
-import org.kazusa.matter.data.model.WeiboSearchCardInfo
-import org.kazusa.matter.data.model.WeiboStatusDto
-import org.kazusa.matter.data.model.AlbumPhotoPage
-import org.kazusa.matter.data.model.ArticleFeedPage
-import org.kazusa.matter.data.model.UserAlbum
-import org.kazusa.matter.data.model.UserPostsPage
-import org.kazusa.matter.data.model.UserProfileDetail
-import org.kazusa.matter.data.model.VideoFeedPage
-import org.kazusa.matter.data.model.parseUserProfileDetail
-import org.kazusa.matter.data.model.classifySearchCard
-import org.kazusa.matter.data.model.toSearchCardInfo
-import org.kazusa.matter.data.model.toSearchChipGroupOrNull
-import org.kazusa.matter.data.model.TimelineResponse
-import org.kazusa.matter.data.model.UserTimelineResult
-import org.kazusa.matter.data.model.FollowingListTab
-import org.kazusa.matter.data.model.WeiboUserListPage
-import org.kazusa.matter.data.model.WeiboConfigResponse
-import org.kazusa.matter.data.model.WeiboGroupDto
 import io.ktor.client.HttpClient
-import io.ktor.client.request.forms.submitForm
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
-import io.ktor.client.request.post
-import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
-import io.ktor.http.ContentType
-import io.ktor.http.Parameters
-import io.ktor.http.contentType
-import io.ktor.http.decodeURLQueryComponent
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.Parameters
+import io.ktor.http.decodeURLQueryComponent
 import io.ktor.http.parameters
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.kazusa.matter.core.network.KtorClientFactory.bodyText
-import org.kazusa.matter.core.network.KtorClientFactory.decodeBody
-import org.kazusa.matter.core.network.KtorClientFactory.jsonBody
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.kazusa.matter.core.datastore.AuthPreferences
+import org.kazusa.matter.core.network.KtorClientFactory.bodyText
+import org.kazusa.matter.core.network.KtorClientFactory.decodeBody
+import org.kazusa.matter.core.network.KtorClientFactory.jsonBody
+import org.kazusa.matter.core.session.SessionExpiredBus
+import org.kazusa.matter.data.model.AlbumPhotoPage
+import org.kazusa.matter.data.model.ArticleFeedPage
+import org.kazusa.matter.data.model.AttitudesDataDto
+import org.kazusa.matter.data.model.AttitudesResponse
+import org.kazusa.matter.data.model.ChatSendResult
+import org.kazusa.matter.data.model.CommentsDataDto
+import org.kazusa.matter.data.model.DEFAULT_HOT_SEARCH_CONTAINER_ID
+import org.kazusa.matter.data.model.FollowingListTab
+import org.kazusa.matter.data.model.HotFeedCategory
+import org.kazusa.matter.data.model.HotFeedPage
+import org.kazusa.matter.data.model.HotSearchBoard
+import org.kazusa.matter.data.model.HotSearchChannel
+import org.kazusa.matter.data.model.RepostsDataDto
+import org.kazusa.matter.data.model.SearchPageResult
+import org.kazusa.matter.data.model.SearchResultItem
+import org.kazusa.matter.data.model.SearchResultKind
+import org.kazusa.matter.data.model.TimelineResponse
+import org.kazusa.matter.data.model.UserAlbum
+import org.kazusa.matter.data.model.UserPostsPage
+import org.kazusa.matter.data.model.UserProfileDetail
+import org.kazusa.matter.data.model.UserTimelineResult
+import org.kazusa.matter.data.model.VideoFeedPage
+import org.kazusa.matter.data.model.WeiboCardContainerDto
+import org.kazusa.matter.data.model.WeiboCardDto
+import org.kazusa.matter.data.model.WeiboCardResponse
+import org.kazusa.matter.data.model.WeiboCommentDto
+import org.kazusa.matter.data.model.WeiboConfigResponse
+import org.kazusa.matter.data.model.WeiboGroupDto
+import org.kazusa.matter.data.model.WeiboSearchCardInfo
+import org.kazusa.matter.data.model.WeiboSearchChannelDto
+import org.kazusa.matter.data.model.WeiboSearchTabDto
+import org.kazusa.matter.data.model.WeiboStatusDto
+import org.kazusa.matter.data.model.WeiboUserDto
+import org.kazusa.matter.data.model.WeiboUserListPage
+import org.kazusa.matter.data.model.classifySearchCard
+import org.kazusa.matter.data.model.parseUserProfileDetail
+import org.kazusa.matter.data.model.toHotSearchBoard
+import org.kazusa.matter.data.model.toSearchCardInfo
+import org.kazusa.matter.data.model.toSearchChipGroupOrNull
 
 /**
  * 热门流频道所属的分组类型：`allGroups` 里 `group_type=1` 为「我的频道 / 频道推荐」，
  * `0` 是关注分组（不参与热门流）。
  */
 private const val HOT_FEED_GROUP_TYPE = 1
+
+/** 分组流的 `refresh` 固定值：网页版 `mygroups` 页对下拉刷新与翻页都用 4。 */
+private const val GROUP_FEED_REFRESH = 4
+
+/**
+ * 关注分组流的接口路由。
+ *
+ * 所有分组统一走网页域 `weibo.com/ajax/feed/…`，参数与网页版 `mygroups?gid=…` 页一致，
+ * 不再有 m 站兜底通道（见 [getGroupTimeline]）。
+ *
+ * 按 gid 前 5 位（微博下发的分组类型，见 `weibo.com/ajax/feed/allGroups`）选路径：
+ *
+ * - **系统合成 id**（`1` + 类型码 + uid，如 `10001` 全部关注、`10009` 好友圈、`11000` 最新微博）：
+ *   其中 `11000/11001/11002`（最新微博 / 原创 / 视频）共用 `friendstimeline`，靠 `fid` 区分。
+ * - **真实分组 id**（16 位随机 id：自建分组、特别关注，如 `4249162129677215`）：
+ *   同样走 `groupstimeline`，`list_id` 就是 mygroups 页 url 里的 gid。实测「特别关注」
+ *   返回 24 条、`max_id` 翻页正常，网页端与分组页 `https://weibo.com/mygroups?gid=` 完全一致。
+ */
+internal data class GroupFeedRoute(
+    /** 网页域路径。 */
+    val path: String,
+    val count: Int,
+    /** 走 `since_id` 增量协议（全部关注 / 最新微博 / 原创 / 视频）。 */
+    val incremental: Boolean,
+    /** 额外带 `fid = gid`：最新微博 / 原创 / 视频 三个过滤流靠它区分。 */
+    val fid: Boolean
+) {
+    companion object {
+        const val PATH_ALL = "/ajax/feed/unreadfriendstimeline"
+        const val PATH_FILTERED = "/ajax/feed/friendstimeline"
+        const val PATH_GROUP = "/ajax/feed/groupstimeline"
+    }
+}
+
+internal fun resolveGroupFeedRoute(gid: String): GroupFeedRoute = when (gid.take(5)) {
+    "10001" -> GroupFeedRoute(GroupFeedRoute.PATH_ALL, count = 15, incremental = true, fid = false)
+    "11000", "11001", "11002" ->
+        GroupFeedRoute(GroupFeedRoute.PATH_FILTERED, count = 25, incremental = true, fid = true)
+    // 10005 悄悄关注 / 10009 好友圈 / 10010 群微博 / 10013 V+ 分组：网页分组时间线
+    "10005", "10009", "10010", "10013" ->
+        GroupFeedRoute(GroupFeedRoute.PATH_GROUP, count = 25, incremental = false, fid = false)
+    // 真实分组 id（自建分组 / 特别关注）：网页端同样是 groupstimeline，list_id 即 mygroups 的 gid
+    else -> GroupFeedRoute(GroupFeedRoute.PATH_GROUP, count = 25, incremental = false, fid = false)
+}
 
 class WeiboApiService(
     private val client: HttpClient,
@@ -102,7 +149,7 @@ class WeiboApiService(
      * 写操作（点赞 / 收藏 / 关注）共用：缓存 `st`、串行提交、识别频控并冷却。
      * 三者共用同一个实例，是因为微博的写操作限流按账号计，分开做会各自把冷却期撑大。
      */
-    private val writeSession = WeiboWriteSession(::fetchWriteCredentials)
+    private val writeSession = WeiboWriteSession(::fetchDesktopWriteCredentials)
 
     /** 私信图片的 init + 分块上传（协议与失败原因都在那一侧维护）。 */
     private val chatImageUploader = ChatImageUploader(client)
@@ -115,7 +162,7 @@ class WeiboApiService(
     @Volatile
     private var cachedDesktopCredentials: WeiboWriteCredentials? = null
 
-    private val favoritesApi = FavoritesApi(client, writeSession, sessionExpiredBus)
+    private val favoritesApi = FavoritesApi(client, sessionExpiredBus, ::desktopJsonWrite)
     private val replyImageUploadApi = ReplyImageUploadApi(client, writeSession)
 
     suspend fun uploadReplyImage(cookie: String, bytes: ByteArray): ApiResult<String> =
@@ -181,6 +228,34 @@ class WeiboApiService(
     }
 
     /**
+     * 主页类读接口的统一入口：游客凭据过期（HTTP 432）时刷新游客 Cookie 重试一次。
+     *
+     * 博主资料 / 相册 / 相册图片 / 视频 / 文章五处原来各自复制同一段脚手架
+     * （本地 `request()` + 432 判断 + 换游客凭据重发），这里收敛成一处：
+     * 凭据仍然由 [buildEndpoint] 按 [WeiboAuth] 重建（端点定义见 [WeiboEndpoint]），
+     * 重试仍 432 就原样返回，错误文案由调用方决定。
+     */
+    private suspend fun weiboGetWithVisitorRetry(
+        buildEndpoint: (WeiboAuth) -> WeiboEndpoint,
+        cookie: String,
+        block: HttpRequestBuilder.() -> Unit = {}
+    ): HttpResponse {
+        var effectiveCookie = getEffectiveCookie(cookie)
+        var response = client.weiboGet(buildEndpoint(WeiboAuth.Session(effectiveCookie)), block)
+        if (response.status.value == 432) {
+            // 游客凭据过期：换一张再试一次
+            cachedVisitorCookie = null
+            val fresh = fetchVisitorCookie()
+            if (fresh.isNotBlank()) {
+                cachedVisitorCookie = fresh
+                effectiveCookie = fresh
+                response = client.weiboGet(buildEndpoint(WeiboAuth.Session(effectiveCookie)), block)
+            }
+        }
+        return response
+    }
+
+    /**
      * 登录功能专用凭据：显式传入非空则直接用，否则取当前登录会话；游客 / 未登录 /
      * 凭据为空一律返回空串，**绝不回落游客凭据**——游客数据会掩盖真实登录态，
      * 分组与写操作这类登录功能拿游客凭据只会换来难懂的服务端错误。
@@ -203,26 +278,38 @@ class WeiboApiService(
         return header
     }
 
+    /** 当前登录账号的 uid；游客 / 未登录 / 读取失败一律返回 null。 */
+    private suspend fun resolveSessionUid(): String? = try {
+        authPreferences?.sessionFlow?.firstOrNull()?.uid?.takeIf { it.isNotBlank() && it != "guest" }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
     /**
      * 向微博 passport 申请游客凭证 (visitor ticket -> SUB)
      */
     suspend fun fetchVisitorCookie(): String {
         return try {
-            val response = client.submitForm(
-                url = "https://passport.weibo.com/visitor/genvisitor",
-                formParameters = parameters {
+            val response = client.weiboPostForm(
+                endpoint = passportEndpoint(
+                    path = "/visitor/genvisitor",
+                    referer = "https://passport.weibo.com/visitor/visitor?entry=miniblog"
+                ),
+                form = parameters {
                     append("cb", "gen_visitor")
                     append("fp", "{\"os\":\"1\",\"browser\":\"Chrome120\",\"fonts\":\"undefined\",\"appSeed\":\"\"}")
                 }
-            ) {
-                header("Referer", "https://passport.weibo.com/visitor/visitor?entry=miniblog")
-            }
+            )
             val text = response.bodyText()
             val tidRegex = Regex("\"tid\"\\s*:\\s*\"([^\"]+)\"")
             val tid = tidRegex.find(text)?.groupValues?.get(1).orEmpty()
             if (tid.isBlank()) return ""
 
-            val incarnateResp = client.get("https://passport.weibo.com/visitor/visitor") {
+            val incarnateResp = client.weiboGet(
+                endpoint = passportEndpoint("/visitor/visitor")
+            ) {
                 parameter("a", "incarnate")
                 parameter("t", tid)
                 parameter("w", "2")
@@ -255,11 +342,7 @@ class WeiboApiService(
      */
     suspend fun verifyConfig(cookie: String): ApiResult<WeiboConfigResponse> {
         return try {
-            val response = client.get("https://m.weibo.cn/api/config") {
-                if (cookie.isNotBlank()) {
-                    cookieHeader(cookie)
-                }
-            }
+            val response = client.weiboGet(mobileEndpoint("/api/config", WeiboAuth.Session(cookie)))
             val rawText = response.bodyText()
             // 响应体含 st / uid / user_token，任何前缀都不允许进日志
             android.util.Log.d("WeiboAuth", "verifyConfig status=${response.status}")
@@ -288,59 +371,44 @@ class WeiboApiService(
     }
 
     /**
-     * 获取关注好友时间线
-     * 端点: https://m.weibo.cn/feed/friends
+     * 获取首页关注流，即网页端「全部关注」分组。
+     *
+     * 走网页 `weibo.com`，gid 由 `10001` + 当前账号 uid 组成，与 `mygroups` 第一个分组同源
+     * （见 [resolveGroupFeedRoute]），参数与解析也因此与 [getGroupTimeline] 完全一致。
+     *
+     * @param uid 当前账号 uid；为空时从登录会话读取。
+     * @param page 仅保留给调用方的页计数，网页通道用 `max_id` 游标翻页，不参与请求。
      */
     suspend fun getFriendsTimeline(
         cookie: String,
         page: Int = 1,
-        maxId: Long? = null
+        maxId: Long? = null,
+        uid: String = ""
     ): ApiResult<TimelineResponse> {
         // 关注流是登录功能：没有登录凭据直接提示，不发游客请求
         val sessionCookie = requireSessionCookie(cookie)
         if (sessionCookie.isBlank()) {
             return ApiResult.Error(code = 401, message = "请先登录微博账号")
         }
-        return try {
-            val response = client.get("https://m.weibo.cn/feed/friends") {
-                cookieHeader(sessionCookie)
-                header("Referer", "https://m.weibo.cn/")
-                header("MWeibo-Pwa", "1")
-                parameter("page", page)
-                if (maxId != null && maxId > 0) {
-                    parameter("max_id", maxId)
-                }
-            }
-            val rawText = response.bodyText()
-            android.util.Log.d("TimelineApi", "friends response status=${response.status}, len=${rawText.length}")
-            if (response.status == HttpStatusCode.OK) {
-                val body = withContext(Dispatchers.IO) {
-                    KtorClientFactory.jsonConfig.decodeFromString<TimelineResponse>(rawText)
-                }
-                if (body.ok == 1) {
-                    ApiResult.Success(body)
-                } else {
-                    reportSessionExpiredIfLoggedIn(cookie, body.ok)
-                    ApiResult.Error(
-                        code = body.ok,
-                        message = if (body.ok == -100) SessionExpiredBus.MESSAGE else "获取微博动态失败(ok=${body.ok})"
-                    )
-                }
-            } else {
-                ApiResult.Error(
-                    code = response.status.value,
-                    message = "加载时间线失败: HTTP ${response.status}"
-                )
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("TimelineApi", "getFriendsTimeline failed", e)
-            ApiResult.Error(message = e.localizedMessage ?: "加载时间线异常", throwable = e)
+        val targetUid = uid.takeIf { it.isNotBlank() && it != "guest" } ?: resolveSessionUid()
+        if (targetUid.isNullOrBlank()) {
+            return ApiResult.Error(message = "获取当前账号信息失败，请重新登录")
         }
+        return fetchWebGroupTimeline(sessionCookie, "10001$targetUid", maxId)
     }
 
     /**
-     * 获取指定分组下的微博时间线
-     * 端点: https://m.weibo.cn/feed/group?gid=xxx&page=1
+     * 获取指定分组下的微博时间线。
+     *
+     * 分组 id 来自 `weibo.com/ajax/feed/allGroups`，一律走**同站**的 web 分组接口，
+     * 参数与网页版 `mygroups?gid=…` 页一致，路径选择见 [resolveGroupFeedRoute]。
+     *
+     * 只走网页通道，没有任何 m 站兜底：`ok=1` + 空 `statuses` 就是该分组确实没有微博
+     * （`total_number=0`），失败如实返回错误，不再换域名重试。
+     *
+     * 分页是游标不是页码：`max_id` 传上一页最后一条微博 id（服务端回的 `max_id_str`
+     * 就是它），首屏不传该参数（空串会被判 400）。[page] 仅为兼容调用方保留，
+     * 不参与请求。
      */
     suspend fun getGroupTimeline(
         cookie: String,
@@ -352,164 +420,256 @@ class WeiboApiService(
         if (effectiveCookie.isBlank()) {
             return ApiResult.Error(code = 401, message = "请先登录微博账号")
         }
+        if (gid.isBlank()) {
+            return ApiResult.Error(message = "分组参数为空")
+        }
+        return fetchWebGroupTimeline(effectiveCookie, gid, maxId)
+    }
+
+    /** 网页域分组流（与网页版 `mygroups` 页同一套参数）。 */
+    private suspend fun fetchWebGroupTimeline(
+        effectiveCookie: String,
+        gid: String,
+        maxId: Long?
+    ): ApiResult<TimelineResponse> {
+        val route = resolveGroupFeedRoute(gid)
         return try {
-            val response = client.get("https://m.weibo.cn/feed/group") {
-                if (effectiveCookie.isNotBlank()) {
-                    cookieHeader(effectiveCookie)
+            val response = client.weiboGet(
+                endpoint = webEndpoint(
+                    path = route.path,
+                    auth = WeiboAuth.Session(effectiveCookie),
+                    referer = "https://weibo.com/mygroups?gid=$gid"
+                )
+            ) {
+                parameter("list_id", gid)
+                parameter("refresh", GROUP_FEED_REFRESH)
+                parameter("count", route.count)
+                // 首屏不传 max_id：网页端首屏同样不带，实测传空串会被判 400 Bad Request，
+                // 之前「网页组流取不到内容」就是这个原因
+                maxId?.takeIf { it > 0 }?.let { parameter("max_id", it) }
+                if (route.incremental) {
+                    // 首屏和下拉刷新都要「最新一页」，since_id=0 表示不设下界；
+                    // 已读位置与新旧衔接由客户端自己合并（TimelineViewModel 的刷新逻辑）。
+                    parameter("since_id", 0)
+                } else {
+                    parameter("fast_refresh", 1)
                 }
-                header("Referer", "https://m.weibo.cn/")
-                header("MWeibo-Pwa", "1")
-                header("X-Requested-With", "XMLHttpRequest")
-                parameter("gid", gid)
-                parameter("page", page)
-                if (maxId != null && maxId > 0) {
-                    parameter("max_id", maxId)
+                if (route.fid) {
+                    parameter("fid", gid)
                 }
             }
-            val rawText = response.bodyText()
-            android.util.Log.d("TimelineApi", "group response status=${response.status}, len=${rawText.length}")
-            if (response.status == HttpStatusCode.OK) {
-                val body = withContext(Dispatchers.IO) {
-                    KtorClientFactory.jsonConfig.decodeFromString<TimelineResponse>(rawText)
-                }
-                if (body.ok == 1) {
-                    ApiResult.Success(body)
-                } else {
-                    reportSessionExpiredIfLoggedIn(effectiveCookie, body.ok)
-                    ApiResult.Error(
-                        code = body.ok,
-                        message = if (body.ok == -100) SessionExpiredBus.MESSAGE else "获取分组微博失败(ok=${body.ok})"
-                    )
-                }
-            } else {
-                ApiResult.Error(
+            if (response.status != HttpStatusCode.OK) {
+                return ApiResult.Error(
                     code = response.status.value,
                     message = "加载分组动态失败: HTTP ${response.status}"
                 )
             }
+            val root = response.jsonBody().jsonObject
+            val ok = (root["ok"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
+            if (ok != 1) {
+                reportSessionExpiredIfLoggedIn(effectiveCookie, ok)
+                return ApiResult.Error(code = ok, message = readGroupFeedErrorMessage(root, ok))
+            }
+            // 分组流既可能把微博放在顶层 statuses，也可能放在 data.statuses
+            val statusesArray = (root["statuses"] as? JsonArray)
+                ?: ((root["data"] as? JsonObject)?.get("statuses") as? JsonArray)
+                ?: JsonArray(emptyList())
+            val posts = withContext(Dispatchers.IO) {
+                statusesArray.mapNotNull { element ->
+                    runCatching {
+                        KtorClientFactory.jsonConfig.decodeFromJsonElement<WeiboStatusDto>(element)
+                    }.getOrNull()
+                }
+            }
+            val totalNumber = (root["total_number"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+                ?: ((root["data"] as? JsonObject)?.get("total_number") as? JsonPrimitive)
+                    ?.contentOrNull?.toIntOrNull()
+            ApiResult.Success(
+                TimelineResponse(ok = 1, statuses = posts, totalNumber = totalNumber)
+            )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            android.util.Log.e("TimelineApi", "getGroupTimeline failed", e)
+            android.util.Log.w("TimelineApi", "getGroupTimeline failed: gid=$gid", e)
             ApiResult.Error(message = e.localizedMessage ?: "加载分组微博异常", throwable = e)
         }
     }
 
+    /** 分组流失败原因：优先用服务端文案，避免只剩「ok=0」无从判断。 */
+    private fun readGroupFeedErrorMessage(root: JsonObject, ok: Int): String {
+        val serverMessage = (root["msg"] as? JsonPrimitive)?.contentOrNull
+            ?: (root["message"] as? JsonPrimitive)?.contentOrNull
+            ?: (root["error"] as? JsonPrimitive)?.contentOrNull
+        if (!serverMessage.isNullOrBlank()) return serverMessage
+        return if (ok == -100) SessionExpiredBus.MESSAGE else "获取分组微博失败(ok=$ok)"
+    }
+
+    /** `allGroups` 的原始 JSON 快照：属主是发起请求的 Cookie，换号 / 游客态天然不复用。 */
+    private data class AllGroupsSnapshot(val owner: String, val root: JsonObject)
+
+    private val allGroupsMutex = Mutex()
+
+    @Volatile
+    private var allGroupsSnapshot: AllGroupsSnapshot? = null
+
     /**
-     * 获取用户关注分组列表
-     * 端点: https://api.weibo.com/2/friendships/groups.json 或 m端分组导航
+     * 拉取（或复用）`allGroups` 原始响应。
+     *
+     * 关注分组（[getFollowGroups]）与热门频道（[getHotFeedCategories]）读的是同一份数据，
+     * 一次会话里没必要各拉一次；缓存原始 JSON，两个入口按各自需要解析。
+     * 分组增删改成功后主动失效，页面上的「重新加载」用 [forceRefresh] 绕过。
      */
+    private suspend fun loadAllGroups(
+        cookie: String,
+        forceRefresh: Boolean
+    ): ApiResult<JsonObject> = allGroupsMutex.withLock {
+        if (!forceRefresh) {
+            allGroupsSnapshot?.takeIf { it.owner == cookie }?.let { return ApiResult.Success(it.root) }
+        }
+        val response = try {
+            client.weiboGet(
+                webEndpoint(
+                    path = "/ajax/feed/allGroups",
+                    auth = WeiboAuth.Session(cookie),
+                    referer = "https://weibo.com"
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("WeiboApi", "allGroups request failed", e)
+            return ApiResult.Error(message = e.localizedMessage ?: "获取分组数据异常", throwable = e)
+        }
+        if (response.status != HttpStatusCode.OK) {
+            return ApiResult.Error(
+                code = response.status.value,
+                message = "获取分组数据失败: HTTP ${response.status}"
+            )
+        }
+        val root = try {
+            response.jsonBody().jsonObject
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return ApiResult.Error(message = "分组数据格式异常", throwable = e)
+        }
+        val ok = root["ok"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+        if (ok != 1) {
+            reportSessionExpiredIfLoggedIn(cookie, ok)
+            return ApiResult.Error(
+                code = ok,
+                message = if (ok == -100) SessionExpiredBus.MESSAGE else "获取分组数据失败(ok=$ok)"
+            )
+        }
+        allGroupsSnapshot = AllGroupsSnapshot(cookie, root)
+        ApiResult.Success(root)
+    }
+
+    /** 分组本身发生变化（新建 / 改名 / 删除 / 排序）后，共用快照必须作废。 */
+    private fun invalidateAllGroupsCache() {
+        allGroupsSnapshot = null
+    }
+
     /**
-     * 获取用户关注分组列表
-     * 优先使用 weibo.com/ajax/feed/allGroups 获取具有真实数值 gid（包括特别关注、互相关注以及自定义分组）的完整列表
+     * 获取用户关注分组列表。
+     *
+     * 端点: `https://weibo.com/ajax/feed/allGroups`（与热门频道共用一份缓存，见 [loadAllGroups]）。
+     *
+     * 分组时间线（[getGroupTimeline]）与分组增删改都用同一套 web 协议，所以这里只走 web。
+     * `api.weibo.com/2/friendships/groups.json` 需要 access_token 而网页登录只给 Cookie，
+     * 拿不到（实测 403 `auth by Null spi`），混进来只会多打一次必然失败的请求，
+     * 还会把真实失败伪装成「只有全部关注」。
      */
-    suspend fun getFollowGroups(cookie: String): ApiResult<List<WeiboGroupDto>> {
+    suspend fun getFollowGroups(
+        cookie: String,
+        forceRefresh: Boolean = false
+    ): ApiResult<List<WeiboGroupDto>> {
         val effectiveCookie = requireSessionCookie(cookie)
         if (effectiveCookie.isBlank()) {
             return ApiResult.Error(code = 401, message = "请先登录微博账号")
         }
-        // 1. 尝试从 weibo.com/ajax/feed/allGroups 获取最新完整真实分组
-        try {
-            val response = client.get("https://weibo.com/ajax/feed/allGroups") {
-                if (effectiveCookie.isNotBlank()) {
-                    cookieHeader(effectiveCookie)
-                }
-                header("Referer", "https://weibo.com")
-            }
-            if (response.status == HttpStatusCode.OK) {
-                val jsonRoot = response.jsonBody().jsonObject
-                val okVal = jsonRoot["ok"]?.jsonPrimitive?.content?.toIntOrNull()
-                if (okVal == 1) {
-                    val groupsArr = jsonRoot["groups"]?.jsonArray
-                    val list = mutableListOf<WeiboGroupDto>()
-                    list.add(WeiboGroupDto(id = 0, gid = "all", name = "全部关注", memberCount = 0))
+        val jsonRoot = when (val groupsResult = loadAllGroups(effectiveCookie, forceRefresh)) {
+            is ApiResult.Success -> groupsResult.data
+            is ApiResult.Error -> return groupsResult
+            ApiResult.Loading -> return ApiResult.Loading
+        }
+        return try {
+            val groupsArr = jsonRoot["groups"]?.jsonArray
+            val list = mutableListOf<WeiboGroupDto>()
+            list.add(WeiboGroupDto(id = 0, gid = "all", name = "全部关注", memberCount = 0))
 
-                    groupsArr?.forEach { groupCat ->
-                        val catObj = groupCat.jsonObject
-                        val catType = catObj["group_type"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                        val catTitle = catObj["title"]?.jsonPrimitive?.content.orEmpty()
+            groupsArr?.forEach { groupCat ->
+                val catObj = groupCat.jsonObject
+                val catType = catObj["group_type"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                val catTitle = catObj["title"]?.jsonPrimitive?.content.orEmpty()
 
-                        // 仅提取关注相关分组（默认分组、我的分组等 group_type == 0），过滤公共推荐频道（group_type == 1）
-                        if (catType == 0 || catTitle.contains("分组")) {
-                            val subGroups = catObj["group"]?.jsonArray
-                            subGroups?.forEach { gObj ->
-                                val g = gObj.jsonObject
-                                val gid = g["gid"]?.jsonPrimitive?.content.orEmpty()
-                                val title = g["title"]?.jsonPrimitive?.content
-                                    ?: g["name"]?.jsonPrimitive?.content
-                                    ?: g["navigation_title"]?.jsonPrimitive?.content.orEmpty()
-                                val cnt = g["count"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                // 只取关注相关分组（默认分组、我的分组等 group_type == 0），
+                // 推荐频道整组是 group_type == 1。
+                if (catType == 0 || catTitle.contains("分组")) {
+                    val subGroups = catObj["group"]?.jsonArray
+                    subGroups?.forEach { gObj ->
+                        val g = gObj.jsonObject
+                        val gid = g["gid"]?.jsonPrimitive?.content.orEmpty()
+                        val title = g["title"]?.jsonPrimitive?.content
+                            ?: g["name"]?.jsonPrimitive?.content
+                            ?: g["navigation_title"]?.jsonPrimitive?.content.orEmpty()
+                        val cnt = g["count"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                        // 带 containerid 的是推荐频道（热门 / 同城 / 榜单…），不是关注分组
+                        val isChannel = g["containerid"]?.jsonPrimitive?.content
+                            ?.isNotBlank() == true
 
-                                // 过滤掉全部关注（已作为第一项）和热门推荐等非关注类条目
-                                val isFollowGroup = gid.isNotBlank() &&
-                                        title.isNotBlank() &&
-                                        !title.contains("热门") &&
-                                        !title.contains("推荐") &&
-                                        title != "全部关注" &&
-                                        title != "关注" &&
-                                        !gid.startsWith("10001")
+                        // 过滤掉全部关注（已作为第一项）和热门推荐等非关注类条目。
+                        // 10001 + uid 就是网页端的「全部关注」，与网页版判断分组类型的
+                        // 方式一致（gid 前 5 位），不再用简单的 startsWith 猜。
+                        val isFollowGroup = gid.isNotBlank() &&
+                                title.isNotBlank() &&
+                                !isChannel &&
+                                !title.contains("热门") &&
+                                !title.contains("推荐") &&
+                                title != "全部关注" &&
+                                title != "关注" &&
+                                gid.take(5) != "10001"
 
-                                if (isFollowGroup && list.none { it.gid == gid }) {
-                                    list.add(
-                                        WeiboGroupDto(
-                                            id = gid.toLongOrNull(),
-                                            idStr = gid,
-                                            gid = gid,
-                                            name = title,
-                                            title = title,
-                                            memberCount = cnt
-                                        )
-                                    )
-                                }
-                            }
+                        if (isFollowGroup && list.none { it.gid == gid }) {
+                            list.add(
+                                WeiboGroupDto(
+                                    id = gid.toLongOrNull(),
+                                    idStr = gid,
+                                    gid = gid,
+                                    name = title,
+                                    title = title,
+                                    memberCount = cnt
+                                )
+                            )
                         }
                     }
-
-                    if (list.size > 1) {
-                        android.util.Log.i("WeiboApi", "getFollowGroups: successfully parsed ${list.size} groups: ${list.map { "${it.name}(${it.gid})" }}")
-                        return ApiResult.Success(list)
-                    }
                 }
-            } else {
-                android.util.Log.w("WeiboApi", "ajax/feed/allGroups returned status: ${response.status}")
             }
+
+            if (list.size <= 1) {
+                return ApiResult.Error(message = "服务端未下发可用的关注分组")
+            }
+            android.util.Log.i(
+                "WeiboApi",
+                "getFollowGroups: parsed ${list.size} groups: ${list.map { "${it.name}(${it.gid})" }}"
+            )
+            ApiResult.Success(list)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            android.util.Log.w("WeiboApi", "getFollowGroups from ajax/feed/allGroups failed, fallback", e)
+            android.util.Log.w("WeiboApi", "getFollowGroups failed", e)
+            ApiResult.Error(message = e.localizedMessage ?: "获取关注分组异常", throwable = e)
         }
-
-        // 2. 备用方式：api.weibo.com 开放接口
-        return try {
-            val response = client.get("https://api.weibo.com/2/friendships/groups.json") {
-                if (effectiveCookie.isNotBlank()) {
-                    cookieHeader(effectiveCookie)
-                }
-            }
-            if (response.status == HttpStatusCode.OK) {
-                val body = response.decodeBody<GroupListResponse>()
-                val groups = body.lists.ifEmpty { body.data.orEmpty() }
-                if (groups.isNotEmpty()) {
-                    val filtered = groups.filter { it.name != "全部关注" && it.title != "全部关注" && it.gid != "all" }
-                    val fullList = listOf(WeiboGroupDto(id = 0, gid = "all", name = "全部关注", memberCount = 0)) + filtered
-                    ApiResult.Success(fullList)
-                } else {
-                    ApiResult.Success(getDefaultSystemGroups())
-                }
-            } else {
-                ApiResult.Success(getDefaultSystemGroups())
-            }
-        } catch (e: Exception) {
-            ApiResult.Success(getDefaultSystemGroups())
-        }
-    }
-
-    private fun getDefaultSystemGroups(): List<WeiboGroupDto> {
-        return listOf(
-            WeiboGroupDto(id = 0, gid = "all", name = "全部关注", memberCount = 0)
-        )
     }
 
     /**
-     * 创建关注分组
-     * 端点: POST https://api.weibo.com/2/friendships/groups/create.json
-     * 备用端点: POST https://weibo.com/ajax/feed/createGroup
+     * 创建关注分组。
+     *
+     * 端点: POST `https://weibo.com/ajax/feed/createGroup`。
+     *
+     * 只走 web：分组列表来自 `allGroups`，gid 是 web 侧 id；
+     * `api.weibo.com/2/friendships/groups` 系列接口需要 access_token（网页登录的 Cookie
+     * 拿不到，实测 403 `auth by Null spi`），混用只会多打一次必然失败的请求。
      */
     suspend fun createGroup(
         name: String,
@@ -520,59 +680,19 @@ class WeiboApiService(
         if (effectiveCookie.isBlank()) {
             return ApiResult.Error(code = 401, message = "未检测到有效登录状态，无法同步至微博")
         }
-        // 1. 尝试使用 openapi
-        try {
-            val response = client.submitForm(
-                url = "https://api.weibo.com/2/friendships/groups/create.json",
-                formParameters = parameters {
-                    append("name", name)
-                    if (description.isNotBlank()) {
-                        append("description", description)
-                    }
-                }
-            ) {
-                cookieHeader(effectiveCookie)
-            }
-            if (response.status == HttpStatusCode.OK) {
-                val jsonRoot = response.jsonBody().jsonObject
-                val idStr = jsonRoot["idstr"]?.jsonPrimitive?.contentOrNull
-                    ?: jsonRoot["id"]?.jsonPrimitive?.contentOrNull
-                val groupName = jsonRoot["name"]?.jsonPrimitive?.contentOrNull ?: name
-                if (!idStr.isNullOrBlank()) {
-                    return ApiResult.Success(
-                        WeiboGroupDto(
-                            id = idStr.toLongOrNull(),
-                            idStr = idStr,
-                            gid = idStr,
-                            name = groupName,
-                            title = groupName,
-                            memberCount = 0
-                        )
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("WeiboApi", "createGroup via api.weibo.com failed, trying web fallback", e)
-        }
-
-        // 2. 备用方式: weibo.com/ajax/feed/createGroup
         return try {
-            val response = client.submitForm(
-                url = "https://weibo.com/ajax/feed/createGroup",
-                formParameters = parameters {
-                    append("name", name)
-                }
-            ) {
-                cookieHeader(effectiveCookie)
-                header("Referer", "https://weibo.com/")
-                header("X-Requested-With", "XMLHttpRequest")
-            }
+            val response = client.weiboPostForm(
+                endpoint = webEndpoint("/ajax/feed/createGroup", WeiboAuth.Session(effectiveCookie)),
+                form = parameters { append("name", name) }
+            )
             val jsonRoot = response.jsonBody().jsonObject
             val ok = jsonRoot["ok"]?.jsonPrimitive?.intOrNull ?: 0
             val gid = jsonRoot["gid"]?.jsonPrimitive?.contentOrNull
                 ?: jsonRoot["id"]?.jsonPrimitive?.contentOrNull
-                ?: System.currentTimeMillis().toString()
-            if (ok == 1 || gid.isNotBlank()) {
+            // 只有 ok == 1 且服务端真的给了 gid 才算建成功；
+            // 以前拿当前时间戳兜底 gid，失败也会当成功写进本地分组。
+            if (ok == 1 && !gid.isNullOrBlank()) {
+                invalidateAllGroupsCache()
                 ApiResult.Success(
                     WeiboGroupDto(
                         id = gid.toLongOrNull(),
@@ -594,9 +714,10 @@ class WeiboApiService(
     }
 
     /**
-     * 更新关注分组名称
-     * 端点: POST https://api.weibo.com/2/friendships/groups/update.json
-     * 备用端点: POST https://weibo.com/ajax/feed/updateGroupName
+     * 更新关注分组名称。
+     *
+     * 端点: POST `https://weibo.com/ajax/feed/updateGroupName`（gid 是 web 侧 id，
+     * 与 `api.weibo.com` 的 `list_id` 协议不是一套；后者需要 access_token，见 [getFollowGroups]）。
      */
     suspend fun updateGroupName(
         gid: String,
@@ -607,40 +728,19 @@ class WeiboApiService(
         if (effectiveCookie.isBlank()) {
             return ApiResult.Error(code = 401, message = "未检测到有效登录状态，无法同步至微博")
         }
-        // 1. 尝试 openapi
-        try {
-            val response = client.submitForm(
-                url = "https://api.weibo.com/2/friendships/groups/update.json",
-                formParameters = parameters {
-                    append("list_id", gid)
-                    append("name", name)
-                }
-            ) {
-                cookieHeader(effectiveCookie)
-            }
-            if (response.status == HttpStatusCode.OK) {
-                return ApiResult.Success(Unit)
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("WeiboApi", "updateGroupName via api.weibo.com failed, trying fallback", e)
-        }
-
-        // 2. 备用方式
         return try {
-            val response = client.submitForm(
-                url = "https://weibo.com/ajax/feed/updateGroupName",
-                formParameters = parameters {
+            val response = client.weiboPostForm(
+                endpoint = webEndpoint("/ajax/feed/updateGroupName", WeiboAuth.Session(effectiveCookie)),
+                form = parameters {
                     append("gid", gid)
                     append("name", name)
                 }
-            ) {
-                cookieHeader(effectiveCookie)
-                header("Referer", "https://weibo.com/")
-                header("X-Requested-With", "XMLHttpRequest")
-            }
+            )
             val jsonRoot = response.jsonBody().jsonObject
+            // HTTP 200 不代表改成功，只看业务 ok
             val ok = jsonRoot["ok"]?.jsonPrimitive?.intOrNull ?: 0
-            if (ok == 1 || response.status == HttpStatusCode.OK) {
+            if (ok == 1) {
+                invalidateAllGroupsCache()
                 ApiResult.Success(Unit)
             } else {
                 val errorMsg = jsonRoot["msg"]?.jsonPrimitive?.contentOrNull ?: "更新分组名称失败"
@@ -652,9 +752,9 @@ class WeiboApiService(
     }
 
     /**
-     * 删除关注分组
-     * 端点: POST https://api.weibo.com/2/friendships/groups/destroy.json
-     * 备用端点: POST https://weibo.com/ajax/feed/destroyGroup
+     * 删除关注分组。
+     *
+     * 端点: POST `https://weibo.com/ajax/feed/destroyGroup`（同 [updateGroupName]，只走 web）。
      */
     suspend fun destroyGroup(
         gid: String,
@@ -664,38 +764,15 @@ class WeiboApiService(
         if (effectiveCookie.isBlank()) {
             return ApiResult.Error(code = 401, message = "未检测到有效登录状态，无法同步至微博")
         }
-        // 1. 尝试 openapi
-        try {
-            val response = client.submitForm(
-                url = "https://api.weibo.com/2/friendships/groups/destroy.json",
-                formParameters = parameters {
-                    append("list_id", gid)
-                }
-            ) {
-                cookieHeader(effectiveCookie)
-            }
-            if (response.status == HttpStatusCode.OK) {
-                return ApiResult.Success(Unit)
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("WeiboApi", "destroyGroup via api.weibo.com failed, trying fallback", e)
-        }
-
-        // 2. 备用方式
         return try {
-            val response = client.submitForm(
-                url = "https://weibo.com/ajax/feed/destroyGroup",
-                formParameters = parameters {
-                    append("gid", gid)
-                }
-            ) {
-                cookieHeader(effectiveCookie)
-                header("Referer", "https://weibo.com/")
-                header("X-Requested-With", "XMLHttpRequest")
-            }
+            val response = client.weiboPostForm(
+                endpoint = webEndpoint("/ajax/feed/destroyGroup", WeiboAuth.Session(effectiveCookie)),
+                form = parameters { append("gid", gid) }
+            )
             val jsonRoot = response.jsonBody().jsonObject
             val ok = jsonRoot["ok"]?.jsonPrimitive?.intOrNull ?: 0
-            if (ok == 1 || response.status == HttpStatusCode.OK) {
+            if (ok == 1) {
+                invalidateAllGroupsCache()
                 ApiResult.Success(Unit)
             } else {
                 val errorMsg = jsonRoot["msg"]?.jsonPrimitive?.contentOrNull ?: "删除分组失败"
@@ -707,8 +784,10 @@ class WeiboApiService(
     }
 
     /**
-     * 更新关注分组排序
-     * 端点: POST https://api.weibo.com/2/friendships/groups/order.json
+     * 更新关注分组排序。
+     *
+     * 端点: POST `https://weibo.com/ajax/feed/setGroupOrder`（参数是逗号分隔的 web gid）。
+     * 本地顺序已落盘，这里失败不影响使用，只把结果如实交回调用方。
      */
     suspend fun setGroupOrder(
         gids: List<String>,
@@ -722,32 +801,20 @@ class WeiboApiService(
         if (gidListStr.isBlank()) return ApiResult.Success(Unit)
 
         return try {
-            val response = client.submitForm(
-                url = "https://api.weibo.com/2/friendships/groups/order.json",
-                formParameters = parameters {
-                    append("list_ids", gidListStr)
-                }
-            ) {
-                cookieHeader(effectiveCookie)
-            }
+            val response = client.weiboPostForm(
+                endpoint = webEndpoint("/ajax/feed/setGroupOrder", WeiboAuth.Session(effectiveCookie)),
+                form = parameters { append("gids", gidListStr) }
+            )
             if (response.status == HttpStatusCode.OK) {
+                // 排序结果也体现在 allGroups 的顺序里，快照一并作废
+                invalidateAllGroupsCache()
                 ApiResult.Success(Unit)
             } else {
-                // 尝试 web 接口
-                client.submitForm(
-                    url = "https://weibo.com/ajax/feed/setGroupOrder",
-                    formParameters = parameters {
-                        append("gids", gidListStr)
-                    }
-                ) {
-                    cookieHeader(effectiveCookie)
-                    header("Referer", "https://weibo.com/")
-                    header("X-Requested-With", "XMLHttpRequest")
-                }
-                ApiResult.Success(Unit)
+                ApiResult.Error(code = response.status.value, message = "同步分组排序失败")
             }
         } catch (e: Exception) {
-            ApiResult.Success(Unit)
+            android.util.Log.w("WeiboApi", "setGroupOrder failed", e)
+            ApiResult.Error(message = e.localizedMessage ?: "网络异常，同步分组排序失败", throwable = e)
         }
     }
 
@@ -774,16 +841,19 @@ class WeiboApiService(
     ): ApiResult<HotSearchBoard> {
         return try {
             val effectiveCookie = getEffectiveCookie(cookie)
-            val response = client.get("https://m.weibo.cn/api/container/getIndex") {
+            val response = client.weiboGet(
+                mobileEndpoint(
+                    path = "/api/container/getIndex",
+                    auth = WeiboAuth.Session(effectiveCookie)
+                )
+            ) {
                 parameter("containerid", containerId)
                 if (latLon != null) {
                     parameter("lat", latLon.first)
                     parameter("lon", latLon.second)
                 }
-                header("Referer", "https://m.weibo.cn/")
+                // m 站 PWA 专用头：缺了会被当普通网页请求，返回结构不同
                 header("MWeibo-Pwa", "1")
-                header("X-Requested-With", "XMLHttpRequest")
-                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
                 val cardResp = response.decodeBody<WeiboCardResponse>()
@@ -801,7 +871,7 @@ class WeiboApiService(
     /**
      * 热门流的分类（频道）列表。
      *
-     * 端点: `https://weibo.com/ajax/feed/allGroups`
+     * 端点: `https://weibo.com/ajax/feed/allGroups`（与关注分组共用一份缓存，见 [loadAllGroups]）。
      *
      * 只取 `group_type=1` 的两组：**我的频道**（热门 / 同城 / 实时 / 榜单 / 明星 …）
      * 与**频道推荐**（财经 / 读书 / 摄影 …）。`group_type=0` 是关注分组，不属于热门流。
@@ -809,30 +879,17 @@ class WeiboApiService(
      * 每项频道自带 `gid`（请求热门流时作为 `group_id`）与 `containerid`
      * （请求热门流时作为 `containerid`），分类名与顺序完全按服务端下发。
      */
-    suspend fun getHotFeedCategories(cookie: String = ""): ApiResult<List<HotFeedCategory>> {
+    suspend fun getHotFeedCategories(
+        cookie: String = "",
+        forceRefresh: Boolean = false
+    ): ApiResult<List<HotFeedCategory>> {
+        val effectiveCookie = getEffectiveCookie(cookie)
+        val root = when (val groupsResult = loadAllGroups(effectiveCookie, forceRefresh)) {
+            is ApiResult.Success -> groupsResult.data
+            is ApiResult.Error -> return groupsResult
+            ApiResult.Loading -> return ApiResult.Loading
+        }
         return try {
-            val effectiveCookie = getEffectiveCookie(cookie)
-            val response = client.get("https://weibo.com/ajax/feed/allGroups") {
-                header("Referer", "https://weibo.com/")
-                header("X-Requested-With", "XMLHttpRequest")
-                cookieHeader(effectiveCookie)
-            }
-            if (response.status != HttpStatusCode.OK) {
-                return ApiResult.Error(
-                    code = response.status.value,
-                    message = "获取热门分类失败: HTTP ${response.status}"
-                )
-            }
-            val root = response.jsonBody().jsonObject
-            val ok = (root["ok"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
-            if (ok != 1) {
-                reportSessionExpiredIfLoggedIn(effectiveCookie, ok)
-                return ApiResult.Error(
-                    code = ok,
-                    message = if (ok == -100) SessionExpiredBus.MESSAGE else "获取热门分类失败(ok=$ok)"
-                )
-            }
-
             val categories = mutableListOf<HotFeedCategory>()
             (root["groups"] as? JsonArray).orEmpty().forEach { groupElement ->
                 val group = groupElement as? JsonObject ?: return@forEach
@@ -893,7 +950,9 @@ class WeiboApiService(
                 return ApiResult.Error(message = "热门分类参数为空")
             }
             val effectiveCookie = getEffectiveCookie(cookie)
-            val response = client.get("https://weibo.com/ajax/feed/hottimeline") {
+            val response = client.weiboGet(
+                webEndpoint("/ajax/feed/hottimeline", WeiboAuth.Session(effectiveCookie))
+            ) {
                 parameter("since_id", sinceId.ifBlank { "0" })
                 parameter("refresh", "0")
                 parameter("group_id", groupId)
@@ -901,9 +960,6 @@ class WeiboApiService(
                 parameter("extparam", "discover|new_feed")
                 parameter("max_id", maxId.ifBlank { "0" })
                 parameter("count", count)
-                header("Referer", "https://weibo.com/")
-                header("X-Requested-With", "XMLHttpRequest")
-                cookieHeader(effectiveCookie)
             }
             if (response.status != HttpStatusCode.OK) {
                 return ApiResult.Error(
@@ -955,7 +1011,7 @@ class WeiboApiService(
      * 热门流的 `since_id` 是「字符串里再套一层 JSON」（`"{\"since_id\":\"5355…\"}"`），
      * 偶尔直接给数字/字符串，这里统一拆出真正的游标。
      */
-    private fun readHotFeedSinceId(element: kotlinx.serialization.json.JsonElement?): String? {
+    private fun readHotFeedSinceId(element: JsonElement?): String? {
         val raw = (element as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
         if (raw.isBlank()) return null
         if (!raw.startsWith("{")) return raw
@@ -975,7 +1031,7 @@ class WeiboApiService(
         page: Int = 1,
         searchType: Int = 1,
         cookie: String = ""
-    ): ApiResult<List<org.kazusa.matter.data.model.WeiboStatusDto>> {
+    ): ApiResult<List<WeiboStatusDto>> {
         return when (
             val res = searchWeiboPage(keyword = keyword, page = page, searchType = searchType, cookie = cookie)
         ) {
@@ -1006,23 +1062,26 @@ class WeiboApiService(
         searchType: Int = 1,
         containerId: String? = null,
         cookie: String = ""
-    ): ApiResult<org.kazusa.matter.data.model.SearchPageResult> {
+    ): ApiResult<SearchPageResult> {
         return try {
             val effectiveCookie = getEffectiveCookie(cookie)
             val requestContainerId = containerId?.takeIf { it.isNotBlank() }
                 ?: defaultSearchContainerId(keyword, searchType)
 
-            val response = client.get("https://m.weibo.cn/api/container/getIndex") {
+            val response = client.weiboGet(
+                mobileEndpoint(
+                    path = "/api/container/getIndex",
+                    auth = WeiboAuth.Session(effectiveCookie)
+                )
+            ) {
                 parameter("containerid", requestContainerId)
                 parameter("page_type", "searchall")
                 parameter("page", page)
-                header("Referer", "https://m.weibo.cn/")
+                // m 站 PWA 专用头：缺了会被当普通网页请求，返回结构不同
                 header("MWeibo-Pwa", "1")
-                header("X-Requested-With", "XMLHttpRequest")
-                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
-                val cardResp = response.decodeBody<org.kazusa.matter.data.model.WeiboCardResponse>()
+                val cardResp = response.decodeBody<WeiboCardResponse>()
                 val container = cardResp.data
                 val tabs = resolveSearchTabs(container)
                 // 首屏请求打的就是「默认栏」的 containerid（`100103type=1&q=…&t=1`）。
@@ -1032,7 +1091,7 @@ class WeiboApiService(
                     ?: tabs.indexOfFirst { it.containerid == requestContainerId }.takeIf { it >= 0 }
                     ?: 0
                 ApiResult.Success(
-                    org.kazusa.matter.data.model.SearchPageResult(
+                    SearchPageResult(
                         items = buildSearchItems(container?.cards.orEmpty()),
                         tabs = tabs,
                         defaultTabIndex = defaultIndex
@@ -1212,7 +1271,7 @@ class WeiboApiService(
         sortByTime: Boolean = false,
         count: Int = 20,
         cookie: String = ""
-    ): ApiResult<List<org.kazusa.matter.data.model.WeiboStatusDto>> {
+    ): ApiResult<List<WeiboStatusDto>> {
         val topicKeyword = if (keyword.startsWith("#") && keyword.endsWith("#")) keyword else "#$keyword#"
         return when (val pageResult = searchWeiboPage(keyword = topicKeyword, page = page, cookie = cookie)) {
             is ApiResult.Success -> {
@@ -1225,24 +1284,27 @@ class WeiboApiService(
     }
 
     /**
-     * 获取单条微博详情
-     * 端点: https://m.weibo.cn/statuses/show?id={id}
+     * 获取单条微博详情。
+     *
+     * 端点: `https://weibo.com/ajax/statuses/show?id={id}`（网页详情页自己调的那个，
+     * 响应顶层就是微博对象，见 [decodeWebStatusDetail]）。
      */
-    suspend fun getPostDetail(id: String, cookie: String = ""): ApiResult<org.kazusa.matter.data.model.WeiboStatusDto> {
+    suspend fun getPostDetail(id: String, cookie: String = ""): ApiResult<WeiboStatusDto> {
         return try {
             val effectiveCookie = getEffectiveCookie(cookie)
-            val response = client.get("https://m.weibo.cn/statuses/show") {
+            val response = client.weiboGet(
+                webEndpoint(
+                    path = "/ajax/statuses/show",
+                    auth = WeiboAuth.Session(effectiveCookie),
+                    referer = "https://weibo.com/detail/$id"
+                )
+            ) {
                 parameter("id", id)
-                header("Referer", "https://m.weibo.cn/detail/$id")
-                header("MWeibo-Pwa", "1")
-                header("X-Requested-With", "XMLHttpRequest")
-                cookieHeader(effectiveCookie)
+                parameter("locale", "zh-CN")
+                parameter("isGetLongText", "true")
             }
             if (response.status == HttpStatusCode.OK) {
-                val resp = response.decodeBody<org.kazusa.matter.data.model.WeiboDetailResponse>()
-                resp.data?.let {
-                    ApiResult.Success(it)
-                } ?: ApiResult.Error(message = "未获取到微博详情")
+                withContext(Dispatchers.IO) { decodeWebStatusDetail(response.bodyAsText()) }
             } else {
                 ApiResult.Error(code = response.status.value, message = "HTTP ${response.status}")
             }
@@ -1253,9 +1315,11 @@ class WeiboApiService(
     }
 
     /**
-     * 获取微博评论（支持按热度或按时间获取）
-     * 热门评论端点: https://m.weibo.cn/comments/hotflow?id={id}&mid={id}&max_id_type=0
-     * 时间流评论端点: https://m.weibo.cn/api/comments/show?id={id}&page={page}
+     * 获取微博评论。
+     *
+     * 端点: `https://weibo.com/ajax/statuses/buildComments`（网页详情页的评论列表），
+     * `flow=1` 热门 / `flow=0` 时间序；翻页用服务端下发的 `max_id` 评论游标，
+     * [page] 仅为兼容调用方保留，不参与请求。
      */
     suspend fun getComments(
         id: String,
@@ -1263,56 +1327,30 @@ class WeiboApiService(
         maxId: Long? = null,
         page: Int = 1,
         cookie: String = ""
-    ): ApiResult<org.kazusa.matter.data.model.CommentsDataDto> {
+    ): ApiResult<CommentsDataDto> {
         return try {
             val effectiveCookie = getEffectiveCookie(cookie)
-            if (sortByHot) {
-                val response = client.get("https://m.weibo.cn/comments/hotflow") {
-                    parameter("id", id)
-                    parameter("mid", id)
-                    parameter("max_id_type", "0")
-                    if (maxId != null && maxId > 0) {
-                        parameter("max_id", maxId)
-                    }
-                    header("Referer", "https://m.weibo.cn/detail/$id")
-                    header("MWeibo-Pwa", "1")
-                    header("X-Requested-With", "XMLHttpRequest")
-                    cookieHeader(effectiveCookie)
-                }
-                if (response.status == HttpStatusCode.OK) {
-                    val resp = response.decodeBody<org.kazusa.matter.data.model.CommentsResponse>()
-                    when {
-                        // 没有评论时服务端返回 ok=0 + "这里还没有内容"，按空列表处理
-                        isWeiboEmptyListResponse(resp.ok, resp.msg, resp.data?.data?.size) ->
-                            ApiResult.Success(org.kazusa.matter.data.model.CommentsDataDto(data = emptyList()))
-                        resp.data != null -> ApiResult.Success(resp.data)
-                        else -> ApiResult.Error(message = "评论加载失败，请稍后重试")
-                    }
-                } else {
-                    ApiResult.Error(code = response.status.value, message = "HTTP ${response.status}")
-                }
+            val response = client.weiboGet(
+                webEndpoint(
+                    path = "/ajax/statuses/buildComments",
+                    auth = WeiboAuth.Session(effectiveCookie),
+                    referer = "https://weibo.com/detail/$id"
+                )
+            ) {
+                parameter("is_reload", 1)
+                parameter("id", id)
+                parameter("is_show_bulletin", 2)
+                parameter("is_mix", 0)
+                parameter("fetch_level", 0)
+                parameter("flow", if (sortByHot) 1 else 0)
+                parameter("count", 20)
+                maxId?.takeIf { it > 0 }?.let { parameter("max_id", it) }
+            }
+            if (response.status == HttpStatusCode.OK) {
+                // 网页一级评论与楼中楼同构（顶层扁平 data 数组），复用同一个解析
+                withContext(Dispatchers.IO) { decodeCommentReplies(response.bodyAsText()) }
             } else {
-                // 按最新时间排序
-                val response = client.get("https://m.weibo.cn/api/comments/show") {
-                    parameter("id", id)
-                    parameter("page", page)
-                    header("Referer", "https://m.weibo.cn/detail/$id")
-                    header("MWeibo-Pwa", "1")
-                    header("X-Requested-With", "XMLHttpRequest")
-                    cookieHeader(effectiveCookie)
-                }
-                if (response.status == HttpStatusCode.OK) {
-                    val resp = response.decodeBody<org.kazusa.matter.data.model.CommentsResponse>()
-                    when {
-                        // 没有评论时服务端返回 ok=0 + "这里还没有内容"，按空列表处理
-                        isWeiboEmptyListResponse(resp.ok, resp.msg, resp.data?.data?.size) ->
-                            ApiResult.Success(org.kazusa.matter.data.model.CommentsDataDto(data = emptyList()))
-                        resp.data != null -> ApiResult.Success(resp.data)
-                        else -> ApiResult.Error(message = "评论加载失败，请稍后重试")
-                    }
-                } else {
-                    ApiResult.Error(code = response.status.value, message = "HTTP ${response.status}")
-                }
+                ApiResult.Error(code = response.status.value, message = "HTTP ${response.status}")
             }
         } catch (e: CancellationException) {
             throw e
@@ -1322,24 +1360,36 @@ class WeiboApiService(
         }
     }
 
-    /** 获取评论的楼中楼回复，按服务端游标分页。 */
+    /**
+     * 获取评论的楼中楼回复，按服务端下发的评论游标分页。
+     *
+     * 端点与一级评论相同（`/ajax/statuses/buildComments`），区别是 `id` 传**父评论 id**，
+     * 且必须带 `fetch_level=1&is_mix=1`（实测缺这两个参数返回的仍是一级评论）。
+     * [maxIdType] 是 m 站专有参数，网页端不需要，仅为兼容调用方保留。
+     */
     suspend fun getCommentReplies(
         postId: String,
         commentId: Long,
         maxId: Long = 0,
         maxIdType: Int = 0,
         cookie: String = ""
-    ): ApiResult<org.kazusa.matter.data.model.CommentsDataDto> {
+    ): ApiResult<CommentsDataDto> {
         return try {
             val effectiveCookie = getEffectiveCookie(cookie)
-            val response = client.get("https://m.weibo.cn/comments/hotFlowChild") {
-                parameter("cid", commentId)
+            val response = client.weiboGet(
+                webEndpoint(
+                    path = "/ajax/statuses/buildComments",
+                    auth = WeiboAuth.Session(effectiveCookie),
+                    referer = "https://weibo.com/detail/$postId?cid=$commentId"
+                )
+            ) {
+                parameter("is_reload", 1)
+                parameter("id", commentId)
+                parameter("is_show_bulletin", 2)
+                parameter("is_mix", 1)
+                parameter("fetch_level", 1)
+                parameter("count", 20)
                 parameter("max_id", maxId)
-                parameter("max_id_type", maxIdType)
-                header("Referer", "https://m.weibo.cn/detail/$postId?cid=$commentId")
-                header("MWeibo-Pwa", "1")
-                header("X-Requested-With", "XMLHttpRequest")
-                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
                 withContext(Dispatchers.IO) { decodeCommentReplies(response.bodyAsText()) }
@@ -1355,33 +1405,30 @@ class WeiboApiService(
     }
 
     /**
-     * 获取微博转发列表
-     * 端点: https://m.weibo.cn/api/statuses/repostTimeline?id={id}&page={page}
+     * 获取微博转发列表。
+     *
+     * 端点: `https://weibo.com/ajax/statuses/repostTimeline?id={id}&page={page}`，
+     * 响应为扁平 `data` 数组，见 [decodeWebRepostPage]。
      */
     suspend fun getReposts(
         id: String,
         page: Int = 1,
         cookie: String = ""
-    ): ApiResult<org.kazusa.matter.data.model.RepostsDataDto> {
+    ): ApiResult<RepostsDataDto> {
         return try {
             val effectiveCookie = getEffectiveCookie(cookie)
-            val response = client.get("https://m.weibo.cn/api/statuses/repostTimeline") {
+            val response = client.weiboGet(
+                webEndpoint(
+                    path = "/ajax/statuses/repostTimeline",
+                    auth = WeiboAuth.Session(effectiveCookie),
+                    referer = "https://weibo.com/detail/$id"
+                )
+            ) {
                 parameter("id", id)
                 parameter("page", page)
-                header("Referer", "https://m.weibo.cn/detail/$id")
-                header("MWeibo-Pwa", "1")
-                header("X-Requested-With", "XMLHttpRequest")
-                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
-                val resp = response.decodeBody<org.kazusa.matter.data.model.RepostsResponse>()
-                when {
-                    // 没有转发时服务端返回 ok=0 + "这里还没有内容"，按空列表处理
-                    isWeiboEmptyListResponse(resp.ok, resp.msg, resp.data?.data?.size) ->
-                        ApiResult.Success(org.kazusa.matter.data.model.RepostsDataDto(data = emptyList()))
-                    resp.data != null -> ApiResult.Success(resp.data)
-                    else -> ApiResult.Error(message = "转发列表加载失败")
-                }
+                withContext(Dispatchers.IO) { decodeWebRepostPage(response.bodyAsText()) }
             } else {
                 ApiResult.Error(code = response.status.value, message = "HTTP ${response.status}")
             }
@@ -1401,23 +1448,27 @@ class WeiboApiService(
         id: String,
         page: Int = 1,
         cookie: String = ""
-    ): ApiResult<org.kazusa.matter.data.model.AttitudesDataDto> {
+    ): ApiResult<AttitudesDataDto> {
         return try {
             val effectiveCookie = getEffectiveCookie(cookie)
-            val response = client.get("https://m.weibo.cn/api/attitudes/show") {
+            val response = client.weiboGet(
+                mobileEndpoint(
+                    path = "/api/attitudes/show",
+                    auth = WeiboAuth.Session(effectiveCookie),
+                    referer = "https://m.weibo.cn/detail/$id"
+                )
+            ) {
                 parameter("id", id)
                 parameter("page", page)
-                header("Referer", "https://m.weibo.cn/detail/$id")
+                // m 站 PWA 专用头：缺了会被当普通网页请求，返回结构不同
                 header("MWeibo-Pwa", "1")
-                header("X-Requested-With", "XMLHttpRequest")
-                cookieHeader(effectiveCookie)
             }
             if (response.status == HttpStatusCode.OK) {
-                val resp = response.decodeBody<org.kazusa.matter.data.model.AttitudesResponse>()
+                val resp = response.decodeBody<AttitudesResponse>()
                 when {
                     // 没有点赞时服务端返回 ok=0 + "这里还没有内容"，按空列表处理
                     isWeiboEmptyListResponse(resp.ok, resp.msg, resp.data?.data?.size) ->
-                        ApiResult.Success(org.kazusa.matter.data.model.AttitudesDataDto(data = emptyList()))
+                        ApiResult.Success(AttitudesDataDto(data = emptyList()))
                     resp.data != null -> ApiResult.Success(resp.data)
                     else -> ApiResult.Error(message = "点赞列表加载失败")
                 }
@@ -1465,9 +1516,9 @@ class WeiboApiService(
             writeSession.execute(
                 cookie = effectiveCookie,
                 action = if (isLike) "点赞" else "取消点赞"
-            ) { mobileCredentials ->
+            ) { baseCredentials ->
                 desktopFormWrite(
-                    url = "https://weibo.com/ajax/statuses/" +
+                    path = "/ajax/statuses/" +
                         when {
                             refererPostId == null && isLike -> "setLike"
                             refererPostId == null -> "cancelLike"
@@ -1476,7 +1527,7 @@ class WeiboApiService(
                         },
                     form = form,
                     referer = "https://weibo.com/",
-                    mobileCredentials = mobileCredentials,
+                    baseCredentials = baseCredentials,
                     failureMessage = if (isLike) "点赞失败" else "取消点赞失败",
                     success = isLike
                 )
@@ -1493,12 +1544,13 @@ class WeiboApiService(
 
     /**
      * 回复（评论）微博。
-     * 端点: POST https://m.weibo.cn/api/comments/create 或 comments/reply（附带 cid）。
      *
-     * 移动端 PWA 提交的是 `mid` + `content` + `st`（mid 即详情链接里的微博 id）；
-     * 这里同时带上 `id`，兼容仍按 `id` 取目标微博的端。
+     * 端点: `POST https://weibo.com/ajax/comments/create`，带 `cid` 时为 `.../reply`。
+     * 请求体是**表单**（JSON 会被拒），`Referer` 指详情页，凭据用网页域 XSRF。
+     * 字段：`mid`/`id`（详情链接里的微博 id，两个都带以兼容不同分支）、`comment`、
+     * 楼中楼用 `cid`，附图用 `pic_id`，其余开关固定为 0。
      *
-     * 与点赞 / 关注共用同一个 [WeiboWriteSession]：`st` 令牌、串行提交与频控冷却一致。
+     * 与点赞 / 关注共用同一个 [WeiboWriteSession]：网页 XSRF 凭据、串行提交与频控冷却一致。
      * 成功时尽量带回服务端新建的评论（`data` 为对象时可直接插入列表）；
      * 部分响应只给 `ok=1`，此时返回 `null`，由调用方静默重拉评论。
      */
@@ -1508,7 +1560,7 @@ class WeiboApiService(
         cookie: String = "",
         commentId: Long? = null,
         pictureId: String? = null
-    ): ApiResult<org.kazusa.matter.data.model.WeiboCommentDto?> {
+    ): ApiResult<WeiboCommentDto?> {
         if (id.isBlank() || (commentId != null && commentId <= 0)) {
             return ApiResult.Error(message = "回复目标无效")
         }
@@ -1519,32 +1571,25 @@ class WeiboApiService(
             if (effectiveCookie.isBlank()) {
                 return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
             }
-            writeSession.execute(cookie = effectiveCookie, action = "回复") { mobileCredentials ->
-                val credentials = if (pictureId == null) mobileCredentials else desktopWriteCredentials(mobileCredentials)
-                val response = client.submitForm(
-                    url = if (pictureId == null) "https://m.weibo.cn/api/comments/${if (commentId == null) "create" else "reply"}"
-                        else "https://weibo.com/ajax/comments/${if (commentId == null) "create" else "reply"}",
-                    formParameters = parameters {
+            writeSession.execute(cookie = effectiveCookie, action = "回复") { credentials ->
+                // 纯文本与图片评论统一走网页端：同一个端点、同一套 XSRF 凭据，不再分两条通道
+                val response = client.weiboPostForm(
+                    endpoint = webEndpoint(
+                        path = "/ajax/comments/${if (commentId == null) "create" else "reply"}",
+                        auth = WeiboAuth.Write(credentials),
+                        referer = "https://weibo.com/detail/$id"
+                    ),
+                    form = parameters {
                         append("mid", id)
                         append("id", id)
                         commentId?.let { append("cid", it.toString()) }
-                        if (pictureId == null) append("content", content) else {
-                            append("comment", content.ifBlank { "图片评论" })
-                            append("pic_id", pictureId)
-                            append("is_repost", "0")
-                            append("comment_ori", "0")
-                            append("is_comment", "0")
-                        }
-                        append("st", credentials.token)
+                        append("comment", content.ifBlank { "图片评论" })
+                        pictureId?.let { append("pic_id", it) }
+                        append("is_repost", "0")
+                        append("comment_ori", "0")
+                        append("is_comment", "0")
                     }
-                ) {
-                    cookieHeader(credentials.cookieHeader)
-                    header("X-XSRF-TOKEN", credentials.token)
-                    header("Origin", if (pictureId == null) "https://m.weibo.cn" else "https://weibo.com")
-                    header("Referer", if (pictureId == null) "https://m.weibo.cn/detail/$id" else "https://weibo.com/")
-                    header("MWeibo-Pwa", "1")
-                    header("X-Requested-With", "XMLHttpRequest")
-                }
+                )
                 readCreatedComment(response, failureMessage = "回复失败")
             }
         } catch (e: WriteGateException) {
@@ -1572,10 +1617,8 @@ class WeiboApiService(
             if (name.isNotEmpty() && '=' in part) cookies[name] = part.substringAfter('=').trim()
         }
         if (cookies["XSRF-TOKEN"].isNullOrBlank()) {
-            val response = client.get("https://weibo.com/") {
-                cookieHeader(base.cookieHeader)
-                header("Referer", "https://weibo.com/")
-            }
+            // 网页域首页只用来换 XSRF Cookie，不带业务参数
+            val response = client.weiboGet(webEndpoint("/", WeiboAuth.Session(base.cookieHeader)))
             if (response.status == HttpStatusCode.TooManyRequests) {
                 writeSession.reportRateLimited()
                 throw WriteGateException(429, WeiboWriteErrors.RATE_LIMITED_MESSAGE)
@@ -1586,7 +1629,7 @@ class WeiboApiService(
             }
         }
         val csrf = cookies["XSRF-TOKEN"]?.takeIf { it.isNotBlank() }
-            ?: throw WriteGateException(401, "无法获取微博网页发布凭据，请重新登录后重试；所选图片已保留")
+            ?: throw WriteGateException(401, "无法获取微博网页发布凭据，请重新登录后重试")
         return base.copy(cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" },
             token = csrf.decodeURLQueryComponent())
             .also { cachedDesktopCredentials = it }
@@ -1617,23 +1660,53 @@ class WeiboApiService(
      * 核实）：`application/x-www-form-urlencoded`，JSON 体会被服务端拒绝。
      */
     private suspend fun <T : Any> desktopFormWrite(
-        url: String,
+        path: String,
         form: Parameters,
         referer: String,
-        mobileCredentials: WeiboWriteCredentials,
+        baseCredentials: WeiboWriteCredentials,
         failureMessage: String,
         success: T
     ): ApiResult<T> {
-        val credentials = desktopWriteCredentials(mobileCredentials)
-        val response = client.submitForm(url = url, formParameters = form) {
-            cookieHeader(credentials.cookieHeader)
-            header("X-XSRF-TOKEN", credentials.token)
-            header("Origin", "https://weibo.com")
-            header("Referer", referer)
-            header("X-Requested-With", "XMLHttpRequest")
-        }
+        val credentials = desktopWriteCredentials(baseCredentials)
+        val response = client.weiboPostForm(
+            endpoint = webEndpoint(path, WeiboAuth.Write(credentials), referer = referer),
+            form = form
+        )
         syncDesktopCredentials(credentials, response)
         return readWriteResponse(response, failureMessage = failureMessage, success = success)
+    }
+
+    /**
+     * 网页域 JSON 写操作（收藏 / 取消收藏）：`application/json` 体 + 网页域 XSRF 令牌。
+     *
+     * 与 [desktopFormWrite] 的区别只在请求体格式：网页端收藏走 JSON（表单会被拒），
+     * 点赞 / 关注走表单。频控、凭据轮换与失败处理共用同一套逻辑。
+     */
+    private suspend fun desktopJsonWrite(
+        cookie: String,
+        action: String,
+        path: String,
+        body: JsonObject,
+        failureMessage: String
+    ): ApiResult<Unit> {
+        return try {
+            writeSession.execute(cookie = cookie, action = action) { baseCredentials ->
+                val credentials = desktopWriteCredentials(baseCredentials)
+                val response = client.weiboPostJson(
+                    endpoint = webEndpoint(path, WeiboAuth.Write(credentials)),
+                    json = body.toString()
+                )
+                syncDesktopCredentials(credentials, response)
+                readWriteResponse(response, failureMessage = failureMessage, success = Unit)
+            }
+        } catch (e: WriteGateException) {
+            ApiResult.Error(code = e.code, message = e.message.orEmpty())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.e("WeiboApi", "$action failed", e)
+            ApiResult.Error(message = e.localizedMessage ?: "$failureMessage，请稍后重试", throwable = e)
+        }
     }
 
     /**
@@ -1659,7 +1732,7 @@ class WeiboApiService(
     private suspend fun readCreatedComment(
         response: HttpResponse,
         failureMessage: String
-    ): ApiResult<org.kazusa.matter.data.model.WeiboCommentDto?> {
+    ): ApiResult<WeiboCommentDto?> {
         writeHttpError(response)?.let { return it }
         val respJson = response.jsonBody().jsonObject
         if (writeOkFlag(respJson) != 1) return writeJsonError(respJson, failureMessage)
@@ -1669,7 +1742,7 @@ class WeiboApiService(
             // 否则会在列表里插进一条点不开、也不属于任何人的空评论
             runCatching {
                 KtorClientFactory.jsonConfig
-                    .decodeFromJsonElement<org.kazusa.matter.data.model.WeiboCommentDto>(data)
+                    .decodeFromJsonElement<WeiboCommentDto>(data)
             }.getOrNull()?.takeIf { it.id != null }
         }
         return ApiResult.Success(created)
@@ -1723,58 +1796,19 @@ class WeiboApiService(
     }
 
     /**
-     * 取写操作凭据（`st` + 配套 Cookie）。
+     * 写操作凭据（网页域 XSRF）。
      *
-     * `st` 与下发它的 Cookie 必须成对使用，因此由 [WeiboWriteSession] 一起缓存：
-     * 原先每次点赞都要先打一次 `/api/config`，写路径请求量翻倍，是最容易触发
-     * 「操作频繁」的地方。
+     * 所有写路径都已收敛到 `weibo.com`，不再需要 `/api/config` 下发的 `st`：这里只把调用方
+     * 的 Cookie 包成凭据，真正的 XSRF 令牌由 [desktopWriteCredentials] 取（首次会打一次
+     * `weibo.com/`，之后按来源 Cookie 缓存复用）。
      */
-    private suspend fun fetchWriteCredentials(
+    @Suppress("UNUSED_PARAMETER")
+    private suspend fun fetchDesktopWriteCredentials(
         cookie: String,
         action: String
-    ): WeiboWriteCredentials {
-        val cookies = parseCookieHeader(cookie)
-        val bootstrap = client.get("https://m.weibo.cn/api/config") {
-            cookieHeader(cookie)
-            header("Referer", "https://m.weibo.cn/")
-        }
-        if (bootstrap.status == HttpStatusCode.TooManyRequests) {
-            throw WriteGateException(
-                WeiboWriteErrors.CODE_RATE_LIMITED,
-                WeiboWriteErrors.RATE_LIMITED_MESSAGE
-            )
-        }
-        if (bootstrap.status != HttpStatusCode.OK) {
-            throw WriteGateException(
-                bootstrap.status.value,
-                "获取${action}凭据失败：HTTP ${bootstrap.status.value}"
-            )
-        }
-        val configElement = bootstrap.jsonBody().jsonObject
-        val configData = configElement["data"]?.jsonObject
-        if (configData?.get("login")?.jsonPrimitive?.booleanOrNull != true) {
-            // /api/config 自身被限流时同样返回 ok=0 + 频控文案，
-            // 不能误报成「登录已失效」，否则用户会去重新登录而不是等待
-            if (WeiboWriteErrors.isRateLimited(configElement["msg"]?.jsonPrimitive?.contentOrNull)) {
-                throw WriteGateException(
-                    WeiboWriteErrors.CODE_RATE_LIMITED,
-                    WeiboWriteErrors.RATE_LIMITED_MESSAGE
-                )
-            }
-            throw WriteGateException(401, "登录已失效，请重新登录后$action")
-        }
-        bootstrap.headers.getAll("Set-Cookie").orEmpty().forEach { value ->
-            val pair = value.substringBefore(';')
-            if ('=' in pair) cookies[pair.substringBefore('=').trim()] = pair.substringAfter('=').trim()
-        }
-        val token = configData["st"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
-            ?: throw WriteGateException(401, "无法获取${action}凭据，请重新登录")
-        return WeiboWriteCredentials(
-            sourceCookie = cookie,
-            cookieHeader = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" },
-            token = token
-        )
-    }
+    ): WeiboWriteCredentials = desktopWriteCredentials(
+        WeiboWriteCredentials(sourceCookie = cookie, cookieHeader = cookie, token = "")
+    )
 
 
     /** 关注用户。端点: POST https://weibo.com/ajax/friendships/create，表单 `friend_uid` */
@@ -1813,15 +1847,15 @@ class WeiboApiService(
             writeSession.execute(
                 cookie = effectiveCookie,
                 action = if (follow) "关注" else "取消关注"
-            ) { mobileCredentials ->
+            ) { baseCredentials ->
                 desktopFormWrite(
-                    url = if (follow) "https://weibo.com/ajax/friendships/create"
-                    else "https://weibo.com/ajax/friendships/destory",
+                    path = if (follow) "/ajax/friendships/create"
+                    else "/ajax/friendships/destory",
                     form = parameters {
                         append(if (follow) "friend_uid" else "uid", targetUid)
                     },
                     referer = "https://weibo.com/u/$targetUid",
-                    mobileCredentials = mobileCredentials,
+                    baseCredentials = baseCredentials,
                     failureMessage = if (follow) "关注失败" else "取消关注失败",
                     success = Unit
                 )
@@ -1839,8 +1873,11 @@ class WeiboApiService(
     /**
      * 删除自己发表的评论（楼中楼回复同样是评论，按 cid 删除）。
      *
-     * 端点: POST https://m.weibo.cn/comments/destroy，表单 `cid` + `st`（服务端对评论
-     * 删除另有更紧的配额，触发后同样走 [WeiboWriteSession] 的本地冷却）。
+     * 端点: POST https://weibo.com/ajax/statuses/destroyComment，表单 `cid`。
+     *
+     * 两个必需条件（缺一个就 400，实测）：请求体必须是**表单**而不是 JSON；
+     * `Referer` 必须是该微博的**详情页**，不能是首页。凭据用网页域 XSRF。
+     * 服务端对评论删除另有更紧的配额，触发后同样走 [WeiboWriteSession] 的本地冷却。
      */
     suspend fun destroyComment(postId: String, cid: Long, cookie: String = ""): ApiResult<Unit> {
         if (cid <= 0 || postId.isBlank()) return ApiResult.Error(message = "删除目标无效")
@@ -1870,23 +1907,18 @@ class WeiboApiService(
                 action = if (cid == null) "删除微博" else "删除评论"
             ) { credentials ->
                 if (cid == null) {
-                    destroyViaDesktop(id, cid = null, base = credentials)
+                    destroyViaDesktop(id, base = credentials)
                 } else {
-                    val response = client.submitForm(
-                        url = "https://m.weibo.cn/comments/destroy",
-                        formParameters = parameters {
-                            append("cid", cid)
-                            append("st", credentials.token)
-                            append("_spr", "screen:1920x1080")
-                        }
-                    ) {
-                        cookieHeader(credentials.cookieHeader)
-                        header("X-XSRF-TOKEN", credentials.token)
-                        header("Origin", "https://m.weibo.cn")
-                        header("Referer", "https://m.weibo.cn/detail/$id")
-                        header("MWeibo-Pwa", "1")
-                        header("X-Requested-With", "XMLHttpRequest")
-                    }
+                    // 网页删评论：只接受**表单** `cid`（JSON 体会被判 400），
+                    // 且 Referer 必须是详情页，否则同样 400
+                    val response = client.weiboPostForm(
+                        endpoint = webEndpoint(
+                            path = "/ajax/statuses/destroyComment",
+                            auth = WeiboAuth.Write(credentials),
+                            referer = "https://weibo.com/detail/$id"
+                        ),
+                        form = parameters { append("cid", cid) }
+                    )
                     readWriteResponse(response, failureMessage = "删除失败", success = Unit)
                 }
             }
@@ -1987,9 +2019,13 @@ class WeiboApiService(
         val extensions = JsonObject(
             mapOf("webchat" to JsonPrimitive(1), "clientid" to JsonPrimitive(makeChatClientId()))
         ).toString()
-        val response = client.submitForm(
-            url = "https://api.weibo.com/webim/2/direct_messages/new.json",
-            formParameters = parameters {
+        val response = client.weiboPostForm(
+            endpoint = openApiEndpoint(
+                path = "/webim/2/direct_messages/new.json",
+                auth = WeiboAuth.Session(cookie),
+                referer = "https://api.weibo.com/chat/"
+            ),
+            form = parameters {
                 append("uid", targetUid)
                 append("text", text)
                 if (fid != null) append("fids", fid)
@@ -1998,10 +2034,8 @@ class WeiboApiService(
                 append("return_detail", "1")
             }
         ) {
-            cookieHeader(cookie)
+            // webim 的 SPA 与网页主站不同源，Origin 要跟 api.weibo.com
             header("Origin", "https://api.weibo.com")
-            header("Referer", "https://api.weibo.com/chat/")
-            header("X-Requested-With", "XMLHttpRequest")
         }
         // 带 fids 时要求服务端确实把图片挂上了：只回一条纯文本消息说明附件被丢掉，
         // 这时必须报失败并回滚，不能让「分享图片」变成一条没有图的私信
@@ -2080,25 +2114,16 @@ class WeiboApiService(
     private fun JsonObject.hasChatImageAttachment(): Boolean =
         this["attachment"] is JsonObject || webimString("media_type")?.toIntOrNull() == 1
 
-    /** 网页渠道删除：JSON 体 + 网页域 XSRF 令牌；凭据取不到时抛 [WriteGateException]。 */
+    /** 网页渠道删除微博：JSON 体 + 网页域 XSRF 令牌；凭据取不到时抛 [WriteGateException]。 */
     private suspend fun destroyViaDesktop(
         id: String,
-        cid: String?,
         base: WeiboWriteCredentials
     ): ApiResult<Unit> {
         val credentials = desktopWriteCredentials(base)
-        val response = client.post(
-            if (cid == null) "https://weibo.com/ajax/statuses/destroy"
-            else "https://weibo.com/ajax/comments/destroy"
-        ) {
-            contentType(ContentType.Application.Json)
-            setBody(JsonObject(mapOf((if (cid == null) "id" else "cid") to JsonPrimitive(cid ?: id))).toString())
-            header("X-XSRF-TOKEN", credentials.token)
-            cookieHeader(credentials.cookieHeader)
-            header("Origin", "https://weibo.com")
-            header("Referer", "https://weibo.com/")
-            header("X-Requested-With", "XMLHttpRequest")
-        }
+        val response = client.weiboPostJson(
+            endpoint = webEndpoint("/ajax/statuses/destroy", WeiboAuth.Write(credentials)),
+            json = JsonObject(mapOf("id" to JsonPrimitive(id))).toString()
+        )
         return readWriteResponse(response, failureMessage = "删除失败", success = Unit)
     }
 
@@ -2117,15 +2142,17 @@ class WeiboApiService(
 
     /**
      * 获取博主资料卡片
-     * 端点: https://m.weibo.cn/api/container/getIndex?containerid=100505{uid}
-     * 兜底: https://weibo.com/ajax/profile/info?uid={uid}
+     * 端点: https://weibo.com/ajax/profile/info?uid={uid}（游客态也能读，字段比 m 站 userInfo 更全）
+     *
+     * 该接口不可用时只回基础字段（id / 昵称），不再回落到 m 站 `container/getIndex`——
+     * 那条通道的 `userInfo` 字段更少，且 m 站对未登录请求返回 432。
      */
-    suspend fun getUserProfile(uid: String, cookie: String = ""): ApiResult<org.kazusa.matter.data.model.WeiboUserDto> {
+    suspend fun getUserProfile(uid: String, cookie: String = ""): ApiResult<WeiboUserDto> {
         return try {
             val cleanUid = uid.removePrefix("name:").removePrefix("@").trim()
             if (cleanUid.isBlank()) return ApiResult.Error(message = "博主名称不能为空")
             val isNumeric = !uid.startsWith("name:") && cleanUid.all { it.isDigit() }
-            var effectiveCookie = getEffectiveCookie(cookie)
+            val effectiveCookie = getEffectiveCookie(cookie)
             val numericUid = if (isNumeric) cleanUid else when (val resolved = resolveMentionUserId(cleanUid, effectiveCookie)) {
                 is ApiResult.Success -> resolved.data
                 is ApiResult.Error -> return resolved
@@ -2134,69 +2161,19 @@ class WeiboApiService(
 
             val targetUid = numericUid
 
-            // 1. 尝试 m.weibo.cn 移动端接口
+            // 网页端资料接口：游客态也能读，字段比移动端 userInfo 更全
             if (targetUid.all { it.isDigit() }) {
                 try {
-                    val containerId = "100505$targetUid"
-                    var response = client.get("https://m.weibo.cn/api/container/getIndex") {
-                        parameter("containerid", containerId)
-                        header("Referer", "https://m.weibo.cn/u/$targetUid")
-                        header("MWeibo-Pwa", "1")
-                        header("X-Requested-With", "XMLHttpRequest")
-                        cookieHeader(effectiveCookie)
-                    }
-                    if (response.status.value == 432) {
-                        cachedVisitorCookie = null
-                        val fresh = fetchVisitorCookie()
-                        if (fresh.isNotBlank()) {
-                            cachedVisitorCookie = fresh
-                            effectiveCookie = fresh
-                            response = client.get("https://m.weibo.cn/api/container/getIndex") {
-                                parameter("containerid", containerId)
-                                header("Referer", "https://m.weibo.cn/u/$targetUid")
-                                header("MWeibo-Pwa", "1")
-                                header("X-Requested-With", "XMLHttpRequest")
-                                cookieHeader(effectiveCookie)
-                            }
-                        }
-                    }
-                    if (response.status == HttpStatusCode.OK) {
-                        val cardResp = response.decodeBody<org.kazusa.matter.data.model.WeiboCardResponse>()
-                        if (cardResp.ok == 1) {
-                            var user: org.kazusa.matter.data.model.WeiboUserDto? = cardResp.data?.userInfo
-                            if (user == null) {
-                                cardResp.data?.cards?.forEach { card ->
-                                    if (user == null) {
-                                        card.mblog?.user?.let { user = it }
-                                        card.cardGroup.forEach { item ->
-                                            item.mblog?.user?.let { user = it }
-                                        }
-                                    }
-                                }
-                            }
-                            if (user != null) {
-                                return ApiResult.Success(user)
-                            }
-                        }
-                    }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (e: Exception) {
-                    android.util.Log.w("WeiboApi", "m.weibo.cn getUserProfile failed for $targetUid, trying PC fallback", e)
-                }
-            }
-
-            // 2. 备用接口：weibo.com PC 端 ajax 接口（对于无需登录即可查看资料的账号极度稳定）
-            if (targetUid.all { it.isDigit() }) {
-                try {
-                    val pcResponse = client.get("https://weibo.com/ajax/profile/info") {
+                    val pcResponse = client.weiboGet(
+                        webEndpoint(
+                            path = "/ajax/profile/info",
+                            auth = WeiboAuth.Session(effectiveCookie),
+                            referer = "https://weibo.com/u/$targetUid"
+                        )
+                    ) {
                         parameter("uid", targetUid)
-                        header("Referer", "https://weibo.com/u/$targetUid")
-                        header("Accept", "application/json, text/plain, */*")
-                        header("X-Requested-With", "XMLHttpRequest")
                         header("client-version", "v2.44.75")
                         header("server-version", "v2024.05.24.1")
-                        cookieHeader(effectiveCookie)
                     }
                     if (pcResponse.status == HttpStatusCode.OK) {
                         val rootJson = pcResponse.jsonBody().jsonObject
@@ -2204,7 +2181,7 @@ class WeiboApiService(
                         if (ok == 1) {
                             val userObj = rootJson["data"]?.jsonObject?.get("user")
                             if (userObj != null) {
-                                val userDto = KtorClientFactory.jsonConfig.decodeFromJsonElement<org.kazusa.matter.data.model.WeiboUserDto>(userObj)
+                                val userDto = KtorClientFactory.jsonConfig.decodeFromJsonElement<WeiboUserDto>(userObj)
                                 return ApiResult.Success(userDto)
                             }
                         }
@@ -2216,9 +2193,9 @@ class WeiboApiService(
                 }
             }
 
-            // 3. 兜底返回基础博主信息
+            // 兜底：只回基础博主信息（没有头像 / 简介）
             ApiResult.Success(
-                org.kazusa.matter.data.model.WeiboUserDto(
+                WeiboUserDto(
                     id = targetUid.toLongOrNull(),
                     idStr = targetUid,
                     screenName = if (targetUid.all { it.isDigit() }) "博主 $targetUid" else targetUid
@@ -2239,7 +2216,7 @@ class WeiboApiService(
      * - https://weibo.com/ajax/profile/detail?uid={uid}（字段最全）
      * - 兜底: https://weibo.com/ajax/profile/info?uid={uid} 的 data.user
      *
-     * 移动端 `100505{uid}` 的 userInfo 只有昵称/头像/粉丝数等基础字段；
+     * `profile/info` 的 `data.user` 只有昵称/头像/粉丝数等基础字段；
      * 生日、星座、IP 属地、注册时间、教育/职业、阳光信用、动态标签只在这里下发。
      * 该接口依赖登录态，失败时由调用方静默降级，不影响主页主体内容。
      */
@@ -2248,30 +2225,15 @@ class WeiboApiService(
             if (!uid.all { it.isDigit() }) {
                 return ApiResult.Error(message = "仅支持数字 UID 获取详细资料")
             }
-            var effectiveCookie = getEffectiveCookie(cookie)
 
-            suspend fun request(url: String): io.ktor.client.statement.HttpResponse =
-                client.get(url) {
+            suspend fun fetchData(path: String): JsonObject? {
+                val response = weiboGetWithVisitorRetry(
+                    buildEndpoint = { auth -> webEndpoint(path, auth, referer = "https://weibo.com/u/$uid") },
+                    cookie = cookie
+                ) {
                     parameter("uid", uid)
-                    header("Referer", "https://weibo.com/u/$uid")
-                    header("Accept", "application/json, text/plain, */*")
-                    header("X-Requested-With", "XMLHttpRequest")
                     header("client-version", "v2.44.75")
                     header("server-version", "v2024.05.24.1")
-                    cookieHeader(effectiveCookie)
-                }
-
-            suspend fun fetchData(url: String): JsonObject? {
-                var response = request(url)
-                if (response.status.value == 432) {
-                    // 游客凭据过期：换一张再试一次
-                    cachedVisitorCookie = null
-                    val fresh = fetchVisitorCookie()
-                    if (fresh.isNotBlank()) {
-                        cachedVisitorCookie = fresh
-                        effectiveCookie = fresh
-                        response = request(url)
-                    }
                 }
                 if (response.status != HttpStatusCode.OK) return null
                 val root = response.jsonBody().jsonObject
@@ -2281,14 +2243,14 @@ class WeiboApiService(
             }
 
             // 1. 详细资料（生日、教育、职业、阳光信用、动态标签等）
-            val detailData = fetchData("https://weibo.com/ajax/profile/detail")
+            val detailData = fetchData("/ajax/profile/detail")
             if (detailData != null) {
                 val detail = parseUserProfileDetail(detailData)
                 if (detail.hasProfileInfo) return ApiResult.Success(detail)
             }
 
             // 2. 兜底 profile/info 的 user 节点，至少补齐所在地/性别
-            val infoUser = fetchData("https://weibo.com/ajax/profile/info")?.get("user") as? JsonObject
+            val infoUser = fetchData("/ajax/profile/info")?.get("user") as? JsonObject
             if (infoUser != null) {
                 val detail = parseUserProfileDetail(infoUser)
                 if (detail.hasProfileInfo) return ApiResult.Success(detail)
@@ -2312,29 +2274,23 @@ class WeiboApiService(
     suspend fun getUserAlbums(uid: String, cookie: String = ""): ApiResult<List<UserAlbum>> {
         return try {
             if (!uid.all { it.isDigit() }) return ApiResult.Error(message = "仅支持数字 UID 获取相册")
-            var effectiveCookie = getEffectiveCookie(cookie)
-
-            suspend fun request(): io.ktor.client.statement.HttpResponse =
-                client.get("https://weibo.com/ajax/profile/getImageWall") {
+            suspend fun request(): HttpResponse =
+                weiboGetWithVisitorRetry(
+                    buildEndpoint = { auth ->
+                        webEndpoint(
+                            path = "/ajax/profile/getImageWall",
+                            auth = auth,
+                            referer = "https://weibo.com/u/$uid?tabtype=album"
+                        )
+                    },
+                    cookie = cookie
+                ) {
                     parameter("uid", uid)
                     parameter("sinceid", "0")
                     parameter("has_album", "true")
-                    header("Referer", "https://weibo.com/u/$uid?tabtype=album")
-                    header("Accept", "application/json, text/plain, */*")
-                    header("X-Requested-With", "XMLHttpRequest")
-                    cookieHeader(effectiveCookie)
                 }
 
-            var response = request()
-            if (response.status.value == 432) {
-                cachedVisitorCookie = null
-                val fresh = fetchVisitorCookie()
-                if (fresh.isNotBlank()) {
-                    cachedVisitorCookie = fresh
-                    effectiveCookie = fresh
-                    response = request()
-                }
-            }
+            val response = request()
             if (response.status != HttpStatusCode.OK) {
                 return ApiResult.Error(code = response.status.value, message = "获取相册失败 (HTTP ${response.status.value})")
             }
@@ -2389,27 +2345,13 @@ class WeiboApiService(
     ): ApiResult<AlbumPhotoPage> {
         return try {
             if (containerId.isBlank()) return ApiResult.Error(message = "相册 containerid 为空")
-            var effectiveCookie = getEffectiveCookie(cookie)
 
-            suspend fun request(): io.ktor.client.statement.HttpResponse =
-                client.get("https://weibo.com/ajax/profile/getAlbumDetail") {
-                    parameter("containerid", containerId)
-                    parameter("since_id", sinceId)
-                    header("Referer", "https://weibo.com/")
-                    header("Accept", "application/json, text/plain, */*")
-                    header("X-Requested-With", "XMLHttpRequest")
-                    cookieHeader(effectiveCookie)
-                }
-
-            var response = request()
-            if (response.status.value == 432) {
-                cachedVisitorCookie = null
-                val fresh = fetchVisitorCookie()
-                if (fresh.isNotBlank()) {
-                    cachedVisitorCookie = fresh
-                    effectiveCookie = fresh
-                    response = request()
-                }
+            val response = weiboGetWithVisitorRetry(
+                buildEndpoint = { auth -> webEndpoint("/ajax/profile/getAlbumDetail", auth) },
+                cookie = cookie
+            ) {
+                parameter("containerid", containerId)
+                parameter("since_id", sinceId)
             }
             if (response.status != HttpStatusCode.OK) {
                 return ApiResult.Error(code = response.status.value, message = "获取相册图片失败 (HTTP ${response.status.value})")
@@ -2480,28 +2422,23 @@ class WeiboApiService(
     ): ApiResult<VideoFeedPage> {
         return try {
             if (!uid.all { it.isDigit() }) return ApiResult.Error(message = "仅支持数字 UID 获取视频")
-            var effectiveCookie = getEffectiveCookie(cookie)
 
-            suspend fun request(): io.ktor.client.statement.HttpResponse =
-                client.get("https://weibo.com/ajax/profile/getWaterFallContent") {
+            suspend fun request(): HttpResponse =
+                weiboGetWithVisitorRetry(
+                    buildEndpoint = { auth ->
+                        webEndpoint(
+                            path = "/ajax/profile/getWaterFallContent",
+                            auth = auth,
+                            referer = "https://weibo.com/u/$uid?tabtype=newVideo"
+                        )
+                    },
+                    cookie = cookie
+                ) {
                     parameter("uid", uid)
                     parameter("cursor", cursor)
-                    header("Referer", "https://weibo.com/u/$uid?tabtype=newVideo")
-                    header("Accept", "application/json, text/plain, */*")
-                    header("X-Requested-With", "XMLHttpRequest")
-                    cookieHeader(effectiveCookie)
                 }
 
-            var response = request()
-            if (response.status.value == 432) {
-                cachedVisitorCookie = null
-                val fresh = fetchVisitorCookie()
-                if (fresh.isNotBlank()) {
-                    cachedVisitorCookie = fresh
-                    effectiveCookie = fresh
-                    response = request()
-                }
-            }
+            val response = request()
             if (response.status != HttpStatusCode.OK) {
                 return ApiResult.Error(code = response.status.value, message = "获取视频失败 (HTTP ${response.status.value})")
             }
@@ -2559,29 +2496,17 @@ class WeiboApiService(
     ): ApiResult<ArticleFeedPage> {
         return try {
             if (!uid.all { it.isDigit() }) return ApiResult.Error(message = "仅支持数字 UID 获取文章")
-            var effectiveCookie = getEffectiveCookie(cookie)
 
-            suspend fun request(): io.ktor.client.statement.HttpResponse =
-                client.get("https://m.weibo.cn/api/container/getIndex") {
-                    parameter("type", "uid")
-                    parameter("value", uid)
-                    parameter("containerid", "230413${uid}_-_WEIBO_SECOND_PROFILE_WEIBO_ARTICAL")
-                    parameter("page", page)
-                    header("Referer", "https://m.weibo.cn/u/$uid")
-                    header("MWeibo-Pwa", "1")
-                    header("X-Requested-With", "XMLHttpRequest")
-                    cookieHeader(effectiveCookie)
-                }
-
-            var response = request()
-            if (response.status.value == 432) {
-                cachedVisitorCookie = null
-                val fresh = fetchVisitorCookie()
-                if (fresh.isNotBlank()) {
-                    cachedVisitorCookie = fresh
-                    effectiveCookie = fresh
-                    response = request()
-                }
+            val response = weiboGetWithVisitorRetry(
+                buildEndpoint = { auth -> mobileEndpoint("/api/container/getIndex", auth, referer = "https://m.weibo.cn/u/$uid") },
+                cookie = cookie
+            ) {
+                parameter("type", "uid")
+                parameter("value", uid)
+                parameter("containerid", "230413${uid}_-_WEIBO_SECOND_PROFILE_WEIBO_ARTICAL")
+                parameter("page", page)
+                // m 站 PWA 专用头：缺了会被当普通网页请求，返回结构不同
+                header("MWeibo-Pwa", "1")
             }
             if (response.status != HttpStatusCode.OK) {
                 return ApiResult.Error(code = response.status.value, message = "获取文章失败 (HTTP ${response.status.value})")
@@ -2619,8 +2544,10 @@ class WeiboApiService(
     }
 
     /**
-     * 获取博主发布的微博时间线
-     * 端点: https://m.weibo.cn/api/container/getIndex?type=uid&value={uid}&containerid=107603{uid}&page={page}
+     * 获取博主发布的微博时间线。
+     *
+     * 端点: `https://weibo.com/ajax/statuses/mymblog?uid={uid}&page={page}&feature=0`
+     * （网页个人主页自己调的那个），响应为 `data.list`，见 [decodeWebUserStatusPage]。
      */
     suspend fun getUserTimeline(
         uid: String,
@@ -2639,63 +2566,20 @@ class WeiboApiService(
                 }
             }
 
-            var effectiveCookie = getEffectiveCookie(cookie)
-            var response = client.get("https://m.weibo.cn/api/container/getIndex") {
-                parameter("type", "uid")
-                parameter("value", uid)
-                parameter("containerid", "107603$uid")
+            val effectiveCookie = getEffectiveCookie(cookie)
+            val response = client.weiboGet(
+                webEndpoint(
+                    path = "/ajax/statuses/mymblog",
+                    auth = WeiboAuth.Session(effectiveCookie),
+                    referer = "https://weibo.com/u/$cleanUid"
+                )
+            ) {
+                parameter("uid", cleanUid)
                 parameter("page", page)
-                header("Referer", "https://m.weibo.cn/u/$uid")
-                header("MWeibo-Pwa", "1")
-                header("X-Requested-With", "XMLHttpRequest")
-                cookieHeader(effectiveCookie)
-            }
-            if (response.status.value == 432) {
-                cachedVisitorCookie = null
-                val fresh = fetchVisitorCookie()
-                if (fresh.isNotBlank()) {
-                    cachedVisitorCookie = fresh
-                    effectiveCookie = fresh
-                    response = client.get("https://m.weibo.cn/api/container/getIndex") {
-                        parameter("type", "uid")
-                        parameter("value", uid)
-                        parameter("containerid", "107603$uid")
-                        parameter("page", page)
-                        header("Referer", "https://m.weibo.cn/u/$uid")
-                        header("MWeibo-Pwa", "1")
-                        header("X-Requested-With", "XMLHttpRequest")
-                        cookieHeader(effectiveCookie)
-                    }
-                }
+                parameter("feature", 0)
             }
             if (response.status == HttpStatusCode.OK) {
-                val cardResp = response.decodeBody<org.kazusa.matter.data.model.WeiboCardResponse>()
-                if (cardResp.ok != 1) {
-                    reportSessionExpiredIfLoggedIn(effectiveCookie, cardResp.ok)
-                    val errorMsg = if (cardResp.ok == -100) {
-                        SessionExpiredBus.MESSAGE
-                    } else {
-                        "微博返回异常状态 (ok: ${cardResp.ok})"
-                    }
-                    return ApiResult.Error(code = cardResp.ok, message = errorMsg)
-                }
-                val list = mutableListOf<org.kazusa.matter.data.model.WeiboStatusDto>()
-                cardResp.data?.cards?.forEach { card ->
-                    card.mblog?.let { list.add(it) }
-                    card.cardGroup.forEach { item ->
-                        item.mblog?.let { list.add(it) }
-                    }
-                }
-                val extractedUser = cardResp.data?.userInfo ?: list.firstOrNull()?.user
-                val totalCount = cardResp.data?.cardlistInfo?.total
-                ApiResult.Success(
-                    UserTimelineResult(
-                        user = extractedUser,
-                        statuses = list,
-                        total = totalCount,
-                        hasMore = list.isNotEmpty()
-                    )
-                )
+                withContext(Dispatchers.IO) { decodeWebUserStatusPage(response.bodyAsText()) }
             } else {
                 ApiResult.Error(code = response.status.value, message = "获取博主动态失败: HTTP ${response.status}")
             }
@@ -2767,28 +2651,27 @@ class WeiboApiService(
             }
 
             var effectiveCookie = getEffectiveCookie(cookie)
-            var response = client.get("https://m.weibo.cn/api/container/getIndex") {
+            // 失败时要把实际使用的 Cookie 交给会话失效判定，所以这里保留手写的 432 重试
+            suspend fun request(): HttpResponse = client.weiboGet(
+                mobileEndpoint(
+                    path = "/api/container/getIndex",
+                    auth = WeiboAuth.Session(effectiveCookie),
+                    referer = "https://m.weibo.cn/u/$targetUid"
+                )
+            ) {
                 parameter("containerid", containerId)
                 parameter("page", page)
-                header("Referer", "https://m.weibo.cn/u/$targetUid")
+                // m 站 PWA 专用头：缺了会被当普通网页请求，返回结构不同
                 header("MWeibo-Pwa", "1")
-                header("X-Requested-With", "XMLHttpRequest")
-                cookieHeader(effectiveCookie)
             }
+            var response = request()
             if (response.status.value == 432) {
                 cachedVisitorCookie = null
                 val fresh = fetchVisitorCookie()
                 if (fresh.isNotBlank()) {
                     cachedVisitorCookie = fresh
                     effectiveCookie = fresh
-                    response = client.get("https://m.weibo.cn/api/container/getIndex") {
-                        parameter("containerid", containerId)
-                        parameter("page", page)
-                        header("Referer", "https://m.weibo.cn/u/$targetUid")
-                        header("MWeibo-Pwa", "1")
-                        header("X-Requested-With", "XMLHttpRequest")
-                        cookieHeader(effectiveCookie)
-                    }
+                    response = request()
                 }
             }
             if (response.status != HttpStatusCode.OK) {

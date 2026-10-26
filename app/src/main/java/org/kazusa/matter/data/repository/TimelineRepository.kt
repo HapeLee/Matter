@@ -30,7 +30,8 @@ class TimelineRepository(
         val cookie = session.cookieHeader
 
         val result: ApiResult<TimelineResponse> = if (gid.isNullOrBlank() || gid == "all") {
-            apiService.getFriendsTimeline(cookie = cookie, page = page, maxId = maxId)
+            // 首页与「全部关注」分组是同一个网页端点（gid = 10001 + uid），不再是两套实现
+            apiService.getFriendsTimeline(cookie = cookie, maxId = maxId, uid = session.uid)
         } else {
             apiService.getGroupTimeline(cookie = cookie, gid = gid, page = page, maxId = maxId)
         }
