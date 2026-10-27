@@ -27,6 +27,35 @@ data class FormattedWeiboText(
 
 object WeiboTextFormatter {
 
+    /*
+     * 全部正则提成常量。
+     *
+     * [formatWeiboContent] 会在每张信息流卡片、每条评论首次进入组合时各跑一次，
+     * 原来每次调用都要现编译 8~10 个 Regex（Android 上没有全局正则缓存），
+     * 是滚动时主线程上最没必要的一笔固定开销。
+     */
+    private val htmlTagRegex = Regex("<[^>]*>")
+    private val brTagRegex = Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE)
+    private val imgTagRegex = Regex(
+        """<img[^>]+alt="(?<alt>\[[^\]]+\])"[^>]+src="(?<src>[^"]+)"[^>]*>""" +
+            """|<img[^>]+src="(?<src2>[^"]+)"[^>]+alt="(?<alt2>\[[^\]]+\])"[^>]*>""",
+        RegexOption.IGNORE_CASE
+    )
+    private val anchorTagRegex = Regex(
+        """<a\b([^>]*)>(.*?)</a\s*>""",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+    )
+    private val hrefAttrRegex = Regex("""\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')""", RegexOption.IGNORE_CASE)
+    private val tokenRegex = Regex(
+        """(\uFFF9LINK\|[0-9]+\uFFFA)|(${WeiboTextEntities.URL_PATTERN})|""" +
+            """(\[[^\[\]\s]+\])|${WeiboTextEntities.TOPIC_PATTERN}|${WeiboTextEntities.MENTION_PATTERN}"""
+    )
+    private val userLinkRegex = Regex(
+        """^(?:https?://(?:m\.)?weibo\.(?:com|cn))?/(?:u|profile)/(\d+)(?:[/?#]|$)""",
+        RegexOption.IGNORE_CASE
+    )
+    private val sinaUserLinkRegex = Regex("""[?&]uid=(\d+)(?:&|$)""")
+    private val htmlEntityRegex = Regex("""&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos|nbsp);""")
 
     fun formatHtmlText(html: String?): String {
         if (html.isNullOrBlank()) return ""
@@ -34,7 +63,7 @@ object WeiboTextFormatter {
             .replace("<br />", "\n")
             .replace("<br/>", "\n")
             .replace("<br>", "\n")
-            .replace(Regex("<[^>]*>"), "")
+            .replace(htmlTagRegex, "")
             .replace("&lt;", "<")
             .replace("&gt;", ">")
             .replace("&amp;", "&")
@@ -62,8 +91,7 @@ object WeiboTextFormatter {
 
         // 1. 动态提取 HTML 中的表情图片 (如 <img ... alt="[doge]" src="//h5.sinaimg.cn/..." />)
         val dynamicEmojiMap = mutableMapOf<String, String>()
-        val imgRegex = Regex("""<img[^>]+alt="(?<alt>\[[^\]]+\])"[^>]+src="(?<src>[^"]+)"[^>]*>|<img[^>]+src="(?<src2>[^"]+)"[^>]+alt="(?<alt2>\[[^\]]+\])"[^>]*>""", RegexOption.IGNORE_CASE)
-        var preprocessed = imgRegex.replace(rawText) { matchResult ->
+        var preprocessed = imgTagRegex.replace(rawText) { matchResult ->
             val alt = matchResult.groups["alt"]?.value ?: matchResult.groups["alt2"]?.value ?: ""
             var src = matchResult.groups["src"]?.value ?: matchResult.groups["src2"]?.value ?: ""
             if (src.startsWith("//")) {
@@ -77,20 +105,18 @@ object WeiboTextFormatter {
 
         // HTML 的博主、话题链接保留完整标题（包括昵称中的标点），并记录站内目标。
         val htmlLinks = mutableListOf<Pair<String, String>>()
-        val linkRegex = Regex("""<a\b([^>]*)>(.*?)</a\s*>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
-        val hrefRegex = Regex("""\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')""", RegexOption.IGNORE_CASE)
-        preprocessed = linkRegex.replace(preprocessed) { match ->
-            val hrefMatch = hrefRegex.find(match.groupValues[1])
+        preprocessed = anchorTagRegex.replace(preprocessed) { match ->
+            val hrefMatch = hrefAttrRegex.find(match.groupValues[1])
             val href = decodeEntities(hrefMatch?.groups?.get(1)?.value ?: hrefMatch?.groups?.get(2)?.value.orEmpty())
-            val title = decodeEntities(match.groupValues[2].replace(Regex("<[^>]*>"), "")).trim().ifBlank { "网页链接" }
+            val title = decodeEntities(match.groupValues[2].replace(htmlTagRegex, "")).trim().ifBlank { "网页链接" }
             val index = htmlLinks.size
             htmlLinks += href to title
             "\uFFF9LINK|$index\uFFFA"
         }
 
         preprocessed = decodeEntities(preprocessed
-            .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("<[^>]*>"), "")).trim()
+            .replace(brTagRegex, "\n")
+            .replace(htmlTagRegex, "")).trim()
 
         fun AnnotatedString.Builder.appendEntity(label: String, target: String, tag: String, onClick: ((String) -> Unit)?) {
             val style = SpanStyle(color = primaryColor)
@@ -104,8 +130,7 @@ object WeiboTextFormatter {
         var inlineIdCounter = 0
 
         val annotated = buildAnnotatedString {
-            // 匹配模式：HTML链接标记、原生URL链接、微博表情标签、@昵称、#话题#
-            val tokenRegex = Regex("""(\uFFF9LINK\|[0-9]+\uFFFA)|(${WeiboTextEntities.URL_PATTERN})|(\[[^\[\]\s]+\])|${WeiboTextEntities.TOPIC_PATTERN}|${WeiboTextEntities.MENTION_PATTERN}""")
+            // 匹配模式：HTML链接标记、原生URL链接、微博表情标签、@昵称、#话题#（见顶层 tokenRegex）
             var lastIndex = 0
 
             tokenRegex.findAll(preprocessed).forEach { match ->
@@ -251,11 +276,10 @@ object WeiboTextFormatter {
     }
 
     private fun userIdFromLink(href: String): String? =
-        Regex("""^(?:https?://(?:m\.)?weibo\.(?:com|cn))?/(?:u|profile)/(\d+)(?:[/?#]|$)""", RegexOption.IGNORE_CASE)
-            .find(href)?.groupValues?.get(1)
-            ?: if (href.startsWith("sinaweibo://userinfo?")) Regex("""[?&]uid=(\d+)(?:&|$)""").find(href)?.groupValues?.get(1) else null
+        userLinkRegex.find(href)?.groupValues?.get(1)
+            ?: if (href.startsWith("sinaweibo://userinfo?")) sinaUserLinkRegex.find(href)?.groupValues?.get(1) else null
 
-    private fun decodeEntities(value: String): String = Regex("""&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos|nbsp);""").replace(value) { match ->
+    private fun decodeEntities(value: String): String = htmlEntityRegex.replace(value) { match ->
         val entity = match.groupValues[1]
         when (entity) {
             "amp" -> "&"

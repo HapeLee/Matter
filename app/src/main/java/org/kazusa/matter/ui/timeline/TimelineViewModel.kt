@@ -328,23 +328,12 @@ class TimelineViewModel(
                 )) {
                     is ApiResult.Success -> {
                         val newPosts = result.data
-                        _uiState.update { state ->
-                            val combined = (state.posts + newPosts).distinctBy { it.listKey }
-                            val snapshot = scrollSnapshot
+                        val landed = _uiState.value
+                        val combined = (landed.posts + newPosts).distinctBy { it.listKey }
+                        val snapshot = scrollSnapshot
 
-                            viewModelScope.launch(Dispatchers.IO) {
-                                timelineRepository.saveCache(
-                                    gid = state.currentGid,
-                                    posts = combined,
-                                    page = nextPage,
-                                    hasMore = newPosts.isNotEmpty(),
-                                    scrollIndex = snapshot.index,
-                                    scrollOffset = snapshot.offset,
-                                    lastReadPostId = state.lastReadPostId
-                                )
-                            }
-
-                            state.copy(
+                        _uiState.update {
+                            it.copy(
                                 posts = combined,
                                 page = nextPage,
                                 hasMore = newPosts.isNotEmpty(),
@@ -352,6 +341,20 @@ class TimelineViewModel(
                                 isRefreshing = false,
                                 isLoadingMore = false,
                                 errorMessage = null
+                            )
+                        }
+
+                        // 落盘必须放在 update 之外：MutableStateFlow.update 的 lambda 在 CAS
+                        // 失败时会整体重试，里面 launch 会让同一份列表被重复 JSON 编码 + 写盘。
+                        viewModelScope.launch(Dispatchers.IO) {
+                            timelineRepository.saveCache(
+                                gid = landed.currentGid,
+                                posts = combined,
+                                page = nextPage,
+                                hasMore = newPosts.isNotEmpty(),
+                                scrollIndex = snapshot.index,
+                                scrollOffset = snapshot.offset,
+                                lastReadPostId = landed.lastReadPostId
                             )
                         }
                     }

@@ -70,6 +70,8 @@ fun HotFeedScreen(
     bottomBarPadding: Dp = 0.dp,
     /** 是否为主框架当前展示的内容；交叉淡化期间离场的那份不应再上报滚动状态 */
     isActive: Boolean = true,
+    /** 本页是否已成为分页里的可见页；首次为 true 时才发起分类与首页请求 */
+    isPageVisible: Boolean = true,
     /** 上报当前列表状态，主框架用它复刻动态页的「到顶立即显示底栏」判断 */
     onActiveListStateChanged: (LazyListState) -> Unit = {},
     modifier: Modifier = Modifier
@@ -84,6 +86,12 @@ fun HotFeedScreen(
     // 而 NavEntry 的 saveable 状态由 rememberSaveableStateHolderNavEntryDecorator 保存，
     // 返回时按同一分类 id 把首行下标与像素偏移原样恢复（与主页动态瀑布流的做法一致）。
     val listState = rememberSaveable(categoryId, saver = LazyListState.Saver) { LazyListState() }
+
+    // 本页在主框架里会被预组合（停在「动态」页时它已经在组合树里），
+    // 所以「第一次真正可见」才是发请求的时机，不能放在 ViewModel 的 init 里。
+    LaunchedEffect(isPageVisible) {
+        if (isPageVisible) viewModel.ensureLoaded()
+    }
 
     SideEffect {
         if (isActive) onActiveListStateChanged(listState)
@@ -123,7 +131,11 @@ fun HotFeedScreen(
             isRefreshing = uiState.isRefreshing,
             state = pullRefreshState,
             onRefresh = viewModel::refresh,
-            modifier = Modifier.fillMaxSize()
+            // 本页唯一一层 backdrop，录整个内容区（含加载 / 报错 / 空态）：
+            // 顶栏与悬浮底栏都采样这一层，不再额外在 Pager 上录一层整屏内容。
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
         ) {
             when {
                 uiState.posts.isEmpty() && (uiState.isLoading || uiState.isRefreshing) -> {
@@ -155,7 +167,6 @@ fun HotFeedScreen(
                         // 只在「换分类」时让整列表淡入一次：同分类刷新 / 翻页不会重置 alpha
                         modifier = Modifier
                             .fillMaxSize()
-                            .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
                             .background(MaterialTheme.colorScheme.surface)
                             .fadeInOnContentChange(key = categoryId),
                         contentPadding = PaddingValues(

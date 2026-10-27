@@ -6,6 +6,8 @@ import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.HttpResponse
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.kazusa.matter.core.network.KtorClientFactory.jsonBody
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -70,7 +72,9 @@ internal class MessageApi(
             header("Referer", "$MESSAGE_BASE/message")
             parameter("page", page)
         }
-        parseNoticePage(readBody(response), page)
+        val body = readBody(response)
+        // 逐条通知解码放在 IO：一轮几十条，留在调用方（主）线程会拖慢消息页首帧
+        withContext(Dispatchers.IO) { parseNoticePage(body, page) }
     }
 
     suspend fun chatHistory(
@@ -87,7 +91,8 @@ internal class MessageApi(
             parameter("count", count)
             if (maxId != null && maxId > 0) parameter("max_id", maxId)
         }
-        parseChatPage(readBody(response), currentUid, peerUid, maxId, count)
+        val body = readBody(response)
+        withContext(Dispatchers.IO) { parseChatPage(body, currentUid, peerUid, maxId, count) }
     }
 
     private suspend fun <T> request(cookie: String, block: suspend () -> T): ApiResult<T> {

@@ -54,7 +54,7 @@ class TimelineRepository(
     suspend fun loadCache(gid: String?): TimelineCacheData? =
         cacheManager.loadCache(gid, currentUid())
 
-    fun getScrollPosition(gid: String?): TimelinePosition = positionManager.getPosition(gid)
+    suspend fun getScrollPosition(gid: String?): TimelinePosition = positionManager.getPosition(gid)
 
     fun saveScrollPosition(
         gid: String?,

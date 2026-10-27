@@ -67,9 +67,13 @@ data class WeiboStatusDto(
      *
      * 不要直接用 [hashCode]（data class 全字段派生）：点赞数等字段变化会导致 key 漂移，
      * 让列表项被当作新项重建并丢失状态。
+     *
+     * 用 `by lazy` 而不是 getter：这个值会被 LazyColumn 的 key lambda、`distinctBy`、
+     * 各种 `indexOfFirst` 反复读取，每次现算 `id.toString()` 都在列表路径上分配字符串。
      */
-    val listKey: String
-        get() = idStr ?: mid ?: id?.toString() ?: hashCode().toString()
+    val listKey: String by lazy {
+        idStr ?: mid ?: id?.toString() ?: hashCode().toString()
+    }
 
     /**
      * 原图档 URL 列表。结果会被缓存，避免每次读取都重新 map 出新的 List。
@@ -1166,8 +1170,9 @@ data class WeiboCommentDto(
     @Serializable(with = CommentPicsSerializer::class) val pics: List<WeiboCommentPicDto> = emptyList()
 ) {
     /** Lazy 列表使用的稳定 key（避免依赖 data class hashCode 造成 key 漂移）。 */
-    val listKey: String
-        get() = id?.toString() ?: hashCode().toString()
+    val listKey: String by lazy {
+        id?.toString() ?: hashCode().toString()
+    }
 
     /** 当前登录用户是否已点赞该评论。 */
     val isLiked: Boolean

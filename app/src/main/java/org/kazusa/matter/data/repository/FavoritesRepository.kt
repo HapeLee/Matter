@@ -47,18 +47,44 @@ class FavoritesRepository(
         val id = post.favoriteId ?: return ApiResult.Error(message = "这条微博无法收藏")
         if (id in state.value.pending) return ApiResult.Error(message = "正在更新收藏，请稍候")
         val favorite = !(state.value.overrides[id] ?: post.isFavorited)
-        mutableState.update { it.copy(pending = it.pending + id) }
+        val previousOverride = state.value.overrides[id]
+        // 乐观更新：先把图标切过去再发请求。收藏和点赞共用一条 250ms 起跳的写闸门，
+        // 若等请求回来才换图标，用户会觉得「点了没反应」；失败时再回滚。
+        mutableState.update {
+            it.copy(
+                overrides = it.overrides + (id to favorite),
+                pending = it.pending + id
+            )
+        }
         try {
             return when (val result = apiService.setFavorite(session.cookieHeader, id, favorite)) {
                 is ApiResult.Success -> {
-                    mutableState.update { it.copy(overrides = it.overrides + (id to favorite), revision = it.revision + 1) }
+                    mutableState.update { it.copy(revision = it.revision + 1) }
                     ApiResult.Success(favorite)
                 }
-                is ApiResult.Error -> result
-                ApiResult.Loading -> ApiResult.Error(message = "收藏操作未完成，请重试")
+                is ApiResult.Error -> {
+                    rollback(id, previousOverride)
+                    result
+                }
+                ApiResult.Loading -> {
+                    rollback(id, previousOverride)
+                    ApiResult.Error(message = "收藏操作未完成，请重试")
+                }
             }
         } finally {
             mutableState.update { it.copy(pending = it.pending - id) }
+        }
+    }
+
+    /** 失败回滚单条覆盖值：只动这一条，避免整体替换 map 盖掉并发变化的其它条目。 */
+    private fun rollback(id: String, previousOverride: Boolean?) {
+        mutableState.update { current ->
+            val restored = if (previousOverride == null) {
+                current.overrides - id
+            } else {
+                current.overrides + (id to previousOverride)
+            }
+            current.copy(overrides = restored)
         }
     }
 }

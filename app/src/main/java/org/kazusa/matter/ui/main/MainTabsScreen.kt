@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
+import org.kazusa.matter.ui.components.LocalCardTextSelectionEnabled
 import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -257,9 +258,14 @@ fun MainTabsScreen(
         scrollTracker.reset()
     }
 
-    // Backdrop 分离架构：
-    // 1. bottomBarBackdrop 挂载在 HorizontalPager 上，滑动切页时全实时采样下方左右滚动的真实页面内容，杜绝切页背景停滞；
-    // 2. 各页面的顶栏拥有独立的 backdrop，专注于模糊采样自身列表，互不争抢 GraphicsLayer。
+    // Backdrop 分层架构（两处录制是结构决定的，不是疏忽）：
+    //
+    // 1. bottomBarBackdrop 挂在 HorizontalPager 上，供悬浮底栏与「发微博」按钮采样。
+    //    它必须是「横向滚动之上的那一层」：底栏要跟着实时滑动的内容走，
+    //    若改用某一页自己的那层，横划时屏幕上滑的是两页内容、而样本是静止的一页，
+    //    底栏模糊就会「黏住不动」。
+    // 2. 各页面再各自挂一层，录「顶栏以下的内容区」，供本页顶栏玻璃采样。
+    //    顶栏本身在 Pager 的录制范围里，如果它去采样 Pager 那层就是在采自己（自反馈）。
     val runtimeShaderSupported = rememberBlurEffectsEnabled()
     val bottomBarBackdrop = if (runtimeShaderSupported) rememberLayerBackdrop() else null
     val timelineBackdrop = if (runtimeShaderSupported) rememberLayerBackdrop() else null
@@ -288,7 +294,11 @@ fun MainTabsScreen(
                 // 共享元素注册，否则同一条微博在「动态」「热门」各注册一份相同 key，
                 // 形变可能从屏幕外那张卡片起飞
                 CompositionLocalProvider(
-                    LocalSharedTransitionSourceActive provides (pagerState.currentPage == page)
+                    LocalSharedTransitionSourceActive provides (pagerState.currentPage == page),
+                    // 信息流分页统一关掉「逐卡文本选区」：SelectionContainer 会为每张卡片
+                    // 建一份选区注册器 + 手势节点，一屏十几张是纯开销。
+                    // 正文页不受影响（正文与转发原文仍可长按选词复制）。
+                    LocalCardTextSelectionEnabled provides false
                 ) {
                     when (page) {
                         0 -> {
@@ -337,6 +347,8 @@ fun MainTabsScreen(
                                             backdrop = searchBackdrop.takeIf { mode == discoverMode },
                                             bottomBarPadding = bottomBarPadding,
                                             isActive = mode == discoverMode,
+                                            // 相邻分页会被预组合，只有本页真正可见时才允许它发首屏请求
+                                            isPageVisible = pagerState.currentPage == page,
                                             onActiveListStateChanged = { state ->
                                                 if (discoverListState.value !== state) {
                                                     discoverListState.value = state

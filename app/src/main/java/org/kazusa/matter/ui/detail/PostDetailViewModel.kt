@@ -717,10 +717,18 @@ internal class PostDetailViewModel internal constructor(
     }
 
     /** 读取某条评论的楼中楼状态；界面通常从 [repliesStates] 自行取用。 */
-    fun commentRepliesOf(comment: WeiboCommentDto): CommentRepliesState =
-        _repliesStates.value[repliesKeyOf(comment)] ?: initialCommentReplies(comment).let { state ->
-            state.copy(replies = mergeCommentReplies(publishedReplies[comment.id]?.values?.toList().orEmpty(), state.replies, comment.id))
+    fun commentRepliesOf(comment: WeiboCommentDto): CommentRepliesState {
+        val key = repliesKeyOf(comment)
+        _repliesStates.value[key]?.let { return it }
+        val published = publishedReplies[comment.id]?.values?.toList().orEmpty()
+        // 没有「刚发布、还未被列表确认」的回复时，接口下发的预览就是最终结果。
+        // 原来这里无条件再 merge 一次，等于每行每次取用都多分配一个 LinkedHashMap + List，
+        // 而评论列表里每条没展开过楼中楼的评论都会走到这条路径。
+        if (published.isEmpty()) return initialCommentReplies(comment)
+        return initialCommentReplies(comment).let { state ->
+            state.copy(replies = mergeCommentReplies(published, state.replies, comment.id))
         }
+    }
 
     /** 楼中楼状态在 Map 里的 key；界面按 key 取用，避免每帧重算。 */
     fun repliesKeyOf(comment: WeiboCommentDto): String =
@@ -869,8 +877,19 @@ internal class PostDetailViewModel internal constructor(
                         if (token != detailToken) return@launch
                         _uiState.update { it.copy(post = res.data, errorMessage = null) }
                         PostDetailCache.put(res.data)
-                        // 本地浏览历史：同一条微博只保留最近一次
-                        recordHistory(res.data)
+                        // 本地浏览历史：同一条微博只保留最近一次。
+                        // 独立一发、不 await：它内部要先做正则清洗 + 整条 DTO 的 JSON 序列化
+                        // + Room 往返，串在这里会把评论首屏请求推后几毫秒到几十毫秒，
+                        // 用户看到的就是「正文已出、评论区还在骨架屏」。
+                        viewModelScope.launch {
+                            try {
+                                recordHistory(res.data)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                // 浏览历史写失败不影响正文与评论的展示
+                            }
+                        }
                         // 命中缓存时页签可能已经用同一个 id 拉过一次评论，这里按 id 去重
                         val resolvedId = targetIdOf(res.data)
                         if (commentsRequestedForId != resolvedId) loadComments(resolvedId)

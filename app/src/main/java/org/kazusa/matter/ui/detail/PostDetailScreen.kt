@@ -13,7 +13,6 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -79,6 +78,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -187,13 +188,30 @@ fun PostDetailScreen(
     // 删除入口只给当前登录账号自己的微博；游客 / 未登录 / 别人的微博都不出现
     val canDeletePost = post != null && viewModel.isMyPost(post)
 
-    // 点赞状态只有一份：共享仓库（信息流里点过赞时这里直接读到同一结果）
+    // 点赞状态只有一份：共享仓库（信息流里点过赞时这里直接读到同一结果）。
+    // 快照是整张 Map 替换的，这里按当前微博 id 精确订阅：
+    // 否则信息流里任意一条微博点赞成功都会让本页整页重组一次。
     val likeRepository = LocalLikeRepository.current
     val postLikeStates = LocalPostLikeStates.current
-    val likeState = post?.let { target ->
-        likeRepository?.postState(target, postLikeStates)
-            ?: LikeState(target.isLiked, parseInteractionCount(target.attitudesCount))
-    } ?: LikeState(liked = false, count = null)
+    val likeState by remember(
+        likeRepository,
+        postLikeStates,
+        post?.idStr,
+        post?.mid,
+        post?.id,
+        post?.isLiked,
+        post?.attitudesCount
+    ) {
+        derivedStateOf {
+            val target = post
+            if (target == null) {
+                LikeState(liked = false, count = null)
+            } else {
+                likeRepository?.postState(target, postLikeStates.value)
+                    ?: LikeState(target.isLiked, parseInteractionCount(target.attitudesCount))
+            }
+        }
+    }
     val isLiked = likeState.liked
     val likeCount = likeState.count ?: 0
 
@@ -348,8 +366,7 @@ fun PostDetailScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
-                            .background(MaterialTheme.colorScheme.surface)
-                            .animateContentSize(),
+                            .background(MaterialTheme.colorScheme.surface),
                         // 底部留出悬浮操作栏的高度，最后一条评论不会被挡住
                         contentPadding = PaddingValues(top = innerPadding.calculateTopPadding(), bottom = 96.dp)
                     ) {
@@ -908,8 +925,13 @@ private fun PostDetailBody(
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 整行仍然切到「转发」分栏；计数读共享仓库，转发面板从底部悬浮栏进入
-            val repostState = LocalRepostStates.current[repostKeyOf(post)]
+            // 整行仍然切到「转发」分栏；计数读共享仓库，转发面板从底部悬浮栏进入。
+            // 按 key 精确订阅，别的微博转发成功不会带着本页重组。
+            val repostStates = LocalRepostStates.current
+            val repostKey = remember(post.idStr, post.mid, post.id) { repostKeyOf(post) }
+            val repostState by remember(repostStates, repostKey) {
+                derivedStateOf { repostStates.value[repostKey] }
+            }
             WeiboActionButton(
                 icon = Icons.Outlined.Repeat,
                 count = repostState?.count?.toString() ?: post.repostsCount,
@@ -1053,10 +1075,15 @@ private fun FeaturedCommentsFooter(modifier: Modifier = Modifier) {
  * 这里用三条与 [CommentRow] 同构的灰条占位，配合呼吸式透明度，
  * 让「加载中 → 有数据」的过渡更连续。
  */
+private val SkeletonFirstLines = listOf(0.92f, 0.78f, 0.86f)
+private val SkeletonSecondLines = listOf(0.62f, 0.48f, 0.7f)
+
 @Composable
 private fun CommentSkeletonList(modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "commentSkeleton")
-    val pulse by transition.animateFloat(
+    // 刻意不 `by` 拆包：拆包会在组合期读动画值，900ms 的呼吸动画会让这三行逐帧重组。
+    // 传 State 下去，行内只在绘制阶段取 value。
+    val pulse = transition.animateFloat(
         initialValue = 0.45f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -1065,14 +1092,12 @@ private fun CommentSkeletonList(modifier: Modifier = Modifier) {
         ),
         label = "commentSkeletonPulse"
     )
-    val firstLines = listOf(0.92f, 0.78f, 0.86f)
-    val secondLines = listOf(0.62f, 0.48f, 0.7f)
     Column(modifier = modifier.fillMaxWidth()) {
         repeat(3) { index ->
             CommentSkeletonRow(
                 pulse = pulse,
-                firstLineFraction = firstLines[index],
-                secondLineFraction = secondLines[index]
+                firstLineFraction = SkeletonFirstLines[index],
+                secondLineFraction = SkeletonSecondLines[index]
             )
         }
     }
@@ -1080,7 +1105,7 @@ private fun CommentSkeletonList(modifier: Modifier = Modifier) {
 
 @Composable
 private fun CommentSkeletonRow(
-    pulse: Float,
+    pulse: State<Float>,
     firstLineFraction: Float,
     secondLineFraction: Float
 ) {
@@ -1089,7 +1114,7 @@ private fun CommentSkeletonRow(
         modifier = Modifier
             .fillMaxWidth()
             // alpha 走绘制阶段，脉冲动画不会引起这三行的重组
-            .graphicsLayer { alpha = pulse }
+            .graphicsLayer { alpha = pulse.value }
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         Box(
@@ -1305,12 +1330,11 @@ internal fun CommentRow(
     modifier: Modifier = Modifier
 ) {
     val replyTarget = comment.replyComment?.user
-    val rawReplyText = comment.replyOriginalText?.takeIf { it.isNotBlank() } ?: comment.text
-    // 纯图片评论的正文是「图片评论 + 查看图片链接」，配图已经单独渲染，这里去掉冗余文案
-    val replyText = if (comment.imageUrls.isEmpty()) {
-        rawReplyText
-    } else {
-        rawReplyText.replace("图片评论", "").trim()
+    // 纯图片评论的正文是「图片评论 + 查看图片链接」，配图已经单独渲染，这里去掉冗余文案。
+    // 用 remember 固定：这里每次重组都会做字符串 replace/trim，评论列表滚动时是纯浪费。
+    val replyText = remember(comment.replyOriginalText, comment.text, comment.imageUrls) {
+        val raw = comment.replyOriginalText?.takeIf { it.isNotBlank() } ?: comment.text
+        if (comment.imageUrls.isEmpty()) raw else raw.replace("图片评论", "").trim()
     }
     val primaryColor = MaterialTheme.colorScheme.primary
     val likeCountText = likeState.count?.let { formatInteractionCount(it, "") }
@@ -1330,7 +1354,11 @@ internal fun CommentRow(
             onTopicClick = onTopicClick
         )
     }
-    val metadata = remember(comment) { formatCommentMetadata(comment) }
+    // key 只取真正参与计算的三个字段：`remember(comment)` 会对整个 WeiboCommentDto
+    // （含楼中楼预览列表）做深比较，评论行每次重组都要付这笔钱。
+    val metadata = remember(comment.createdAt, comment.source, comment.regionName) {
+        formatCommentMetadata(comment)
+    }
 
     Column(
         modifier = modifier
@@ -1411,24 +1439,18 @@ internal fun CommentRow(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        if (likeState.pending) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(12.dp),
-                                strokeWidth = 1.dp,
-                                color = likeTint
-                            )
-                        } else {
-                            Icon(
-                                imageVector = if (likeState.liked) {
-                                    Icons.Filled.ThumbUp
-                                } else {
-                                    Icons.Outlined.ThumbUp
-                                },
-                                contentDescription = if (likeState.liked) "取消点赞" else "点赞",
-                                tint = likeTint,
-                                modifier = Modifier.size(12.dp)
-                            )
-                        }
+                        // 评论点赞同样是乐观更新：pending 期间直接显示结果态，
+                        // 重复点击由 clickable 的 enabled 拦住，不再转圈
+                        Icon(
+                            imageVector = if (likeState.liked) {
+                                Icons.Filled.ThumbUp
+                            } else {
+                                Icons.Outlined.ThumbUp
+                            },
+                            contentDescription = if (likeState.liked) "取消点赞" else "点赞",
+                            tint = likeTint,
+                            modifier = Modifier.size(12.dp)
+                        )
                         if (likeCountText.isNotEmpty()) {
                             Text(
                                 text = likeCountText,
@@ -1477,14 +1499,15 @@ internal fun CommentRow(
             }
 
             if (commentFormatted.annotatedString.isNotEmpty()) {
-                SelectionContainer {
-                    Text(
-                        text = commentFormatted.annotatedString,
-                        inlineContent = commentFormatted.inlineContent,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
+                // 评论正文不挂 SelectionContainer：一条评论一份选区注册器 + 手势节点，
+                // 而评论列表是这一页最长的列表，逐行挂载是纯固定开销。
+                // 正文区（主正文 / 转发原文）仍然保留长按选词复制。
+                Text(
+                    text = commentFormatted.annotatedString,
+                    inlineContent = commentFormatted.inlineContent,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
 
             val commentImages = comment.imageUrls
@@ -1500,10 +1523,13 @@ internal fun CommentRow(
     }
 }
 
+/** 评论区元信息前缀（「IP属地：」「发布于」「来自」）；提成常量避免每行每次组合重编译。 */
+private val CommentLocationPrefixRegex = Regex("""^(?:(?:IP属地|发布于|来自)\s*[:：]?\s*)+""")
+
 private fun formatCommentMetadata(comment: WeiboCommentDto): String {
     val source = WeiboTextFormatter.formatHtmlText(comment.source)
     val region = WeiboTextFormatter.formatHtmlText(comment.regionName)
-    val locationPrefix = Regex("""^(?:(?:IP属地|发布于|来自)\s*[:：]?\s*)+""")
+    val locationPrefix = CommentLocationPrefixRegex
     val sourceIsLocation = locationPrefix.containsMatchIn(source)
     val location = locationPrefix.replace(region.ifBlank { if (sourceIsLocation) source else "" }, "").trim()
     return listOfNotNull(
@@ -1513,9 +1539,11 @@ private fun formatCommentMetadata(comment: WeiboCommentDto): String {
     ).joinToString(" · ")
 }
 
+private val HtmlTagRegex = Regex("<[^>]*>")
+
 private fun formatSubtitle(createdAt: String, source: String?, regionName: String? = null): String {
     val friendlyTime = TimeUtils.formatWeiboTime(createdAt)
-    val cleanSource = source?.replace(Regex("<[^>]*>"), "")?.trim().orEmpty()
+    val cleanSource = source?.replace(HtmlTagRegex, "")?.trim().orEmpty()
     val cleanRegion = regionName?.trim().orEmpty()
     return buildString {
         append(friendlyTime)

@@ -4,7 +4,9 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -33,6 +35,19 @@ fun rememberImageMorphState(): ImageMorphState {
         )
     }
 }
+
+/**
+ * 「当前是否有形变大图在场」，供组合期做禁用滚动 / 屏蔽点击这类离散判断。
+ *
+ * 不要直接写 `morphState?.isPresent != true`：[ImageMorphState.isPresent] 内部读的是
+ * [ImageMorphState.progress]（`Animatable` 的进度），直接读等于订阅**动画的每一帧**——
+ * 打开 / 收起大图的 300~400ms 里，读取方会逐帧重组（实测表现为「一点大图整页卡一下」）。
+ *
+ * 包一层 [derivedStateOf] 后只有 false↔true 翻转才失效，动画帧不再触发重组。
+ */
+@Composable
+fun rememberImageMorphPresent(morphState: ImageMorphState?): State<Boolean> =
+    remember(morphState) { derivedStateOf { morphState?.isPresent == true } }
 
 /**
  * 微博图片 Morph 形变动画全局状态（参考 legado-with-MD3 经典设计）：

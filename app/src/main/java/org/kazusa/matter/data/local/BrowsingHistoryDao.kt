@@ -3,6 +3,7 @@ package org.kazusa.matter.data.local
 import androidx.room3.Dao
 import androidx.room3.Insert
 import androidx.room3.Query
+import androidx.room3.Transaction
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -85,4 +86,50 @@ interface BrowsingHistoryDao {
         """
     )
     suspend fun oldestIds(uid: String?, limit: Int, offset: Int): List<Long>
+
+    /**
+     * 去重写入 + 容量裁剪，同一事务内完成。
+     *
+     * 原来这条序列在仓库里是 5 次独立往返（查重 → 插入/更新 → count → 取最旧 id → 删除），
+     * 既多付 4 次事务提交，也允许另一条写入插在 count 与 delete 之间导致多删；
+     * 收进一个事务后只提交一次，且裁剪与写入原子。
+     */
+    @Transaction
+    suspend fun upsertAndTrim(
+        statusId: String,
+        uid: String?,
+        username: String?,
+        totalText: String?,
+        json: String?,
+        category: Int,
+        createAt: Long,
+        maxEntries: Int
+    ) {
+        val existing = findByStatusId(statusId, uid)
+        if (existing != null) {
+            updateSnapshot(
+                id = existing.id,
+                createAt = createAt,
+                username = username ?: existing.username,
+                totalText = totalText?.ifBlank { null } ?: existing.totalText,
+                json = json ?: existing.json
+            )
+        } else {
+            insert(
+                BrowsingHistoryEntity(
+                    statusId = statusId,
+                    username = username,
+                    totalText = totalText,
+                    uid = uid,
+                    json = json,
+                    createAt = createAt,
+                    category = category
+                )
+            )
+        }
+        val overflow = countForUid(uid) - maxEntries
+        if (overflow > 0) {
+            deleteByIds(oldestIds(uid = uid, limit = overflow, offset = 0))
+        }
+    }
 }

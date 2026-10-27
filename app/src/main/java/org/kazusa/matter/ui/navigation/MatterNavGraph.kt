@@ -57,6 +57,7 @@ import org.kazusa.matter.ui.composer.repost.RepostComposerViewModel
 import org.kazusa.matter.ui.composer.repost.RepostSheet
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.components.LocalCommentLikeStates
+import org.kazusa.matter.ui.components.LocalFavoriteState
 import org.kazusa.matter.ui.components.LocalFavoritesRepository
 import org.kazusa.matter.ui.components.LocalLikeRepository
 import org.kazusa.matter.ui.components.LocalPostLikeStates
@@ -115,16 +116,19 @@ fun MatterNavGraph() {
     // 转发面板挂在导航根：卡片与正文页共用一份，列表项不需要各自持有 sheet
     val repostRepository = koinInject<RepostRepository>()
     val repostViewModel: RepostComposerViewModel = koinViewModel()
-    val repostStates by repostRepository.postStates.collectAsStateWithLifecycle()
+    // 这里刻意不 `by` 拆包：下发的是 State 对象本身，消费方各自在 derivedStateOf 里取值。
+    // 拆包会把「整张 Map」写进 CompositionLocal，一有变化就让所有卡片 / 评论行失效。
+    val repostStates = repostRepository.postStates.collectAsStateWithLifecycle()
     val publishRepository = koinInject<PublishRepository>()
     val rootSnackbar = remember { SnackbarHostState() }
     val requestRepost: (WeiboStatusDto) -> Unit = remember(repostViewModel) {
         { post -> repostViewModel.open(post) }
     }
     val koin = getKoin()
-    // 点赞状态在仓库里是只读 StateFlow；这里收集一次下发给列表项，避免每张卡片各自订阅
-    val postLikeStates by likeRepository.postStates.collectAsStateWithLifecycle()
-    val commentLikeStates by likeRepository.commentStates.collectAsStateWithLifecycle()
+    // 点赞状态在仓库里是只读 StateFlow；这里收集一次下发 State 给列表项，
+    // 避免每张卡片各自订阅，也避免用 Map 值触发整屏重组
+    val postLikeStates = likeRepository.postStates.collectAsStateWithLifecycle()
+    val commentLikeStates = likeRepository.commentStates.collectAsStateWithLifecycle()
     val session by authPreferences.sessionFlow.collectAsStateWithLifecycle(initialValue = null)
     val isOnboardingCompleted by authPreferences.isOnboardingCompletedFlow.collectAsStateWithLifecycle(initialValue = null)
     val coroutineScope = rememberCoroutineScope()
@@ -200,6 +204,8 @@ fun MatterNavGraph() {
     val favoritesRepository = remember(session?.uid, session?.cookieHeader, session?.isLoggedIn, koin) {
         koin.get<FavoritesRepository> { parametersOf(requireNotNull(session)) }
     }
+    // 收藏态同样在根收集一次：列表卡片不再各自 collectAsStateWithLifecycle
+    val favoriteState = favoritesRepository.state.collectAsStateWithLifecycle()
 
     // 会话失效统一收口：任一接口确认 -100 且当前确实处于登录态时，清会话
     // （含 WebView Cookie，防自动登回旧账号）并回到登录页。游客与未登录的
@@ -246,6 +252,7 @@ fun MatterNavGraph() {
         LocalPostLikeStates provides postLikeStates,
         LocalCommentLikeStates provides commentLikeStates,
         LocalRepostStates provides repostStates,
+        LocalFavoriteState provides favoriteState,
         LocalRepostRequest provides requestRepost,
         LocalUserActionScope provides coroutineScope,
         LocalWeiboApiService provides apiService

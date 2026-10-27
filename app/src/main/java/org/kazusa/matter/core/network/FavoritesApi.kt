@@ -6,6 +6,8 @@ import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.HttpResponse
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import org.kazusa.matter.core.network.KtorClientFactory.jsonBody
 import org.kazusa.matter.data.model.WeiboStatusDto
@@ -48,7 +50,10 @@ internal class FavoritesApi(
             parameter("tid", 0)
             parameter("with_total", true)
         }
-        decodeFavoritesPage(readResponse(response, allowEmpty = true), page)
+        val body = readResponse(response, allowEmpty = true)
+        // 逐条 DTO 解码放到 IO：这一页动辄二三十条微博，留在调用方（主）线程就是首帧卡顿，
+        // 与 KtorClientFactory 里 bodyText/decodeBody 的约定保持一致
+        withContext(Dispatchers.IO) { decodeFavoritesPage(body, page) }
     }
 
     suspend fun getLikedPosts(cookie: String, page: Int): ApiResult<UserPostsPage> = request {
@@ -57,7 +62,8 @@ internal class FavoritesApi(
             header("Referer", "https://m.weibo.cn/collect")
             parameter("page", page)
         }
-        decodeLikedPostsPage(readResponse(response, allowEmpty = true), page)
+        val body = readResponse(response, allowEmpty = true)
+        withContext(Dispatchers.IO) { decodeLikedPostsPage(body, page) }
     }
 
     /**

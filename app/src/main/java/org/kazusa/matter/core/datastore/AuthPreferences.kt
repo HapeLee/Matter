@@ -9,8 +9,10 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import org.kazusa.matter.core.session.CredentialCipher
 import java.io.IOException
@@ -146,6 +148,14 @@ class AuthPreferences(
                 isLoggedIn = prefs[Keys.IS_LOGGED_IN] ?: false
             )
         }
+        // 解密必须在后台线程完成。
+        //
+        // 上面这个 map 会做 3 次 AndroidKeyStore 解密（SUB / SUBP / 原始 Cookie），
+        // 而 Flow 的 map 默认跑在**收集者上下文**：导航根的 collectAsStateWithLifecycle、
+        // 各 Repository 的 sessionFlow.first()（发起请求的 viewModelScope = 主线程）
+        // 都会把这段解密拉到主线程上，并且每个请求都要付一次。
+        // 放在这里统一改，比在 29 个调用点各自包线程可靠。
+        .flowOn(Dispatchers.Default)
 
     suspend fun saveSession(
         uid: String,
