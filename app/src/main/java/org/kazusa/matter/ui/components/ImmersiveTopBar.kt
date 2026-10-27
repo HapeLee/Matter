@@ -12,8 +12,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -53,16 +54,32 @@ internal fun topBarTitleStyle(glassProgress: Float): TextStyle = lerp(
 /**
  * 顶栏滚动联动状态，由 [ImmersiveTopBar] 内部根据滚动位置计算并透传给插槽，
  * 用于联动 LiquidGlassCapsule 的玻璃强度、内边距与标题展开动画。
+ *
+ * 内部持有 [State] 而不是直接持有 Float，并且由 [ImmersiveTopBar] 用 `remember` 固化实例。
+ * 之前的写法是「每次重组新建一个 data class」：
+ *
+ * 1. 实例每次都变 → title / actions / navigation 三个插槽 lambda 的捕获值每帧都变 →
+ *    槽位内容无法跳过重组，滚动前 96dp 内相当于整根顶栏逐像素重建
+ *    （含 `TextStyle.lerp` + `.copy(shadow)` + 文字重新排版 + 玻璃重新着色）；
+ * 2. `alpha` 存的是动画值：淡入淡出的每一帧都会产生新实例（哪怕目标可见度没变），
+ *    连带整根顶栏重建。
+ *
+ * 改成「实例固化 + 取值延后」后：槽位内容可跳过重组；滚动只在淡入淡出的 180ms 窗口内
+ * 驱动标题胶囊 / 玻璃这些叶子组件重组，动画结束后滚动不再引起顶栏任何重组。
  */
-@Immutable
-data class TopBarScrollState(
-    /** 目标可见度（0..1），直接由滚动位置映射、未经动画；适合「是否展开」这类离散判断 */
-    val targetAlpha: Float,
-    /** 动画后的实际透明度，用于绘制与内边距等连续联动 */
-    val alpha: Float
+@Stable
+class TopBarScrollState internal constructor(
+    private val targetAlphaState: State<Float>,
+    private val animatedAlphaState: State<Float>
 ) {
+    /** 目标可见度（0..1），直接由滚动位置映射、未经动画；适合「是否展开」这类离散判断 */
+    val targetAlpha: Float get() = targetAlphaState.value
+
+    /** 动画后的实际透明度，用于绘制与内边距等连续联动 */
+    val alpha: Float get() = animatedAlphaState.value
+
     /** 顶栏是否已被滚动内容「顶起」（标题等元素应随之展开） */
-    val active: Boolean get() = targetAlpha > 0f
+    val active: Boolean get() = targetAlphaState.value > 0f
 }
 
 /**
@@ -136,10 +153,13 @@ fun ImmersiveTopBar(
         label = animationLabel
     )
 
-    val scrollStateHolder = TopBarScrollState(
-        targetAlpha = targetAlphaState.value,
-        alpha = animatedAlpha.value
-    )
+    // 固化实例：插槽 lambda 的捕获值必须稳定，否则槽位内容无法跳过重组（见 TopBarScrollState 注释）。
+    // 只以 targetAlphaState（确实被 remember 的 derivedStateOf）为 key：即便 animateFloatAsState
+    // 每次返回新的 State 包装，它背后仍是同一个 remember 出来的 Animatable，读到的值始终是最新的，
+    // 而把 animatedAlpha 也塞进 key 会让实例在某些实现下逐帧重建，等于这层优化失效。
+    val scrollStateHolder = remember(targetAlphaState) {
+        TopBarScrollState(targetAlphaState, animatedAlpha)
+    }
 
     Box(modifier = modifier) {
         if (hasScrollSource) {

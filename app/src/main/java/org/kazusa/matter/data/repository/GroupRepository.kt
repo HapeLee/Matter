@@ -73,6 +73,15 @@ class GroupRepository internal constructor(
     }
 
     /**
+     * 一次性取「隐藏分组 + 自定义排序」。
+     *
+     * 原来是两次顺序 `first()`：分两次走 Flow 收集（各自要等 DataStore 的第一帧），
+     * 一次分组加载里还要重复三遍。合成一次 combine 后只收集一遍。
+     */
+    private suspend fun currentVisibility(): Pair<Set<String>, List<String>> =
+        combine(hiddenGroupIdsFlow, customOrderFlow) { hidden, order -> hidden to order }.first()
+
+    /**
      * 获取关注分组列表（支持强制从远端刷新）
      */
     suspend fun getGroups(forceRefresh: Boolean = false): ApiResult<List<WeiboGroupDto>> {
@@ -80,9 +89,8 @@ class GroupRepository internal constructor(
         val cached = _rawGroupsFlow.value
         val cacheBelongsToCurrentUser = cacheOwnerUid == session.uid
         if (!forceRefresh && cached.isNotEmpty() && cacheBelongsToCurrentUser) {
-            return ApiResult.Success(
-                sortAndApplyVisibility(cached, hiddenGroupIdsFlow.first(), customOrderFlow.first())
-            )
+            val (hidden, order) = currentVisibility()
+            return ApiResult.Success(sortAndApplyVisibility(cached, hidden, order))
         }
 
         val cookie = session.cookieHeader
@@ -97,16 +105,14 @@ class GroupRepository internal constructor(
                 if (generation != fetchGeneration) return result
                 cacheOwnerUid = session.uid
                 _rawGroupsFlow.value = result.data
-                ApiResult.Success(
-                    sortAndApplyVisibility(result.data, hiddenGroupIdsFlow.first(), customOrderFlow.first())
-                )
+                val (hidden, order) = currentVisibility()
+                ApiResult.Success(sortAndApplyVisibility(result.data, hidden, order))
             }
             is ApiResult.Error -> {
                 // 失败兜底同样只信属主匹配的缓存，不把旧账号分组当本账号的兜底展示
                 if (cached.isNotEmpty() && cacheBelongsToCurrentUser) {
-                    ApiResult.Success(
-                        sortAndApplyVisibility(cached, hiddenGroupIdsFlow.first(), customOrderFlow.first())
-                    )
+                    val (hidden, order) = currentVisibility()
+                    ApiResult.Success(sortAndApplyVisibility(cached, hidden, order))
                 } else {
                     result
                 }

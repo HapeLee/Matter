@@ -23,6 +23,18 @@ class KeystoreCredentialCipher : CredentialCipher {
 
     private val keyAlias = "matter_auth_credentials"
 
+    /**
+     * 进程内缓存的密钥。
+     *
+     * 取一次密钥要 `KeyStore.getInstance("AndroidKeyStore").load(null)` + `getKey`，
+     * 这背后是跨进程调用 Keystore 服务，典型数毫秒、低端机更久。而会话读取（一次 3 个凭据）
+     * 与每次请求都要走一遍，每次现取等于每个请求白付 3 次 Keystore 往返。
+     * 别名在进程内不会被换（重建密钥只发生在 [freshKey] 的失效兜底与 [decrypt] 的失败兜底），
+     * 两处都会清空缓存，语义与之前一致。
+     */
+    @Volatile
+    private var cachedKey: SecretKey? = null
+
     override fun encrypt(plainText: String): String = try {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, freshKey())
@@ -44,6 +56,8 @@ class KeystoreCredentialCipher : CredentialCipher {
             cipher.init(Cipher.DECRYPT_MODE, obtainKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
             String(cipher.doFinal(cipherText), Charsets.UTF_8)
         } catch (_: Exception) {
+            // 可能是密钥被系统重置（换机恢复 / 清除凭据）：丢掉缓存，下次重新取
+            cachedKey = null
             ""
         }
     }
@@ -51,8 +65,14 @@ class KeystoreCredentialCipher : CredentialCipher {
     override fun isEncrypted(value: String): Boolean = value.startsWith(PREFIX)
 
     private fun obtainKey(): SecretKey {
+        cachedKey?.let { return it }
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        (keyStore.getKey(keyAlias, null) as? SecretKey)?.let { return it }
+        val key = (keyStore.getKey(keyAlias, null) as? SecretKey) ?: generateKey()
+        cachedKey = key
+        return key
+    }
+
+    private fun generateKey(): SecretKey {
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         generator.init(
             KeyGenParameterSpec.Builder(
@@ -73,6 +93,7 @@ class KeystoreCredentialCipher : CredentialCipher {
     private fun freshKey(): SecretKey = try {
         obtainKey()
     } catch (_: GeneralSecurityException) {
+        cachedKey = null
         runCatching {
             KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.deleteEntry(keyAlias)
         }

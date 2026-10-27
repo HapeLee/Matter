@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -28,7 +27,9 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
@@ -52,6 +53,7 @@ import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.repository.LikeState
 import org.kazusa.matter.data.repository.repostKeyOf
 import org.kazusa.matter.ui.media.morph.LocalImageMorphState
+import org.kazusa.matter.ui.media.morph.rememberImageMorphPresent
 import androidx.compose.ui.graphics.RectangleShape
 import org.kazusa.matter.ui.detail.PostDetailCache
 import org.kazusa.matter.ui.detail.getCardSharedKey
@@ -231,11 +233,14 @@ private fun PostCardContent(
                 val avatar = post.user?.avatarLarge
                     ?: post.user?.profileImageUrl
                     ?: "https://tvax1.sinaimg.cn/default/images/default_avatar_male_180.gif"
+                // 认证类型只算一次：昵称行与下面的角标都要用
+                val verifyType = post.user.getVerifyType()
                 // 记录头像地址与昵称：进入博主主页首帧即可复用同一地址与名字，
-                // 避免共享元素飞行期间闪默认头像、或动画结束后昵称再跳一次
-                SideEffect {
+                // 避免共享元素飞行期间闪默认头像、或动画结束后昵称再跳一次。
+                // 用 LaunchedEffect 而不是 SideEffect：SideEffect 每次重组都会执行，
+                // 而这里写的是全局 LruCache —— 滚动时应零开销。
+                LaunchedEffect(post.user?.id, avatar, post.user?.screenName, verifyType) {
                     UserAvatarCache.put(post.user?.id, avatar, post.user?.screenName)
-                    val verifyType = post.user.getVerifyType()
                     if (verifyType != WeiboVerifyType.NONE) {
                         UserAvatarCache.putVerify(post.user?.id, verifyType.ordinal)
                     }
@@ -279,7 +284,6 @@ private fun PostCardContent(
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f, fill = false)
                         )
-                        val verifyType = post.user.getVerifyType()
                         if (verifyType != WeiboVerifyType.NONE) {
                             UserVerifyBadge(verifyType = verifyType, size = 15.dp)
                         }
@@ -314,7 +318,7 @@ private fun PostCardContent(
                 )
             }
             // 两端字号一致，各自固定最终折行，转场保持字号并移动、淡化排版。
-            SelectionContainer {
+            CardTextSelection {
                 Text(
                     text = contentFormatted.annotatedString,
                     inlineContent = contentFormatted.inlineContent,
@@ -366,8 +370,13 @@ private fun PostCardContent(
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 转发：计数读共享仓库（与正文页同一份），点击由导航根的面板承接
-            val repostState = LocalRepostStates.current[repostKeyOf(post)]
+            // 转发：计数读共享仓库（与正文页同一份），点击由导航根的面板承接。
+            // 按 key 精确订阅：别的微博转发成功后本卡片不重组。
+            val repostStates = LocalRepostStates.current
+            val repostKey = remember(post.idStr, post.mid, post.id) { repostKeyOf(post) }
+            val repostState by remember(repostStates, repostKey) {
+                derivedStateOf { repostStates.value[repostKey] }
+            }
             val requestRepost = LocalRepostRequest.current
             WeiboActionButton(
                 icon = Icons.Outlined.Repeat,
@@ -478,7 +487,7 @@ private fun RetweetCard(
         // 转发区块正文：与正文 / 主正文走同一套「固定排版 + 交叉淡化」处理，
         // 避免容器形变期间文字逐帧重新折行；
         // ownerKey 锁定宿主卡片，避免多条微博转发同一条时多张卡片一起动画
-        SelectionContainer {
+        CardTextSelection {
             Text(
                 text = fullAnnotated,
                 inlineContent = bodyFormatted.inlineContent,
@@ -544,11 +553,23 @@ private fun PostLikeActionButton(
     val snackbarHostState = LocalSnackbarHostState.current
     val context = LocalContext.current
     val morphState = LocalImageMorphState.current
-    val likeState = repository?.postState(post, LocalPostLikeStates.current)
-        ?: LikeState(post.isLiked, parseInteractionCount(post.attitudesCount))
+    val morphPresent by rememberImageMorphPresent(morphState)
+    // 点赞快照按 key 精确取用：别人那条微博点赞成功时本按钮不重组
+    val likeStates = LocalPostLikeStates.current
+    val likeKey = remember(post.idStr, post.mid, post.id) {
+        post.idStr?.takeIf { it.isNotBlank() }
+            ?: post.mid?.takeIf { it.isNotBlank() }
+            ?: post.id?.toString().orEmpty()
+    }
+    val likeState by remember(repository, likeStates, likeKey, post.isLiked, post.attitudesCount) {
+        derivedStateOf {
+            repository?.postState(post, likeStates.value)
+                ?: LikeState(post.isLiked, parseInteractionCount(post.attitudesCount))
+        }
+    }
 
     val onLikeClick: () -> Unit = {
-        if (morphState?.isPresent != true && repository != null && !likeState.pending) {
+        if (!morphPresent && repository != null && !likeState.pending) {
             scope.launch {
                 val message = repository.togglePost(post) ?: return@launch
                 if (snackbarHostState != null) {
@@ -566,16 +587,21 @@ private fun PostLikeActionButton(
         count = likeState.count?.toString() ?: post.attitudesCount,
         label = "赞",
         tint = if (likeState.liked) MaterialTheme.colorScheme.primary else null,
-        busy = likeState.pending,
+        // 刻意不用 busy：点赞是乐观更新，图标已经是结果态。
+        // 写闸门排队期间转圈反而让人以为「没点上」；这里只靠 onLikeClick 里的
+        // `!likeState.pending` 拦住重复点击。
         enabled = repository != null,
         onClick = onLikeClick,
         modifier = modifier
     )
 }
 
+/** 信息流副标题里剥 HTML 标签的正则：提成常量，避免每张卡片每次组合都编译一次。 */
+private val HtmlTagRegex = Regex("<[^>]*>")
+
 private fun formatSubtitle(createdAt: String, source: String?, regionName: String? = null): String {
     val friendlyTime = TimeUtils.formatWeiboTime(createdAt)
-    val cleanSource = source?.replace(Regex("<[^>]*>"), "")?.trim().orEmpty()
+    val cleanSource = source?.replace(HtmlTagRegex, "")?.trim().orEmpty()
     val cleanRegion = regionName?.trim().orEmpty()
     return buildString {
         append(friendlyTime)

@@ -64,7 +64,18 @@ class HotFeedViewModel internal constructor(
     private var nextSinceId: String? = null
     private var nextMaxId: String? = null
 
-    init {
+    private var loadRequested = false
+
+    /**
+     * 由界面在本页首次真正可见时调用（见 `HotFeedScreen`）。
+     *
+     * 不能在 init 里直接拉：主框架的分页使用 `beyondViewportPageCount = 1`，
+     * 用户还停在「动态」页时这张页就已经被预组合、ViewModel 也已创建，
+     * init 里发请求等于让热门分类 + 首页流和动态首屏抢带宽与主线程。
+     */
+    fun ensureLoaded() {
+        if (loadRequested) return
+        loadRequested = true
         loadCategories()
     }
 

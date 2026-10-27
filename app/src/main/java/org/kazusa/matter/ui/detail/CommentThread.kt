@@ -22,8 +22,10 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -94,7 +96,13 @@ internal fun CommentThread(
     postId: String? = null,
     modifier: Modifier = Modifier
 ) {
-    val state = repliesProvider(comment)
+    // 楼中楼状态：上游交给我们的是一整张 Map 的 State，任何一条评论展开 / 翻页都会替换整张 Map。
+    // 直接在上游 lambda 里取值等于「整张 Map 变了 → 本行重组」，所以这里包一层 derivedStateOf：
+    // 只有与本条评论相关的那份状态真的变化时才失效。
+    // key 只取 comment —— provider 的捕获项（收集到的 State、ViewModel）在页面存活期内不变，
+    // 把它当作依赖会导致每次重组都重建派生态，反而丢掉这层保护。
+    val repliesStateProvider = remember(comment) { derivedStateOf { repliesProvider(comment) } }
+    val state by repliesStateProvider
     // 展开 / 收起是纯界面状态：只需存一个 Bool，不必把回复正文写进 saveable
     var expanded by rememberSaveable(comment.id ?: comment.listKey) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -102,8 +110,14 @@ internal fun CommentThread(
     // 不会把 pending 永久留在共享状态里
     val actionScope = LocalUserActionScope.current ?: scope
     val likeRepository = LocalLikeRepository.current
-    val likeState = likeRepository?.commentState(comment, LocalCommentLikeStates.current)
-        ?: LikeState(comment.isLiked, parseInteractionCount(comment.likeCount))
+    // 同上：评论点赞快照也按 id 精确订阅，别人那条评论点赞不会带着本行重组
+    val commentLikeStates = LocalCommentLikeStates.current
+    val likeState by remember(likeRepository, commentLikeStates, comment.id, comment.isLiked, comment.likeCount) {
+        derivedStateOf {
+            likeRepository?.commentState(comment, commentLikeStates.value)
+                ?: LikeState(comment.isLiked, parseInteractionCount(comment.likeCount))
+        }
+    }
     val snackbarHostState = LocalSnackbarHostState.current
     val context = LocalContext.current
     val isReply = depth > 0

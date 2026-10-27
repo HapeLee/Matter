@@ -13,7 +13,11 @@ import io.ktor.http.Parameters
 import io.ktor.http.decodeURLQueryComponent
 import io.ktor.http.parameters
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -511,10 +515,26 @@ class WeiboApiService(
     /** `allGroups` 的原始 JSON 快照：属主是发起请求的 Cookie，换号 / 游客态天然不复用。 */
     private data class AllGroupsSnapshot(val owner: String, val root: JsonObject)
 
-    private val allGroupsMutex = Mutex()
+    /** 只保护「读缓存 / 挂上在途任务」这一小段，网络请求在锁外跑。 */
+    private val allGroupsLock = Mutex()
 
     @Volatile
     private var allGroupsSnapshot: AllGroupsSnapshot? = null
+
+    /**
+     * 在途请求（Cookie + 任务）。同一个 Cookie 的并发调用共享**同一次**网络往返，
+     * 但失败不共享：任务一结束就摘掉，下次调用会重新发起。
+     */
+    @Volatile
+    private var allGroupsInFlight: Pair<String, Deferred<ApiResult<JsonObject>>>? = null
+
+    /**
+     * 共享在途请求用的作用域。
+     *
+     * 请求不能挂在某一个调用方的 scope 上：发起方（比如动态页）被取消时，
+     * 同一时刻在等这份数据的另一个入口（热门频道）会被连带取消。
+     */
+    private val sharedFetchScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
      * 拉取（或复用）`allGroups` 原始响应。
@@ -522,14 +542,35 @@ class WeiboApiService(
      * 关注分组（[getFollowGroups]）与热门频道（[getHotFeedCategories]）读的是同一份数据，
      * 一次会话里没必要各拉一次；缓存原始 JSON，两个入口按各自需要解析。
      * 分组增删改成功后主动失效，页面上的「重新加载」用 [forceRefresh] 绕过。
+     *
+     * 这里刻意**不**把网络请求放进 mutex：之前是 `mutex.withLock { 网络请求 }`，
+     * 一旦分组请求超时（最长 20s），另一条完全无关的入口就得排在它后面；
+     * 而失败后下一个调用方还会在锁里再发一次，最坏情况要等两倍超时。
+     * 改成单飞（single-flight）后：并发调用共享一次往返，失败不会再叠一层等待。
      */
     private suspend fun loadAllGroups(
         cookie: String,
         forceRefresh: Boolean
-    ): ApiResult<JsonObject> = allGroupsMutex.withLock {
+    ): ApiResult<JsonObject> {
         if (!forceRefresh) {
             allGroupsSnapshot?.takeIf { it.owner == cookie }?.let { return ApiResult.Success(it.root) }
         }
+        val flight = allGroupsLock.withLock {
+            allGroupsInFlight?.takeIf { it.first == cookie }?.second ?: run {
+                val created = sharedFetchScope.async { fetchAllGroups(cookie) }
+                created.invokeOnCompletion {
+                    val current = allGroupsInFlight
+                    if (current != null && current.second === created) allGroupsInFlight = null
+                }
+                allGroupsInFlight = cookie to created
+                created
+            }
+        }
+        return flight.await()
+    }
+
+    /** 真正的一次 `allGroups` 往返；不持锁、不读缓存。 */
+    private suspend fun fetchAllGroups(cookie: String): ApiResult<JsonObject> {
         val response = try {
             client.weiboGet(
                 webEndpoint(
@@ -566,7 +607,7 @@ class WeiboApiService(
             )
         }
         allGroupsSnapshot = AllGroupsSnapshot(cookie, root)
-        ApiResult.Success(root)
+        return ApiResult.Success(root)
     }
 
     /** 分组本身发生变化（新建 / 改名 / 删除 / 排序）后，共用快照必须作废。 */
@@ -674,6 +715,9 @@ class WeiboApiService(
      * 只走 web：分组列表来自 `allGroups`，gid 是 web 侧 id；
      * `api.weibo.com/2/friendships/groups` 系列接口需要 access_token（网页登录的 Cookie
      * 拿不到，实测 403 `auth by Null spi`），混用只会多打一次必然失败的请求。
+     *
+     * 与点赞 / 关注共用 [WeiboWriteSession]：微博的写限流按账号计，分组写操作同样会触发，
+     * 走闸门才能串行提交、在冷却期内直接拒绝而不是继续给服务端记账。
      */
     suspend fun createGroup(
         name: String,
@@ -685,33 +729,46 @@ class WeiboApiService(
             return ApiResult.Error(code = 401, message = "未检测到有效登录状态，无法同步至微博")
         }
         return try {
-            val response = client.weiboPostForm(
-                endpoint = webEndpoint("/ajax/feed/createGroup", WeiboAuth.Session(effectiveCookie)),
-                form = parameters { append("name", name) }
-            )
-            val jsonRoot = response.jsonBody().jsonObject
-            val ok = jsonRoot["ok"]?.jsonPrimitive?.intOrNull ?: 0
-            val gid = jsonRoot["gid"]?.jsonPrimitive?.contentOrNull
-                ?: jsonRoot["id"]?.jsonPrimitive?.contentOrNull
-            // 只有 ok == 1 且服务端真的给了 gid 才算建成功；
-            // 以前拿当前时间戳兜底 gid，失败也会当成功写进本地分组。
-            if (ok == 1 && !gid.isNullOrBlank()) {
-                invalidateAllGroupsCache()
-                ApiResult.Success(
-                    WeiboGroupDto(
-                        id = gid.toLongOrNull(),
-                        idStr = gid,
-                        gid = gid,
-                        name = name,
-                        title = name,
-                        memberCount = 0
-                    )
+            writeSession.execute(
+                cookie = effectiveCookie,
+                action = "创建分组",
+                // 分组接口只用会话 Cookie 鉴权（WeiboAuth.Session），不需要 XSRF 令牌
+                needsXsrfToken = false
+            ) { credentials ->
+                val response = client.weiboPostForm(
+                    endpoint = webEndpoint(
+                        "/ajax/feed/createGroup",
+                        WeiboAuth.Session(credentials.cookieHeader)
+                    ),
+                    form = parameters { append("name", name) }
                 )
-            } else {
-                val errorMsg = jsonRoot["msg"]?.jsonPrimitive?.contentOrNull
-                    ?: jsonRoot["error"]?.jsonPrimitive?.contentOrNull ?: "创建分组失败"
-                ApiResult.Error(message = errorMsg)
+                writeHttpError(response)?.let { return@execute it }
+                val jsonRoot = response.jsonBody().jsonObject
+                val ok = jsonRoot["ok"]?.jsonPrimitive?.intOrNull ?: 0
+                val gid = jsonRoot["gid"]?.jsonPrimitive?.contentOrNull
+                    ?: jsonRoot["id"]?.jsonPrimitive?.contentOrNull
+                // 只有 ok == 1 且服务端真的给了 gid 才算建成功；
+                // 以前拿当前时间戳兜底 gid，失败也会当成功写进本地分组。
+                if (ok == 1 && !gid.isNullOrBlank()) {
+                    invalidateAllGroupsCache()
+                    ApiResult.Success(
+                        WeiboGroupDto(
+                            id = gid.toLongOrNull(),
+                            idStr = gid,
+                            gid = gid,
+                            name = name,
+                            title = name,
+                            memberCount = 0
+                        )
+                    )
+                } else {
+                    groupWriteError(jsonRoot, "创建分组失败")
+                }
             }
+        } catch (e: WriteGateException) {
+            ApiResult.Error(code = e.code, message = e.message.orEmpty())
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             ApiResult.Error(message = e.localizedMessage ?: "网络异常，创建分组失败", throwable = e)
         }
@@ -733,23 +790,36 @@ class WeiboApiService(
             return ApiResult.Error(code = 401, message = "未检测到有效登录状态，无法同步至微博")
         }
         return try {
-            val response = client.weiboPostForm(
-                endpoint = webEndpoint("/ajax/feed/updateGroupName", WeiboAuth.Session(effectiveCookie)),
-                form = parameters {
-                    append("gid", gid)
-                    append("name", name)
+            writeSession.execute(
+                cookie = effectiveCookie,
+                action = "重命名分组",
+                needsXsrfToken = false
+            ) { credentials ->
+                val response = client.weiboPostForm(
+                    endpoint = webEndpoint(
+                        "/ajax/feed/updateGroupName",
+                        WeiboAuth.Session(credentials.cookieHeader)
+                    ),
+                    form = parameters {
+                        append("gid", gid)
+                        append("name", name)
+                    }
+                )
+                writeHttpError(response)?.let { return@execute it }
+                val jsonRoot = response.jsonBody().jsonObject
+                // HTTP 200 不代表改成功，只看业务 ok
+                val ok = jsonRoot["ok"]?.jsonPrimitive?.intOrNull ?: 0
+                if (ok == 1) {
+                    invalidateAllGroupsCache()
+                    ApiResult.Success(Unit)
+                } else {
+                    groupWriteError(jsonRoot, "更新分组名称失败")
                 }
-            )
-            val jsonRoot = response.jsonBody().jsonObject
-            // HTTP 200 不代表改成功，只看业务 ok
-            val ok = jsonRoot["ok"]?.jsonPrimitive?.intOrNull ?: 0
-            if (ok == 1) {
-                invalidateAllGroupsCache()
-                ApiResult.Success(Unit)
-            } else {
-                val errorMsg = jsonRoot["msg"]?.jsonPrimitive?.contentOrNull ?: "更新分组名称失败"
-                ApiResult.Error(message = errorMsg)
             }
+        } catch (e: WriteGateException) {
+            ApiResult.Error(code = e.code, message = e.message.orEmpty())
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             ApiResult.Error(message = e.localizedMessage ?: "网络异常，更新分组失败", throwable = e)
         }
@@ -769,19 +839,32 @@ class WeiboApiService(
             return ApiResult.Error(code = 401, message = "未检测到有效登录状态，无法同步至微博")
         }
         return try {
-            val response = client.weiboPostForm(
-                endpoint = webEndpoint("/ajax/feed/destroyGroup", WeiboAuth.Session(effectiveCookie)),
-                form = parameters { append("gid", gid) }
-            )
-            val jsonRoot = response.jsonBody().jsonObject
-            val ok = jsonRoot["ok"]?.jsonPrimitive?.intOrNull ?: 0
-            if (ok == 1) {
-                invalidateAllGroupsCache()
-                ApiResult.Success(Unit)
-            } else {
-                val errorMsg = jsonRoot["msg"]?.jsonPrimitive?.contentOrNull ?: "删除分组失败"
-                ApiResult.Error(message = errorMsg)
+            writeSession.execute(
+                cookie = effectiveCookie,
+                action = "删除分组",
+                needsXsrfToken = false
+            ) { credentials ->
+                val response = client.weiboPostForm(
+                    endpoint = webEndpoint(
+                        "/ajax/feed/destroyGroup",
+                        WeiboAuth.Session(credentials.cookieHeader)
+                    ),
+                    form = parameters { append("gid", gid) }
+                )
+                writeHttpError(response)?.let { return@execute it }
+                val jsonRoot = response.jsonBody().jsonObject
+                val ok = jsonRoot["ok"]?.jsonPrimitive?.intOrNull ?: 0
+                if (ok == 1) {
+                    invalidateAllGroupsCache()
+                    ApiResult.Success(Unit)
+                } else {
+                    groupWriteError(jsonRoot, "删除分组失败")
+                }
             }
+        } catch (e: WriteGateException) {
+            ApiResult.Error(code = e.code, message = e.message.orEmpty())
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             ApiResult.Error(message = e.localizedMessage ?: "网络异常，删除分组失败", throwable = e)
         }
@@ -805,17 +888,29 @@ class WeiboApiService(
         if (gidListStr.isBlank()) return ApiResult.Success(Unit)
 
         return try {
-            val response = client.weiboPostForm(
-                endpoint = webEndpoint("/ajax/feed/setGroupOrder", WeiboAuth.Session(effectiveCookie)),
-                form = parameters { append("gids", gidListStr) }
-            )
-            if (response.status == HttpStatusCode.OK) {
+            // 排序不是关键写操作：失败只上报调用方，但同样经过闸门，
+            // 免得在频控冷却期里继续试探服务端（那会延长账号的冷却）
+            writeSession.execute(
+                cookie = effectiveCookie,
+                action = "分组排序",
+                needsXsrfToken = false
+            ) { credentials ->
+                val response = client.weiboPostForm(
+                    endpoint = webEndpoint(
+                        "/ajax/feed/setGroupOrder",
+                        WeiboAuth.Session(credentials.cookieHeader)
+                    ),
+                    form = parameters { append("gids", gidListStr) }
+                )
+                writeHttpError(response)?.let { return@execute it }
                 // 排序结果也体现在 allGroups 的顺序里，快照一并作废
                 invalidateAllGroupsCache()
                 ApiResult.Success(Unit)
-            } else {
-                ApiResult.Error(code = response.status.value, message = "同步分组排序失败")
             }
+        } catch (e: WriteGateException) {
+            ApiResult.Error(code = e.code, message = e.message.orEmpty())
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.w("WeiboApi", "setGroupOrder failed", e)
             ApiResult.Error(message = e.localizedMessage ?: "网络异常，同步分组排序失败", throwable = e)
@@ -1957,6 +2052,26 @@ class WeiboApiService(
         writeSession.invalidate()
         cachedDesktopCredentials = null
         return ApiResult.Error(message = msg)
+    }
+
+    /**
+     * 关注分组（建 / 改名 / 删）的业务失败：`ok != 1` 时频控同样收敛成 429 并进入本地冷却。
+     *
+     * 与 [writeJsonError] 的差别：分组接口用会话 Cookie 鉴权（没有 XSRF 令牌可作废），
+     * 失败不牵动 `st` 与桌面凭据缓存，免得下一次写操作白打一次取令牌的 GET。
+     */
+    private fun groupWriteError(jsonRoot: JsonObject, failureMessage: String): ApiResult.Error {
+        val msg = jsonRoot["msg"]?.jsonPrimitive?.contentOrNull
+            ?: jsonRoot["message"]?.jsonPrimitive?.contentOrNull
+            ?: jsonRoot["error"]?.jsonPrimitive?.contentOrNull
+        if (WeiboWriteErrors.isRateLimited(msg)) {
+            writeSession.reportRateLimited()
+            return ApiResult.Error(
+                code = WeiboWriteErrors.CODE_RATE_LIMITED,
+                message = WeiboWriteErrors.RATE_LIMITED_MESSAGE
+            )
+        }
+        return ApiResult.Error(message = msg ?: failureMessage)
     }
 
     /** `ok` 在不同端是数字或字符串，统一取整数。 */

@@ -2,6 +2,7 @@ package org.kazusa.matter.ui.profile
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -493,8 +494,18 @@ internal class UserProfileViewModel internal constructor(
 
         if (profileRes is ApiResult.Success) {
             val p = profileRes.data
-            // 本地浏览历史：同一博主只保留最近一次访问
-            recordUser(p)
+            // 本地浏览历史：同一博主只保留最近一次访问。
+            // 独立一发、不 await：它内部要做正则清洗 + 整条 DTO 的 JSON 序列化 + 多次 Room 往返，
+            // 串在这里会把主页头部与动态列表的渲染一起推后（与正文页的处理保持一致）。
+            viewModelScope.launch {
+                try {
+                    recordUser(p)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // 历史写失败不影响主页展示
+                }
+            }
             updateHeader { it.copy(user = mergeUserProfile(it.user, p)) }
             // 关注状态打底：本会话里已经点过的结果优先，不被服务端的旧值覆盖
             followRepository.seed(uid, p.following)

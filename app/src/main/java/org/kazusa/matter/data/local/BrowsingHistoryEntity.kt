@@ -16,11 +16,18 @@ import androidx.room3.PrimaryKey
  *   `create_at` INTEGER NOT NULL, `category` INTEGER NOT NULL
  * )
  * CREATE INDEX IF NOT EXISTS `index_browsing_history_status_id` ON `browsing_history` (`status_id`)
+ * CREATE INDEX IF NOT EXISTS `index_browsing_history_uid_create_at` ON `browsing_history` (`uid`, `create_at`)
  * ```
+ *
+ * 第二个索引服务两类高频查询：列表按 `(uid, create_at DESC)` 取页，以及容量裁剪按
+ * `create_at ASC` 找最旧若干条——没有它两者都是全表扫描 + 临时排序。
  */
 @Entity(
     tableName = "browsing_history",
-    indices = [Index(value = ["status_id"], name = "index_browsing_history_status_id")]
+    indices = [
+        Index(value = ["status_id"], name = "index_browsing_history_status_id"),
+        Index(value = ["uid", "create_at"], name = "index_browsing_history_uid_create_at")
+    ]
 )
 data class BrowsingHistoryEntity(
     @PrimaryKey(autoGenerate = true)

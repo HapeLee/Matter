@@ -35,14 +35,23 @@ class HotFeedViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun keep(viewModel: HotFeedViewModel): HotFeedViewModel = viewModel.also { vm ->
+    private fun post(id: Long) = WeiboStatusDto(id = id)
+
+    /**
+     * 构造并立即触发首屏加载。
+     *
+     * ViewModel 不再在 init 里自动发请求（预组合阶段不该抢首屏带宽），
+     * 由界面在「本页首次可见」时调用 [HotFeedViewModel.ensureLoaded]。
+     */
+    private fun keep(viewModel: HotFeedViewModel, load: Boolean = true): HotFeedViewModel =
+        keepRegistered(viewModel).also { if (load) it.ensureLoaded() }
+
+    private fun keepRegistered(viewModel: HotFeedViewModel): HotFeedViewModel = viewModel.also { vm ->
         ViewModelStore().also { store ->
             store.put("hotFeed", vm)
             stores += store
         }
     }
-
-    private fun post(id: Long) = WeiboStatusDto(id = id)
 
     private val category = HotFeedCategory(id = "1", containerId = "102803", title = "热门")
 
@@ -207,5 +216,36 @@ class HotFeedViewModelTest {
         vm.loadMore()
         advanceUntilIdle()
         assertEquals(listOf(1L, 2L), vm.uiState.value.posts.map { it.id })
+    }
+
+    @Test
+    fun doesNotRequestUntilThePageBecomesVisible() = runTest {
+        var categoryCalls = 0
+        // 本页在「动态」页时就被预组合：只构造、不调用 ensureLoaded，必须一个请求都不发
+        val vm = keep(
+            HotFeedViewModel(
+                getCategories = {
+                    categoryCalls += 1
+                    ApiResult.Success(listOf(category))
+                },
+                getFeed = { _, _, _ ->
+                    ApiResult.Success(HotFeedPage(posts = listOf(post(1)), hasMore = false))
+                }
+            ),
+            load = false
+        )
+        advanceUntilIdle()
+        assertEquals(0, categoryCalls)
+        assertTrue(vm.uiState.value.posts.isEmpty())
+
+        vm.ensureLoaded()
+        advanceUntilIdle()
+        assertEquals(1, categoryCalls)
+        assertEquals(listOf(1L), vm.uiState.value.posts.map { it.id })
+
+        // 切走再回来会重复调用 ensureLoaded：只加载一次
+        vm.ensureLoaded()
+        advanceUntilIdle()
+        assertEquals(1, categoryCalls)
     }
 }

@@ -1,5 +1,6 @@
 package org.kazusa.matter.data.repository
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
@@ -128,13 +129,32 @@ class EmojiRepository(private val source: OnlineEmojiSource, private val store: 
         }
     }
 
-    private fun updateImages(installed: List<InstalledEmojiPackage>) {
-        // 热门包优先，其次当前基础目录，再按扩展包的新旧次序补齐代码和别名。
-        val images = linkedMapOf<String, String>()
-        installed.sortedWith(compareBy<InstalledEmojiPackage> { if (it.id == "com.sina.default") 0 else if (it.id.startsWith("catalog.")) 1 else 2 }.thenByDescending { it.id }).forEach { pack ->
-            pack.emojis.forEach { emoji ->
-                (listOf(emoji.code) + emoji.aliases).forEach { code -> if (code !in images) images[code] = emoji.image }
-            }
+    private suspend fun updateImages(installed: List<InstalledEmojiPackage>) {
+        // 几千个表情重建整张 map，放到 Default 上做：调用点虽然都在 publishMutex 临界区内，
+        // 但那段临界区只碰内存状态，切线程不影响一致性；留在调用方（主）线程则是一次可见的卡顿。
+        val images = withContext(Dispatchers.Default) {
+            // 热门包优先，其次当前基础目录，再按扩展包的新旧次序补齐代码和别名。
+            val result = linkedMapOf<String, String>()
+            installed
+                .sortedWith(
+                    compareBy<InstalledEmojiPackage> {
+                        when {
+                            it.id == "com.sina.default" -> 0
+                            it.id.startsWith("catalog.") -> 1
+                            else -> 2
+                        }
+                    }.thenByDescending { it.id }
+                )
+                .forEach { pack ->
+                    pack.emojis.forEach { emoji ->
+                        // 不再为每个表情现造 `listOf(code) + aliases` 的临时表
+                        if (emoji.code !in result) result[emoji.code] = emoji.image
+                        emoji.aliases.forEach { code ->
+                            if (code !in result) result[code] = emoji.image
+                        }
+                    }
+                }
+            result
         }
         _images.value = images
     }

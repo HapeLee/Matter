@@ -12,6 +12,7 @@ import org.kazusa.matter.core.util.WeiboTextFormatter
 import org.kazusa.matter.data.local.BrowsingCategory
 import org.kazusa.matter.data.local.BrowsingHistoryDao
 import org.kazusa.matter.data.local.BrowsingHistoryEntity
+import org.kazusa.matter.data.local.MatterDatabase
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.model.WeiboUserDto
 
@@ -129,40 +130,19 @@ class BrowsingHistoryRepository(
         payload: String?,
         category: Int
     ) {
+        // 会话读取放在事务外：不要在持有数据库事务时去等 DataStore / 解密
         val uid = currentUid()
-        val now = System.currentTimeMillis()
-
-        val existing = dao.findByStatusId(statusId, uid)
-        if (existing != null) {
-            dao.updateSnapshot(
-                id = existing.id,
-                createAt = now,
-                username = username ?: existing.username,
-                totalText = totalText?.ifBlank { null } ?: existing.totalText,
-                json = payload ?: existing.json
-            )
-        } else {
-            dao.insert(
-                BrowsingHistoryEntity(
-                    statusId = statusId,
-                    username = username,
-                    totalText = totalText,
-                    uid = uid,
-                    json = payload,
-                    createAt = now,
-                    category = category
-                )
-            )
-        }
-        trimToLimit(uid)
-    }
-
-    /** 同账号历史超过上限时，删除最旧的若干条 */
-    private suspend fun trimToLimit(uid: String?) {
-        val total = dao.countForUid(uid)
-        val overflow = total - maxEntriesPerAccount
-        if (overflow <= 0) return
-        dao.deleteByIds(dao.oldestIds(uid = uid, limit = overflow, offset = 0))
+        // 查重、写入与容量裁剪收在一个事务里（见 BrowsingHistoryDao.upsertAndTrim）
+        dao.upsertAndTrim(
+            statusId = statusId,
+            uid = uid,
+            username = username,
+            totalText = totalText,
+            json = payload,
+            category = category,
+            createAt = System.currentTimeMillis(),
+            maxEntries = maxEntriesPerAccount
+        )
     }
 
     private fun encode(post: WeiboStatusDto): String? =

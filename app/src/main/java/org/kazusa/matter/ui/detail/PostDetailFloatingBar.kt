@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.ThumbUp
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -206,7 +205,7 @@ private fun ActionIcon(
 private fun FavoriteActionIcon(
     post: WeiboStatusDto
 ) {
-    FavoriteToggleAction(post = post) { favorited, busy, enabled, onClick ->
+    FavoriteToggleAction(post = post) { favorited, _ /* pending 期间保持结果态，见下 */, enabled, onClick ->
         val tint = if (favorited) {
             MaterialTheme.colorScheme.primary
         } else {
@@ -225,21 +224,15 @@ private fun FavoriteActionIcon(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            if (busy) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                    color = tint
-                )
-            } else {
-                // 收藏沿用全 app 一致的书签图标（与卡片、顶栏收藏按钮同一套语义）
-                LiquidGlassIcon(
-                    imageVector = if (favorited) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                    contentDescription = if (favorited) "取消收藏" else "收藏微博",
-                    tint = tint,
-                    modifier = Modifier.size(BarIconSize)
-                )
-            }
+            // 收藏是乐观更新：pending 期间直接显示结果态图标，重复点击由 enabled 拦住，
+            // 不再转圈（写闸门排队时转圈会让人以为「没点上」）。
+            // 收藏沿用全 app 一致的书签图标（与卡片、顶栏收藏按钮同一套语义）
+            LiquidGlassIcon(
+                imageVector = if (favorited) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                contentDescription = if (favorited) "取消收藏" else "收藏微博",
+                tint = tint,
+                modifier = Modifier.size(BarIconSize)
+            )
         }
     }
 }

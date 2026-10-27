@@ -74,12 +74,11 @@ class WeiboWriteSessionTest {
     }
 
     @Test
-    fun writesAreSpacedByTheMinimumInterval() = runTest {
+    fun writesAreSpacedByTheNormalIntervalBeforeAnyRateLimit() = runTest {
         val startedAt = mutableListOf<Long>()
         val session = WeiboWriteSession(
             fetchCredentials = { _, _ -> credentials() },
-            clock = { testScheduler.currentTime },
-            minWriteIntervalMillis = 800
+            clock = { testScheduler.currentTime }
         )
 
         repeat(3) {
@@ -89,7 +88,105 @@ class WeiboWriteSessionTest {
             }
         }
 
-        assertEquals(listOf(0L, 800L, 1_600L), startedAt)
+        // 没踩过频控时用常规间隔（250ms），连点不至于排长队
+        assertEquals(listOf(0L, 250L, 500L), startedAt)
+    }
+
+    @Test
+    fun rateLimitBacksOffTheSpacingForFollowingWrites() = runTest {
+        val startedAt = mutableListOf<Long>()
+        val session = WeiboWriteSession(
+            fetchCredentials = { _, _ -> credentials() },
+            clock = { testScheduler.currentTime }
+        )
+
+        runCatching {
+            session.execute(cookie, "点赞") {
+                startedAt += testScheduler.currentTime
+                session.reportRateLimited()
+                throw WriteGateException(
+                    WeiboWriteErrors.CODE_RATE_LIMITED,
+                    WeiboWriteErrors.RATE_LIMITED_MESSAGE
+                )
+            }
+        }
+        advanceTimeBy(60_001)
+
+        repeat(2) {
+            session.execute(cookie, "点赞") {
+                startedAt += testScheduler.currentTime
+                "ok"
+            }
+        }
+
+        // 冷却结束后按退避间隔（800ms）排队，而不是回到 250ms
+        assertEquals(listOf(0L, 60_001L, 60_801L), startedAt)
+    }
+
+    @Test
+    fun spacingRecoversAfterConsecutiveSuccesses() = runTest {
+        val startedAt = mutableListOf<Long>()
+        val session = WeiboWriteSession(
+            fetchCredentials = { _, _ -> credentials() },
+            clock = { testScheduler.currentTime },
+            recoverySuccesses = 2
+        )
+
+        runCatching {
+            session.execute(cookie, "点赞") {
+                session.reportRateLimited()
+                throw WriteGateException(
+                    WeiboWriteErrors.CODE_RATE_LIMITED,
+                    WeiboWriteErrors.RATE_LIMITED_MESSAGE
+                )
+            }
+        }
+        advanceTimeBy(60_001)
+
+        repeat(3) {
+            session.execute(cookie, "点赞") {
+                startedAt += testScheduler.currentTime
+                "ok"
+            }
+        }
+
+        // 前两次仍在退避（间隔 800ms），连续两次成功后第三次恢复常规间隔（250ms）
+        assertEquals(listOf(60_001L, 60_801L, 61_051L), startedAt)
+    }
+
+    @Test
+    fun rateLimitedResultDoesNotCountAsRecoverySuccess() = runTest {
+        val startedAt = mutableListOf<Long>()
+        val session = WeiboWriteSession(
+            fetchCredentials = { _, _ -> credentials() },
+            clock = { testScheduler.currentTime },
+            recoverySuccesses = 2
+        )
+
+        // 真实写路径被限流时是「上报 + 返回 Error」，不抛异常
+        val limited: ApiResult<Any> = session.execute(cookie, "点赞") {
+            session.reportRateLimited()
+            ApiResult.Error(
+                code = WeiboWriteErrors.CODE_RATE_LIMITED,
+                message = WeiboWriteErrors.RATE_LIMITED_MESSAGE
+            )
+        }
+        assertEquals(
+            WeiboWriteErrors.CODE_RATE_LIMITED,
+            (limited as ApiResult.Error).code
+        )
+        advanceTimeBy(60_001)
+
+        repeat(3) {
+            session.execute(cookie, "点赞") {
+                startedAt += testScheduler.currentTime
+                "ok"
+            }
+        }
+
+        // 被限流那次不能算「连续成功」：冷却后第一次成功仍按 800ms 退避排队，
+        // 若把失败计入进度，这里会提前掉回 250ms
+        assertEquals(listOf(60_001L, 60_801L, 61_051L), startedAt)
     }
 
     @Test

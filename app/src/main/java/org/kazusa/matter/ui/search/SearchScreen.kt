@@ -131,7 +131,11 @@ fun HotSearchScreen(
             isRefreshing = hotSearchUi.isRefreshing,
             state = pullRefreshState,
             onRefresh = { hotSearchViewModel.refresh() },
-            modifier = Modifier.fillMaxSize()
+            // 本页唯一一层 backdrop，录整个内容区。挂在 AnimatedContent 外层后，
+            // 换榜的交叉淡化是同一次录制的结果，不再需要「只让当前那份写入」来防止双写。
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
         ) {
             // 换榜：新旧两份内容交叉淡化，各自持有 LazyListState，过渡期间互不干扰。
             // contentKey 只认 containerid —— 同榜刷新（下拉刷新 / 自动刷新）不重放过渡，
@@ -163,14 +167,6 @@ fun HotSearchScreen(
                     state = boardListState,
                     modifier = Modifier
                         .fillMaxSize()
-                        // 只让当前那份参与顶栏模糊采样，避免过渡期间两份列表同时写入同一张 backdrop
-                        .then(
-                            if (isCurrent && backdrop != null) {
-                                Modifier.layerBackdrop(backdrop)
-                            } else {
-                                Modifier
-                            }
-                        )
                         .background(MaterialTheme.colorScheme.surface),
                     contentPadding = PaddingValues(
                         start = 12.dp,

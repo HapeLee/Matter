@@ -89,6 +89,7 @@ import androidx.compose.ui.unit.sp
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.components.WeiboPostCard
 import org.kazusa.matter.ui.media.morph.LocalImageMorphState
+import org.kazusa.matter.ui.media.morph.rememberImageMorphPresent
 import org.kazusa.matter.ui.theme.TextSecondary
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.geometry.Offset
@@ -129,6 +130,8 @@ fun TimelineScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val morphState = LocalImageMorphState.current
+    // 是否存在飞行中的大图：必须走 derivedStateOf，否则形变动画期间本页逐帧重组
+    val morphPresent by rememberImageMorphPresent(morphState)
 
     // 取一次列表快照：断点下标、分栏 key 与下面的 subList 必须来自同一份列表，
     // 否则下标可能落在上一份列表上，subList 会直接抛 IndexOutOfBoundsException（切分组时最容易触发）。
@@ -175,10 +178,13 @@ fun TimelineScreen(
         }
     }
 
-    // 点击卡片进入正文前立即同步持久化当前滚动位置，确保从正文返回时精准定位
+    // 点击卡片进入正文前持久化当前滚动位置，确保从正文返回时精准定位。
+    // 这里必须用 apply()（异步落盘）而不是 commit()：同进程内返回时读到的是内存里的新值，
+    // 而 commit() 的 fsync 会落在主线程、正好压在共享元素转场起手那一帧。
+    // 真正需要「进程被杀也不丢」的场景交给 ON_PAUSE / ON_STOP（那里仍然同步写）。
     val handlePostClick: (WeiboStatusDto) -> Unit = remember(onPostClick, saveCurrentPosition) {
         { post ->
-            saveCurrentPosition(true)
+            saveCurrentPosition(false)
             onPostClick(post)
         }
     }
@@ -186,7 +192,7 @@ fun TimelineScreen(
     // 点击评论按钮进入正文评论区
     val handleCommentClick: (WeiboStatusDto) -> Unit = remember(onCommentClick, saveCurrentPosition) {
         { post ->
-            saveCurrentPosition(true)
+            saveCurrentPosition(false)
             onCommentClick(post)
         }
     }
@@ -379,6 +385,11 @@ fun TimelineScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    // 本页唯一一层 backdrop：录「顶栏以下」的整个内容区。
+                    // 挂在内容区而不是列表上，是为了加载 / 报错 / 空态也有内容可采样
+                    // （悬浮底栏与顶栏玻璃都吃这一层）；顶栏在 Scaffold 的 topBar 槽里，
+                    // 不在这棵子树内，因此不会采到自己。
+                    .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
                     // 只在「加载态 → 有数据」时整页淡入一次；
                     // 刷新 / 翻页 / 报错不重置 alpha，否则列表会反复闪
                     .fadeInOnContentChange(key = uiState.posts.isNotEmpty())
@@ -479,10 +490,9 @@ fun TimelineScreen(
                 else -> {
                     LazyColumn(
                         state = listState,
-                        userScrollEnabled = (morphState?.isPresent != true && uiState.pendingRestoreIndex == null),
+                        userScrollEnabled = (!morphPresent && uiState.pendingRestoreIndex == null),
                         modifier = Modifier
                             .fillMaxSize()
-                            .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
                             .background(MaterialTheme.colorScheme.surface),
                         contentPadding = PaddingValues(
                             start = 12.dp,

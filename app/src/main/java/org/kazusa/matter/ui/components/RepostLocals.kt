@@ -1,5 +1,8 @@
 package org.kazusa.matter.ui.components
 
+import androidx.compose.runtime.State
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.repository.RepostState
@@ -7,9 +10,10 @@ import org.kazusa.matter.data.repository.RepostState
 /**
  * 转发计数的只读快照（导航根从 `RepostRepository.postStates` 收集一次后下发）。
  *
- * 与 [LocalPostLikeStates] 同理：列表项各自订阅 Flow 会付出 N 份收集成本。
+ * 与 [LocalPostLikeStates] 同理：列表项各自订阅 Flow 会付出 N 份收集成本；
+ * 下发 State 而不是 Map，是为了让卡片只在自己那条微博的转发态变化时重组。
  */
-val LocalRepostStates = staticCompositionLocalOf<Map<String, RepostState>> { emptyMap() }
+val LocalRepostStates = compositionLocalOf<State<Map<String, RepostState>>> { mutableStateOf(emptyMap()) }
 
 /**
  * 打开转发面板。
