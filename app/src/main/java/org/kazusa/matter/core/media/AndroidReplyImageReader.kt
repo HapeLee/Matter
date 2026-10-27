@@ -33,7 +33,7 @@ class AndroidReplyImageReader(context: Context) : ReplyImageReader {
         require(bytes.isNotEmpty()) { "图片内容为空，请重新选择" }
         val mime = resolver.getType(uri)
         if (mime in setOf("image/jpeg", "image/png", "image/gif")) {
-            ReplyImageContent(bytes)
+            ReplyImageContent(bytes, mime!!)
         } else {
             val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
@@ -45,7 +45,7 @@ class AndroidReplyImageReader(context: Context) : ReplyImageReader {
             try {
                 val output = ByteArrayOutputStream()
                 check(bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)) { "图片转换失败" }
-                ReplyImageContent(output.toByteArray())
+                ReplyImageContent(output.toByteArray(), "image/jpeg")
             } finally { bitmap.recycle() }
         }
     }

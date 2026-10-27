@@ -18,9 +18,9 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -61,10 +61,11 @@ private val BarActionsHorizontalPadding = 8.dp
  * 正文页底部的液态玻璃悬浮操作栏。
  *
  * 左侧是「写评论」胶囊，点击唤起 [PostReplySheet]；右侧是互动胶囊：
- * 赞、收藏、分享。评论不再单独放图标 —— 左侧「写评论」已经承担了评论入口，
+ * 赞、收藏、转发。评论不再单独放图标 —— 左侧「写评论」已经承担了评论入口，
  * 评论区本身也还在正文下方，重复一个气泡只会把这条悬浮栏拉长。
  *
- * 收藏与分享不再占用顶栏；左侧输入胶囊吃掉剩余宽度，右侧互动胶囊按内容收紧。
+ * 分享移到顶栏右侧：悬浮栏只保留与当前微博强相关的写操作；
+ * 左侧输入胶囊吃掉剩余宽度，右侧互动胶囊按内容收紧。
  */
 @Composable
 internal fun PostDetailFloatingBar(
@@ -73,7 +74,7 @@ internal fun PostDetailFloatingBar(
     backdrop: LayerBackdrop?,
     onWriteComment: () -> Unit,
     onLikeClick: () -> Unit,
-    onShareClick: () -> Unit,
+    onRepostClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -96,7 +97,7 @@ internal fun PostDetailFloatingBar(
             isLiked = isLiked,
             backdrop = backdrop,
             onLikeClick = onLikeClick,
-            onShareClick = onShareClick
+            onRepostClick = onRepostClick
         )
     }
 }
@@ -137,14 +138,14 @@ private fun WriteCommentCapsule(
     }
 }
 
-/** 右互动胶囊：赞 / 收藏 / 分享。 */
+/** 右互动胶囊：赞 / 收藏 / 转发。 */
 @Composable
 private fun PostActionsCapsule(
     post: WeiboStatusDto,
     isLiked: Boolean,
     backdrop: LayerBackdrop?,
     onLikeClick: () -> Unit,
-    onShareClick: () -> Unit,
+    onRepostClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     LiquidGlassCapsule(
@@ -163,9 +164,9 @@ private fun PostActionsCapsule(
             )
             FavoriteActionIcon(post = post)
             ActionIcon(
-                imageVector = Icons.Filled.Share,
-                contentDescription = "分享当前微博链接",
-                onClick = onShareClick
+                imageVector = Icons.Outlined.Repeat,
+                contentDescription = "转发",
+                onClick = onRepostClick
             )
         }
     }

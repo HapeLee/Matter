@@ -43,7 +43,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -73,7 +72,8 @@ import org.kazusa.matter.core.util.LocalOnlineEmojiImages
 import org.kazusa.matter.data.model.OnlineEmojiState
 import org.kazusa.matter.data.model.ReplyImageHandle
 import org.kazusa.matter.data.model.ReplyPickerKind
-import org.kazusa.matter.ui.components.composer.ComposerEmojiState
+import org.kazusa.matter.ui.components.composer.ComposerPickerSheet
+import org.kazusa.matter.ui.components.composer.ComposerPickerState
 import org.kazusa.matter.ui.components.composer.ComposerSheet
 import org.kazusa.matter.ui.components.composer.ComposerToolButton
 import org.kazusa.matter.ui.components.composer.EmojiDraftState
@@ -103,7 +103,7 @@ internal fun PostReplySheet(
     onOpenOnlineEmojis: () -> Unit,
     onRefreshOnlineEmojis: () -> Unit,
     onInstallEmojiPackage: (String) -> Unit,
-    pickerState: StateFlow<ReplyPickerState>,
+    pickerState: StateFlow<ComposerPickerState>,
     onBeginImageSelection: () -> Int,
     onImageSelected: (ReplyImageHandle, Int) -> Unit,
     onRemoveImage: () -> Unit,
@@ -203,7 +203,7 @@ private fun ReplySheetPanel(
     targetId: Long?,
     attachment: ReplyAttachment?,
     isUploading: Boolean,
-    picker: ReplyPickerState,
+    picker: ComposerPickerState,
     onlineEmojis: OnlineEmojiState,
     onOpenOnlineEmojis: () -> Unit,
     onRefreshOnlineEmojis: () -> Unit,
@@ -403,7 +403,7 @@ private fun ReplySheetPanel(
             }
         }
     }
-    if (picker.kind != null) ReplyComposerPickerSheet(
+    if (picker.kind != null) ComposerPickerSheet(
         state = picker,
         onQueryChange = onPickerQueryChange,
         onDismiss = { onPickerDismiss(); restoreKeyboard() },

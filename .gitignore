@@ -59,3 +59,6 @@ Thumbs.db
 
 # Local debug artifacts (screenshots / layout dumps)
 tmp_*
+
+# 本地工具产物（计划草稿等）
+.zcode/

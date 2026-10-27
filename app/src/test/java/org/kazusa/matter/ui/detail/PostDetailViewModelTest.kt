@@ -37,6 +37,8 @@ import org.kazusa.matter.data.model.WeiboCommentDto
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.model.WeiboUserDto
 import org.kazusa.matter.data.repository.LikeRepository
+import org.kazusa.matter.data.repository.RepostRepository
+import org.kazusa.matter.data.repository.SuggestionRepository
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PostDetailViewModelTest {
@@ -65,7 +67,9 @@ class PostDetailViewModelTest {
         likeRepository: LikeRepository = LikeRepository { _, isLike, _ -> ApiResult.Success(isLike) },
         source: FakeSource = FakeSource(),
         sessions: MutableStateFlow<ReplySession> = MutableStateFlow(ReplySession("1", "SUB=test", true)),
-        repository: ReplyRepository? = null
+        repository: ReplyRepository? = null,
+        suggestionRepository: SuggestionRepository = SuggestionRepository(sessions),
+        repostRepository: RepostRepository? = null
     ) = keep(
         PostDetailViewModel(
             postId = postId,
@@ -81,9 +85,38 @@ class PostDetailViewModelTest {
                     is ApiResult.Error -> result
                     ApiResult.Loading -> ApiResult.Loading
                 }
-            }
+            },
+            suggestionRepository = suggestionRepository,
+            repostRepository = repostRepository
         )
     )
+
+    @Test
+    fun repostSuccessRefreshesTheRepostTab() = runTest {
+        var repostCalls = 0
+        val repostRepository = RepostRepository { _, _ -> ApiResult.Success(Unit) }
+        val vm = viewModel(
+            postId = "detail-repost-refresh",
+            source = FakeSource(
+                repostsResponse = { _, _ ->
+                    repostCalls += 1
+                    ApiResult.Success(RepostsDataDto(data = listOf(WeiboStatusDto(id = 1))))
+                }
+            ),
+            repostRepository = repostRepository
+        )
+        vm.load()
+        advanceUntilIdle()
+        vm.selectTab(DetailSubTab.REPOSTS)
+        advanceUntilIdle()
+        assertEquals(1, repostCalls)
+
+        // 转发面板在导航根，正文页只能通过仓库事件得知写入成功
+        repostRepository.repost(WeiboStatusDto(id = 9), "")
+        advanceUntilIdle()
+
+        assertEquals(2, repostCalls)
+    }
 
     @Test
     fun refreshSupersedesInFlightRepostsRequest() = runTest {
@@ -562,11 +595,15 @@ class PostDetailViewModelTest {
     @Test
     fun oldPickerSearchCannotOverwriteNewQuery() = runTest {
         val sessions = MutableStateFlow(ReplySession("1", "SUB=test", true))
-        val repository = ReplyRepository(sessions, search = { _, _, query ->
+        val suggestions = SuggestionRepository(sessions) { _, _, query ->
             if (query == "old") kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { delay(1000) }
             ApiResult.Success(listOf(ReplySuggestion(query.ifBlank { "follow" }, query.ifBlank { "follow" })))
-        }) { _, _, _, _, _ -> ApiResult.Success(null) }
-        val vm = viewModel("picker-race", sessions = sessions, repository = repository)
+        }
+        val vm = viewModel(
+            "picker-race",
+            sessions = sessions,
+            suggestionRepository = suggestions
+        )
         vm.load(); advanceUntilIdle()
         vm.openReplyPicker(ReplyPickerKind.MENTION)
         vm.searchReplyPicker("old")

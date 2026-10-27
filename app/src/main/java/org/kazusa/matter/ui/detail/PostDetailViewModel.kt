@@ -3,7 +3,6 @@ package org.kazusa.matter.ui.detail
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
@@ -26,11 +25,15 @@ import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.repository.BrowsingHistoryRepository
 import org.kazusa.matter.data.model.ReplyImageHandle
 import org.kazusa.matter.data.model.ReplyPickerKind
-import org.kazusa.matter.data.model.ReplySuggestion
 import org.kazusa.matter.data.model.WeiboUserDto
 import org.kazusa.matter.data.repository.ReplyRepository
 import org.kazusa.matter.data.repository.ReplySession
 import org.kazusa.matter.data.repository.LikeRepository
+import org.kazusa.matter.data.repository.RepostRepository
+import org.kazusa.matter.data.repository.SuggestionRepository
+import org.kazusa.matter.ui.components.composer.ComposerPickerController
+import org.kazusa.matter.ui.components.composer.ComposerPickerState
+import org.kazusa.matter.ui.components.composer.limitComposerDraft
 
 /** 正文页的子页签。 */
 internal enum class DetailSubTab(val label: String) {
@@ -52,11 +55,7 @@ internal interface PostDetailDataSource {
 /** 输入长度保护；不把 UTF-16 代理对截成半个字符。 */
 internal const val MAX_REPLY_LENGTH = 2000
 
-internal fun limitReplyDraft(text: String): String {
-    val end = if (text.length > MAX_REPLY_LENGTH && text[MAX_REPLY_LENGTH - 1].isHighSurrogate()
-        && text[MAX_REPLY_LENGTH].isLowSurrogate()) MAX_REPLY_LENGTH - 1 else MAX_REPLY_LENGTH
-    return text.take(end)
-}
+internal fun limitReplyDraft(text: String): String = limitComposerDraft(text, MAX_REPLY_LENGTH)
 
 private class ApiPostDetailDataSource(private val apiService: WeiboApiService) : PostDetailDataSource {
     override suspend fun post(postId: String): ApiResult<WeiboStatusDto> =
@@ -153,14 +152,6 @@ internal data class ReplyComposerState(
 
 internal data class ReplyAttachment(val image: ReplyImageHandle, val uploadedId: String? = null)
 
-internal data class ReplyPickerState(
-    val kind: ReplyPickerKind? = null,
-    val query: String = "",
-    val loading: Boolean = false,
-    val suggestions: List<ReplySuggestion> = emptyList(),
-    val error: String? = null
-)
-
 internal data class ReplyTarget(val commentId: Long, val rootId: Long, val screenName: String)
 
 /**
@@ -179,7 +170,11 @@ internal class PostDetailViewModel internal constructor(
     private val recordHistory: suspend (WeiboStatusDto) -> Unit,
     private val likeRepository: LikeRepository,
     private val dataSource: PostDetailDataSource,
-    private val replyRepository: ReplyRepository
+    private val replyRepository: ReplyRepository,
+    /** `@` / `#` 选择器的建议来源；与发微博、转发面板共用同一份搜索口径。 */
+    private val suggestionRepository: SuggestionRepository,
+    /** 转发成功事件来源；单测可缺省，缺省时不刷新转发分栏。 */
+    private val repostRepository: RepostRepository? = null
 ) : ViewModel() {
 
     constructor(
@@ -187,13 +182,17 @@ internal class PostDetailViewModel internal constructor(
         apiService: WeiboApiService,
         historyRepository: BrowsingHistoryRepository,
         likeRepository: LikeRepository,
-        replyRepository: ReplyRepository
+        replyRepository: ReplyRepository,
+        suggestionRepository: SuggestionRepository,
+        repostRepository: RepostRepository? = null
     ) : this(
         postId = postId,
         recordHistory = { post -> historyRepository.recordPost(post) },
         likeRepository = likeRepository,
         dataSource = ApiPostDetailDataSource(apiService),
-        replyRepository = replyRepository
+        replyRepository = replyRepository,
+        suggestionRepository = suggestionRepository,
+        repostRepository = repostRepository
     )
 
     private val _uiState = MutableStateFlow(PostDetailUiState())
@@ -347,47 +346,24 @@ internal class PostDetailViewModel internal constructor(
         }
     }
 
-    private val _replyPickerState = MutableStateFlow(ReplyPickerState())
-    val replyPickerState: StateFlow<ReplyPickerState> = _replyPickerState.asStateFlow()
-    private var pickerJob: Job? = null
-    private var pickerToken = 0
+    private val picker = ComposerPickerController(viewModelScope) { kind, query ->
+        suggestionRepository.suggestions(kind, query)
+    }
+
+    /** `@` / `#` 选择器状态；只有选择器自己收集。 */
+    val replyPickerState: StateFlow<ComposerPickerState> = picker.state
+
     private val replyAttachments = mutableMapOf<Long?, ReplyAttachment>()
 
     fun openReplyPicker(kind: ReplyPickerKind) {
+        // 选图会话随之作废：面板开合期间选中的图片不能落到旧的回复目标上
         composerRevision++
-        _replyPickerState.value = ReplyPickerState(kind = kind)
-        searchReplyPicker("")
+        picker.open(kind)
     }
 
-    fun closeReplyPicker() {
-        pickerToken++
-        pickerJob?.cancel()
-        _replyPickerState.value = ReplyPickerState()
-    }
+    fun closeReplyPicker() = picker.dismiss()
 
-    fun searchReplyPicker(query: String) {
-        val kind = _replyPickerState.value.kind ?: return
-        val token = ++pickerToken
-        pickerJob?.cancel()
-        _replyPickerState.update { it.copy(query = query, loading = true, suggestions = emptyList(), error = null) }
-        pickerJob = viewModelScope.launch {
-            try {
-                if (query.isNotBlank()) delay(250)
-                val result = replyRepository.suggestions(kind, query)
-                currentCoroutineContext().ensureActive()
-                if (token != pickerToken) return@launch
-                when (result) {
-                    is ApiResult.Success -> _replyPickerState.update { it.copy(loading = false, suggestions = result.data) }
-                    is ApiResult.Error -> _replyPickerState.update { it.copy(loading = false, error = result.message) }
-                    ApiResult.Loading -> _replyPickerState.update { it.copy(loading = false) }
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                if (token == pickerToken) _replyPickerState.update { it.copy(loading = false, error = "加载失败，请重试") }
-            }
-        }
-    }
+    fun searchReplyPicker(query: String) = picker.updateQuery(query)
 
     fun beginReplyImageSelection(): Int = ++composerRevision
 
@@ -453,6 +429,17 @@ internal class PostDetailViewModel internal constructor(
                     if (started) loadComments()
                 }
                 replySession = session
+            }
+        }
+        // 转发成功后刷新「转发」分栏：转发面板挂在导航根，正文页只能通过仓库事件得知。
+        // 不在此分栏时不打扰当前内容，等用户切回来时由 selectTab 自行加载。
+        repostRepository?.let { repository ->
+            viewModelScope.launch {
+                repository.reposted.collect { id ->
+                    if (id == targetId() && _uiState.value.selectedTab == DetailSubTab.REPOSTS) {
+                        loadReposts()
+                    }
+                }
             }
         }
     }

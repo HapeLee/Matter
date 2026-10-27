@@ -35,7 +35,20 @@
 
 `PostDetailViewModelTest` 覆盖目标 ID、独立草稿、重复提交、失败重试、慢响应与列表交错、发送期间编辑、关闭重开、取消和账号隔离。`ReplyApiTest` 用 MockEngine 检查移动网页版请求的端点、表单编码、目标参数和成功响应缺少评论对象的处理，并检查上传 bytes / CRC32 及网页附图评论的 XSRF 与参数。补充单测覆盖上传后发布失败重试和旧搜索响应隔离。
 
-本次没有升级依赖或新增平台。MockEngine 验证的是请求构造及本地状态处理，不代表已使用真实微博账号完成服务端发布验证；Android 设备上的键盘、焦点、滚动及视觉效果仍需实机验证。实机测试由用户执行；验证码处理和同步转发尚未接入，当前不启用相应操作入口。
+本次没有升级依赖或新增平台。MockEngine 验证的是请求构造及本地状态处理，不代表已使用真实微博账号完成服务端发布验证；Android 设备上的键盘、焦点、滚动及视觉效果仍需实机验证。实机测试由用户执行。
+
+转发已接入：信息流卡片的「转发」按钮与正文页底部悬浮栏的转发图标都会唤起导航根统一挂载的转发面板（`ui/composer/repost/`），写入走 `weibo.com/ajax/statuses/normal_repost`（2026-10-28 网页端抓包核实，路径不是 `repost`；表单为 `id`、`comment`、`pic_id`、`is_repost=0`、`comment_ori=0`、`is_comment`、`visible`、`share_id`），与评论共用 `WeiboWriteSession` 的串行提交与频控冷却。
+
+转发面板的输入能力：
+
+- `@` 用户 / `#` 话题：与评论、发微博共用 `ui/components/composer/ComposerPickerSheet` 与 `ComposerPickerController`，建议搜索走 `SuggestionRepository`；
+- 配图一张（与评论一致）：复用 `PublishRepository` 的上传通道，提交时才上传，失败保留已上传 pid，重试不重复上传；`pic_id` 与发微博同用一份 JSON 数组编码并带 `need_transcode=1`；
+- 「同时评论此微博」→ `is_comment=1`；分享范围（公开 / 好友圈 / 仅自己可见）→ `visible=0/6/1`；
+- 转发一条**转发**时，正文自动带上 `//@上一层用户:他的转发语`（对方没写字时用「转发微博」），光标落在开头，用户自己的话写在链前；该文案是可编辑的正文而不是提交时偷偷拼接。
+
+`is_comment` / `visible` / `pic_id` 三组字段是按网页端表单补齐的，尚未逐项实机抓包核对；服务端拒绝时会把原话写进 logcat。验证码处理仍未接入。
+
+发微博（多图 + 纯文本）是另一条独立写入链路，见 [post-composer.md](post-composer.md)。
 
 ## 内置表情资源
 

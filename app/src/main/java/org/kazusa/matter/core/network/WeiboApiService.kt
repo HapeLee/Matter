@@ -22,12 +22,15 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.core.network.KtorClientFactory.bodyText
 import org.kazusa.matter.core.network.KtorClientFactory.decodeBody
@@ -49,6 +52,7 @@ import org.kazusa.matter.data.model.RepostsDataDto
 import org.kazusa.matter.data.model.SearchPageResult
 import org.kazusa.matter.data.model.SearchResultItem
 import org.kazusa.matter.data.model.SearchResultKind
+import org.kazusa.matter.data.model.StatusVisibility
 import org.kazusa.matter.data.model.TimelineResponse
 import org.kazusa.matter.data.model.UserAlbum
 import org.kazusa.matter.data.model.UserPostsPage
@@ -1603,6 +1607,166 @@ class WeiboApiService(
     }
 
     /**
+     * 转发微博。
+     *
+     * 端点: `POST https://weibo.com/ajax/statuses/normal_repost`（2026-10 网页端抓包核实：
+     * 路径是 `normal_repost`，不是 `repost`），**表单**，`Referer` 用网页首页，凭据用网页域 XSRF。
+     *
+     * 字段（括号内为网页端抓包核实过的值）：
+     * `id`（被转发微博 id）、`comment`（转发语，空串＝直接转发，网页端确实这么发）、
+     * `is_repost=0`、`comment_ori=0`、`share_id`（空串）；
+     * `is_comment`（`1`＝转发的同时评论给原作者，即「同时评论此微博」）、
+     * `visible`（分享范围，见 [StatusVisibility]）、
+     * `pic_id`（带图时与 [publishStatus] 同为 JSON 数组字符串，并额外带 `need_transcode=1`；
+     * 不带图时发空串）。
+     *
+     * `is_comment` / `visible` / `pic_id` 是 2026-10 之后按网页端表单补齐的，
+     * 尚未逐项实机抓包核对，失败时把服务端原话留在 logcat 便于对照。
+     *
+     * 网页端还会带 `fp`（浏览器指纹），App 侧无法生成，评论等写接口不带也正常，先不伪造。
+     * 成功响应是 `{"ok":1,"data":{"statuses":{...}}}`，可直接走 [readWriteResponse]。
+     */
+    suspend fun repost(
+        id: String,
+        text: String,
+        pictures: List<StatusPicture> = emptyList(),
+        alsoComment: Boolean = false,
+        visibility: StatusVisibility = StatusVisibility.PUBLIC,
+        cookie: String = ""
+    ): ApiResult<Unit> {
+        if (id.isBlank()) return ApiResult.Error(message = "转发目标无效")
+        return try {
+            val effectiveCookie = requireSessionCookie(cookie)
+            if (effectiveCookie.isBlank()) {
+                return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
+            }
+            writeSession.execute(cookie = effectiveCookie, action = "转发") { credentials ->
+                val response = client.weiboPostForm(
+                    endpoint = webEndpoint(
+                        path = "/ajax/statuses/normal_repost",
+                        auth = WeiboAuth.Write(credentials),
+                        referer = "https://weibo.com/"
+                    ),
+                    form = parameters {
+                        append("id", id)
+                        append("comment", text.trim())
+                        append("pic_id", if (pictures.isEmpty()) "" else pictureJsonOf(pictures))
+                        if (pictures.isNotEmpty()) append("need_transcode", "1")
+                        append("is_repost", "0")
+                        append("comment_ori", "0")
+                        append("is_comment", if (alsoComment) "1" else "0")
+                        append("visible", visibility.value)
+                        append("share_id", "")
+                    }
+                )
+                readWriteResponse(response, failureMessage = "转发失败", success = Unit).also { result ->
+                    // 端点字段尚未实机核实：失败时把服务端原话留在 logcat，方便对照网页端请求排查
+                    if (result is ApiResult.Error) {
+                        android.util.Log.w(
+                            "WeiboApi",
+                            "repost id=$id failed: code=${result.code} msg=${result.message}"
+                        )
+                    }
+                }
+            }
+        } catch (e: WriteGateException) {
+            ApiResult.Error(code = e.code, message = e.message.orEmpty())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.e("WeiboApi", "repost failed", e)
+            ApiResult.Error(message = e.localizedMessage ?: "转发异常", throwable = e)
+        }
+    }
+
+    /**
+     * 发微博。
+     *
+     * 端点: `POST https://weibo.com/ajax/statuses/update`（2026-10 网页端抓包核实），
+     * **表单**，`Referer` 用网页首页，凭据用网页域 XSRF。
+     *
+     * 字段（同一次抓包核实）：
+     * - `content`、`visible=0`、`share_id`/`vote`/`media` 空串；
+     * - 带图时 `pic_id` 是 **JSON 数组字符串**，形如
+     *   `[{"type":"image/jpeg","pid":"008ve..."},{"type":"image/webp","pid":"..."}]`，
+     *   同时带 `need_transcode=1`；不带图时网页端压根不发这两个字段。
+     *
+     * 成功响应**没有 `ok` 字段**，只有 `{"data":{...新微博...}}`，
+     * 因此不能用 [readWriteResponse]（它按 `ok==1` 判定），见 [readPublishResponse]。
+     * 网页端另带 `fp`（浏览器指纹），App 无法生成，先不伪造。
+     */
+    suspend fun publishStatus(
+        text: String,
+        pictures: List<StatusPicture> = emptyList(),
+        cookie: String = ""
+    ): ApiResult<Unit> {
+        val content = text.trim()
+        if (content.isEmpty() && pictures.isEmpty()) {
+            return ApiResult.Error(message = "微博内容不能为空")
+        }
+        return try {
+            val effectiveCookie = requireSessionCookie(cookie)
+            if (effectiveCookie.isBlank()) {
+                return ApiResult.Error(code = 401, message = "未登录或登录已失效，请先登录")
+            }
+            val pictureJson = pictureJsonOf(pictures)
+            writeSession.execute(cookie = effectiveCookie, action = "发布") { credentials ->
+                val response = client.weiboPostForm(
+                    endpoint = webEndpoint(
+                        path = "/ajax/statuses/update",
+                        auth = WeiboAuth.Write(credentials),
+                        referer = "https://weibo.com/"
+                    ),
+                    form = parameters {
+                        append("content", content)
+                        append("visible", "0")
+                        append("share_id", "")
+                        append("vote", "")
+                        append("media", "")
+                        if (pictures.isNotEmpty()) {
+                            append("pic_id", pictureJson)
+                            append("need_transcode", "1")
+                        }
+                    }
+                )
+                readPublishResponse(response).also { result ->
+                    // 失败原话进 logcat，便于和网页端抓到的请求对齐
+                    if (result is ApiResult.Error) {
+                        android.util.Log.w(
+                            "WeiboApi",
+                            "publishStatus pictures=${pictures.size} failed: " +
+                                "code=${result.code} msg=${result.message}"
+                        )
+                    }
+                }
+            }
+        } catch (e: WriteGateException) {
+            ApiResult.Error(code = e.code, message = e.message.orEmpty())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.e("WeiboApi", "publishStatus failed", e)
+            ApiResult.Error(message = e.localizedMessage ?: "发布异常", throwable = e)
+        }
+    }
+
+    /**
+     * 网页写接口的 `pic_id` 编码：JSON 数组字符串，逐项带 MIME（见 [StatusPicture]）。
+     *
+     * 发微博与转发带图共用同一份编码；两者的 `pic_id` 字段在网页端是同一个格式。
+     */
+    private fun pictureJsonOf(pictures: List<StatusPicture>): String = buildJsonArray {
+        pictures.forEach { picture ->
+            add(
+                buildJsonObject {
+                    put("type", picture.mimeType)
+                    put("pid", picture.pid)
+                }
+            )
+        }
+    }.toString()
+
+    /**
      * 网页域（weibo.com/ajax）写操作的凭据：点赞、关注/取关、删除等网页端点用网页域
      * 自己的 XSRF Cookie，不混用移动端 st。按来源 Cookie 缓存复用（见
      * [cachedDesktopCredentials]）。
@@ -1726,6 +1890,21 @@ class WeiboApiService(
         val respJson = response.jsonBody().jsonObject
         if (writeOkFlag(respJson) == 1) return ApiResult.Success(success)
         return writeJsonError(respJson, failureMessage)
+    }
+
+    /**
+     * 发表接口的响应：成功时**没有 `ok` 字段**，只有 `data`（新微博对象）。
+     *
+     * 按 `ok==1` 判定会把每一次成功都当失败，这里改成「有 data 或有 ok=1」即为成功；
+     * 失败仍然交给 [writeJsonError]（频控收敛、凭据失效处理与其它写接口一致）。
+     */
+    private suspend fun readPublishResponse(response: HttpResponse): ApiResult<Unit> {
+        writeHttpError(response)?.let { return it }
+        val respJson = response.jsonBody().jsonObject
+        if (respJson["data"] is JsonObject || writeOkFlag(respJson) == 1) {
+            return ApiResult.Success(Unit)
+        }
+        return writeJsonError(respJson, "发布失败")
     }
 
     /** 与 [readWriteResponse] 同一套失败处理，成功时带回 `data` 里新建的评论（可能缺省）。 */

@@ -2,8 +2,14 @@ package org.kazusa.matter.ui.navigation
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -15,6 +21,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import org.koin.compose.koinInject
 import org.koin.compose.getKoin
 import org.koin.compose.viewmodel.koinViewModel
@@ -43,12 +50,21 @@ import org.kazusa.matter.data.repository.GroupRepository
 import org.kazusa.matter.ui.components.composer.OnlineEmojiViewModel
 import org.kazusa.matter.core.util.LocalOnlineEmojiImages
 import org.kazusa.matter.data.repository.LikeRepository
+import org.kazusa.matter.data.repository.PublishRepository
+import org.kazusa.matter.data.repository.RepostRepository
+import org.kazusa.matter.ui.composer.post.PostComposerScreen
+import org.kazusa.matter.ui.composer.repost.RepostComposerViewModel
+import org.kazusa.matter.ui.composer.repost.RepostSheet
+import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.components.LocalCommentLikeStates
 import org.kazusa.matter.ui.components.LocalFavoritesRepository
 import org.kazusa.matter.ui.components.LocalLikeRepository
 import org.kazusa.matter.ui.components.LocalPostLikeStates
+import org.kazusa.matter.ui.components.LocalRepostRequest
+import org.kazusa.matter.ui.components.LocalRepostStates
 import org.kazusa.matter.ui.components.LocalUserActionScope
 import org.kazusa.matter.ui.components.LocalWeiboApiService
+import org.kazusa.matter.ui.components.MatterSnackbar
 import org.kazusa.matter.ui.saved.SavedPostsScreen
 import org.kazusa.matter.ui.saved.SavedPostsViewModel
 import org.kazusa.matter.data.local.BrowsingCategory
@@ -96,6 +112,15 @@ fun MatterNavGraph() {
     val groupRepository = koinInject<GroupRepository>()
     val onlineEmojiViewModel: OnlineEmojiViewModel = koinViewModel()
     val onlineEmojiImages by onlineEmojiViewModel.images.collectAsStateWithLifecycle()
+    // 转发面板挂在导航根：卡片与正文页共用一份，列表项不需要各自持有 sheet
+    val repostRepository = koinInject<RepostRepository>()
+    val repostViewModel: RepostComposerViewModel = koinViewModel()
+    val repostStates by repostRepository.postStates.collectAsStateWithLifecycle()
+    val publishRepository = koinInject<PublishRepository>()
+    val rootSnackbar = remember { SnackbarHostState() }
+    val requestRepost: (WeiboStatusDto) -> Unit = remember(repostViewModel) {
+        { post -> repostViewModel.open(post) }
+    }
     val koin = getKoin()
     // 点赞状态在仓库里是只读 StateFlow；这里收集一次下发给列表项，避免每张卡片各自订阅
     val postLikeStates by likeRepository.postStates.collectAsStateWithLifecycle()
@@ -110,6 +135,28 @@ fun MatterNavGraph() {
         followRepository.clear()
         PostDetailCache.clear()
         groupRepository.clear()
+        repostRepository.clear()
+        repostViewModel.reset()
+    }
+
+    // 转发成功 / 失败的一次性提示：面板可能从任意页面唤起，统一在根上出示
+    LaunchedEffect(repostViewModel) {
+        repostViewModel.messages.collect { message ->
+            rootSnackbar.currentSnackbarData?.dismiss()
+            rootSnackbar.showSnackbar(message = message, duration = SnackbarDuration.Short)
+        }
+    }
+
+    // 发微博成功后编辑页会立即返回，提示留给根：用户此时可能已经回到任意标签页。
+    // 仓库给的是只增计数，根这一层始终在组合中，按「比已处理的大」提示一次即可。
+    val publishedCount by publishRepository.publishedCount.collectAsStateWithLifecycle()
+    var handledPublishCount by remember { mutableLongStateOf(publishedCount) }
+    LaunchedEffect(publishedCount) {
+        if (publishedCount > handledPublishCount) {
+            handledPublishCount = publishedCount
+            rootSnackbar.currentSnackbarData?.dismiss()
+            rootSnackbar.showSnackbar(message = "发布成功", duration = SnackbarDuration.Short)
+        }
     }
 
     // 状态加载中保护，防止 DataStore 首次空流导致欢迎页闪现
@@ -198,6 +245,8 @@ fun MatterNavGraph() {
         LocalLikeRepository provides likeRepository,
         LocalPostLikeStates provides postLikeStates,
         LocalCommentLikeStates provides commentLikeStates,
+        LocalRepostStates provides repostStates,
+        LocalRepostRequest provides requestRepost,
         LocalUserActionScope provides coroutineScope,
         LocalWeiboApiService provides apiService
     ) {
@@ -290,6 +339,9 @@ fun MatterNavGraph() {
                                                     },
                                                     onNavigateToMessages = {
                                                         navigate(Screen.Messages)
+                                                    },
+                                                    onNavigateToComposer = {
+                                                        navigate(Screen.PostComposer)
                                                     },
                                                     onUserClick = { uid ->
                                                         if (uid != null) {
@@ -644,6 +696,13 @@ fun MatterNavGraph() {
                                             )
                                         }
 
+                                        Screen.PostComposer -> {
+                                            PostComposerScreen(
+                                                onDismiss = { navigateBack() },
+                                                onPublished = { navigateBack() }
+                                            )
+                                        }
+
                                         is Screen.PostDetail -> {
                                             run {
                                                 PostDetailScreen(
@@ -716,6 +775,40 @@ fun MatterNavGraph() {
                 morphState = morphState,
                 mediaPreferences = mediaPreferences
             )
+
+            // 转发面板（任意页面的卡片 / 正文页悬浮栏都可唤起）与它的一次性提示
+            RepostSheet(
+                state = repostViewModel.state,
+                pickerState = repostViewModel.pickerState,
+                onlineEmojiState = onlineEmojiViewModel.state,
+                onOpenOnlineEmojis = onlineEmojiViewModel::openCatalog,
+                onRefreshOnlineEmojis = onlineEmojiViewModel::refreshCatalog,
+                onInstallEmojiPackage = onlineEmojiViewModel::install,
+                onDismiss = repostViewModel::dismiss,
+                onDraftChange = repostViewModel::updateDraft,
+                onAddImage = repostViewModel::addImage,
+                onRemoveImage = repostViewModel::removeImage,
+                onAlsoCommentChange = repostViewModel::setAlsoComment,
+                onVisibilityChange = repostViewModel::setVisibility,
+                onOpenPicker = repostViewModel::openPicker,
+                onPickerQueryChange = repostViewModel::updatePickerQuery,
+                onPickerDismiss = repostViewModel::dismissPicker,
+                onSubmit = repostViewModel::submit
+            )
+            SnackbarHost(
+                hostState = rootSnackbar,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 16.dp)
+            ) { data ->
+                MatterSnackbar(modifier = Modifier.padding(horizontal = 24.dp)) {
+                    Text(
+                        text = data.visuals.message,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
         }
     }
 }
