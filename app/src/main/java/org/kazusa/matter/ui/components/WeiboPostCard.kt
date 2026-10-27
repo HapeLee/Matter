@@ -8,10 +8,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -25,10 +23,8 @@ import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
@@ -44,19 +40,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import org.kazusa.matter.core.util.TimeUtils
 import org.kazusa.matter.core.util.LocalOnlineEmojiImages
 import org.kazusa.matter.core.util.WeiboTextFormatter
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.repository.LikeState
+import org.kazusa.matter.data.repository.repostKeyOf
 import org.kazusa.matter.ui.media.morph.LocalImageMorphState
 import androidx.compose.ui.graphics.RectangleShape
 import org.kazusa.matter.ui.detail.PostDetailCache
@@ -372,11 +366,17 @@ private fun PostCardContent(
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // 转发：计数读共享仓库（与正文页同一份），点击由导航根的面板承接
+            val repostState = LocalRepostStates.current[repostKeyOf(post)]
+            val requestRepost = LocalRepostRequest.current
             WeiboActionButton(
                 icon = Icons.Outlined.Repeat,
-                count = post.repostsCount,
+                count = repostState?.count?.toString() ?: post.repostsCount,
                 label = "转发",
-                onClick = {}
+                busy = repostState?.pending == true,
+                onClick = {
+                    if (morphState?.isPresent != true) requestRepost(post)
+                }
             )
             VerticalDivider(
                 modifier = Modifier.height(8.dp),

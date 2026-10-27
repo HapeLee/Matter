@@ -1,4 +1,4 @@
-package org.kazusa.matter.ui.detail
+package org.kazusa.matter.ui.components.composer
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -24,15 +24,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.rememberBottomSheetState
-import androidx.compose.material3.SheetValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,17 +60,20 @@ import org.kazusa.matter.ui.components.EmptyMessage
 private const val PickerSheetHeightFraction = 0.86f
 
 /**
- * 回复面板里的 @ 用户 / 话题选择器。
+ * 评论、发微博与转发共用的 `@` 用户 / 话题选择器。
  *
  * - Sheet 只保留 Hidden / Expanded 两个锚点：拖动不会停在半开位置，打开直达顶部（参考 legado 的 AppModalBottomSheet）；
  * - 搜索默认收起，由标题右侧按钮展开，展开时才请求焦点，收起时清空搜索词并收回键盘；
  * - 默认区小标题（我的关注 / 热门话题）与面板标题垂直居中成组、紧跟其正下方，进入搜索后收起；
  * - 建议行与占位共用圆角行样式，加载 / 出错 / 为空统一用 [EmptyMessage] 占位，切换自带过渡动画。
+ *
+ * 谁使用谁负责插入文本：选择事件只回传 [ReplySuggestion]，评论、发微博与转发各自决定
+ * 插入位置与包裹格式。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ReplyComposerPickerSheet(
-    state: ReplyPickerState,
+internal fun ComposerPickerSheet(
+    state: ComposerPickerState,
     onQueryChange: (String) -> Unit,
     onDismiss: () -> Unit,
     onSelected: (ReplySuggestion) -> Unit
@@ -158,12 +161,12 @@ internal fun ReplyComposerPickerSheet(
             ) {
                 val customTopic = state.query.trim().trim('#').takeIf { !mention && it.isNotBlank() && !it.contains('\n') }
                 if (customTopic != null && state.suggestions.none { it.name.trim('#') == customTopic }) item("custom-topic") {
-                    ReplySuggestionRow(ReplySuggestion(customTopic, "#$customTopic#", "使用此话题"), modifier = Modifier.animateItem()) {
+                    SuggestionRow(ReplySuggestion(customTopic, "#$customTopic#", "使用此话题"), modifier = Modifier.animateItem()) {
                         onSelected(ReplySuggestion(customTopic, customTopic))
                     }
                 }
                 items(state.suggestions, key = { it.id }) { suggestion ->
-                    ReplySuggestionRow(
+                    SuggestionRow(
                         suggestion.copy(name = if (mention) suggestion.name else "#${suggestion.name.trim('#')}#"),
                         modifier = Modifier.animateItem()
                     ) {
@@ -257,7 +260,7 @@ private fun PickerSearchField(
 
 /** 单条建议：圆角填充块 + 行内边距，避免点击波纹顶到屏幕边缘；头像圆形裁剪。 */
 @Composable
-private fun ReplySuggestionRow(
+private fun SuggestionRow(
     suggestion: ReplySuggestion,
     modifier: Modifier = Modifier,
     onClick: () -> Unit

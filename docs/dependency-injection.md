@@ -17,6 +17,8 @@
 
 回复发布通过应用级 `ReplyRepository` 注入正文页 ViewModel。仓库观察当前会话，每次写入固定账号凭据；ViewModel 管理发送任务、目标草稿及结果身份，切账号取消旧任务并清理草稿。`ViewModelInjectionTest` 同时解析正文页生产依赖图。详见 [回复逻辑对照与验证](reply-composer.md)。
 
-图片读取能力以 `ReplyImageReader` 注入 `ReplyRepository`，Android 实现为 `AndroidReplyImageReader`；图片上传、用户 / 话题搜索同样由仓库提供，回复输入面板只派发事件。
+图片读取能力以 `ReplyImageReader` 注入 `ReplyRepository`，Android 实现为 `AndroidReplyImageReader`；图片上传同样由仓库提供，回复输入面板只派发事件。
+
+用户 / 话题建议由独立的 `SuggestionRepository` 提供：评论、发微博、转发三个输入框共用同一份搜索口径，它不属于任何一条写入语义，因此不挂在 `ReplyRepository` 上。
 
 在线表情的 `EmojiRepository` 为应用级单例，注册独立只读协议 `OnlineEmojiSource` 和平台存储 `EmojiPackageStore`。导航根与详情条目各自持有 `OnlineEmojiViewModel`，共享已安装包与只读图片表；ViewModel 初始化只恢复缓存，打开表情面板触发基础与扩展目录刷新及热门包更新，选择扩展 tab 触发按需下载。

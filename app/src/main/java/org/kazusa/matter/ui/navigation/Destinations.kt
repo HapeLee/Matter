@@ -31,6 +31,10 @@ sealed interface Screen : NavKey {
         val scrollToComments: Boolean = false
     ) : Screen
 
+    /** 发微博（全屏编辑器） */
+    @Serializable
+    data object PostComposer : Screen
+
     @Serializable
     data class ImageViewer(
         val initialIndex: Int = 0,

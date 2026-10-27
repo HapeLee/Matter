@@ -49,6 +49,11 @@ import org.kazusa.matter.ui.components.composer.OnlineEmojiViewModel
 import java.io.File
 import org.kazusa.matter.data.repository.ReplyRepository
 import org.kazusa.matter.data.repository.LikeRepository
+import org.kazusa.matter.data.repository.RepostRepository
+import org.kazusa.matter.data.repository.SuggestionRepository
+import org.kazusa.matter.data.repository.PublishRepository
+import org.kazusa.matter.ui.composer.post.PostComposerViewModel
+import org.kazusa.matter.ui.composer.repost.RepostComposerViewModel
 import org.kazusa.matter.ui.detail.PostDetailViewModel
 import org.kazusa.matter.ui.group.GroupViewModel
 import org.kazusa.matter.ui.history.BrowsingHistoryViewModel
@@ -96,8 +101,14 @@ val dataModule = module {
     single { SearchHistoryRepository(get(), get()) }
     // 点赞的唯一事实来源：跨页面共享状态 + 取消/失败回滚都由它负责，换账号时由导航根清空
     single { LikeRepository(get<WeiboApiService>()) }
+    // 转发的唯一事实来源：卡片 / 正文的转发计数与「转发成功」事件都由它统一维护
+    single { RepostRepository(get<WeiboApiService>()) }
     single<ReplyImageReader> { AndroidReplyImageReader(androidContext()) }
     single { ReplyRepository(get<WeiboApiService>(), get<AuthPreferences>(), get<ReplyImageReader>()) }
+    // 输入框的 @ / # 建议：评论、发微博、转发三个输入框共用同一份搜索口径
+    single { SuggestionRepository(get<WeiboApiService>(), get<AuthPreferences>()) }
+    // 发微博的数据入口：固定账号 + 图片上传 + 提交，成功后广播「已发布」
+    single { PublishRepository(get<WeiboApiService>(), get<AuthPreferences>(), get<ReplyImageReader>()) }
     // 关注关系的唯一事实来源：用户列表与博主主页读同一份状态，换账号时同样由导航根清空
     single { FollowRepository(get<UserRepository>()) }
 
@@ -151,6 +162,10 @@ val viewModelModule = module {
             savedStateHandle = parameters.get<SavedStateHandle>()
         )
     }
+    // 转发面板挂在导航根（卡片与正文页共用一份）；草稿与提交状态随进程存活
+    viewModel { RepostComposerViewModel(get(), get(), get()) }
+    // 发微博：编辑器是独立 NavEntry，离开即销毁草稿
+    viewModel { PostComposerViewModel(get(), get()) }
     // 正文页：正文 / 评论 / 转发 / 赞四个分区的业务状态与请求生命周期
     viewModel { parameters ->
         PostDetailViewModel(
@@ -158,7 +173,9 @@ val viewModelModule = module {
             apiService = get(),
             historyRepository = get(),
             likeRepository = get(),
-            replyRepository = get()
+            replyRepository = get(),
+            suggestionRepository = get(),
+            repostRepository = get()
         )
     }
     // 「我的微博」：列表与分页由 ViewModel 持有，失败可重试

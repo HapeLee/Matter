@@ -42,8 +42,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -57,13 +55,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Sort
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material.icons.outlined.Verified
 import androidx.compose.material.icons.outlined.Whatshot
@@ -72,7 +69,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -96,11 +92,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import org.kazusa.matter.core.util.TimeUtils
 import org.kazusa.matter.core.util.LocalOnlineEmojiImages
@@ -116,18 +110,18 @@ import org.kazusa.matter.data.model.WeiboCommentDto
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.components.composer.OnlineEmojiViewModel
 import org.kazusa.matter.ui.components.AuthorBadgeTag
-import org.kazusa.matter.ui.components.BloggerSuffixTag
 import org.kazusa.matter.ui.components.EmptyMessage
 import org.kazusa.matter.ui.components.StatusMediaGrid
 import org.kazusa.matter.ui.components.videoTitleFallback
 import org.kazusa.matter.data.repository.LikeState
+import org.kazusa.matter.data.repository.repostKeyOf
 import org.kazusa.matter.ui.components.LocalLikeRepository
 import org.kazusa.matter.ui.components.LocalPostLikeStates
+import org.kazusa.matter.ui.components.LocalRepostRequest
+import org.kazusa.matter.ui.components.LocalRepostStates
 import org.kazusa.matter.ui.components.MatterSnackbar
-import org.kazusa.matter.ui.components.UserAvatarWithBadge
 import org.kazusa.matter.ui.components.rememberSharedAvatarRequest
 import org.kazusa.matter.ui.components.UserVerifyBadge
-import org.kazusa.matter.ui.components.UserVipBadge
 import org.kazusa.matter.ui.components.WeiboVerifyType
 import org.kazusa.matter.ui.components.getVerifyType
 import coil3.compose.AsyncImage
@@ -138,18 +132,12 @@ import org.kazusa.matter.ui.components.ImmersiveTopBar
 import org.kazusa.matter.ui.components.LocalSnackbarHostState
 import org.kazusa.matter.ui.components.TopBarActionButton
 import org.kazusa.matter.ui.components.TopBarTitleText
-import org.kazusa.matter.ui.components.TopBarTokens
 import org.kazusa.matter.ui.components.WeiboActionButton
-import org.kazusa.matter.ui.effect.liquid.LiquidGlassCapsule
-import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
-import org.kazusa.matter.ui.effect.liquid.LiquidGlassIconButton
-import org.kazusa.matter.ui.effect.liquid.liquidTextShadow
 import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 
 import org.kazusa.matter.data.model.WeiboAttitudeDto
-import org.kazusa.matter.ui.effect.ContentFadeState
 import org.kazusa.matter.ui.effect.contentFade
 import org.kazusa.matter.ui.effect.rememberContentFadeState
 
@@ -296,6 +284,16 @@ fun PostDetailScreen(
                     )
                 },
                 actions = { scroll ->
+                    // 分享从底部悬浮栏移到顶栏右侧；删除作为不可逆操作排在最后
+                    if (post != null) {
+                        TopBarActionButton(
+                            imageVector = Icons.Outlined.Share,
+                            contentDescription = "分享当前微博链接",
+                            scroll = scroll,
+                            backdrop = backdrop,
+                            onClick = { sharePost(context, post, postId) }
+                        )
+                    }
                     if (canDeletePost) {
                         TopBarActionButton(
                             imageVector = Icons.Outlined.Delete,
@@ -548,16 +546,17 @@ fun PostDetailScreen(
                 }
             }
 
-            // 底部悬浮操作栏：写评论 + 评论 / 赞 / 收藏 / 分享。
+            // 底部悬浮操作栏：写评论 + 赞 / 收藏 / 转发（分享已移到顶栏）。
             // 正文还没到手时（加载 / 失败）不出现，避免对着一屏占位提示操作。
             if (post != null) {
+                val requestRepost = LocalRepostRequest.current
                 PostDetailFloatingBar(
                     post = post,
                     isLiked = isLiked,
                     backdrop = backdrop,
                     onWriteComment = viewModel::openReplyComposer,
                     onLikeClick = viewModel::toggleLike,
-                    onShareClick = { sharePost(context, post, postId) },
+                    onRepostClick = { requestRepost(post) },
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
             }
@@ -615,7 +614,7 @@ fun PostDetailScreen(
 /**
  * 分享当前微博：系统分享面板，正文摘录 + 链接。
  *
- * 入口已从顶栏移到正文页底部悬浮操作栏，文案与链接拼装保持原样。
+ * 入口在正文页顶栏右侧；底部悬浮栏改放转发（与当前微博强相关的写操作）。
  */
 private fun sharePost(context: Context, post: WeiboStatusDto, fallbackPostId: String) {
     val postIdToUse = post.idStr ?: post.mid ?: post.id?.toString() ?: fallbackPostId
@@ -909,10 +908,13 @@ private fun PostDetailBody(
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // 整行仍然切到「转发」分栏；计数读共享仓库，转发面板从底部悬浮栏进入
+            val repostState = LocalRepostStates.current[repostKeyOf(post)]
             WeiboActionButton(
                 icon = Icons.Outlined.Repeat,
-                count = post.repostsCount,
+                count = repostState?.count?.toString() ?: post.repostsCount,
                 label = "转发",
+                busy = repostState?.pending == true,
                 emphasized = selectedTab == DetailSubTab.REPOSTS,
                 onClick = { onTabSelect(DetailSubTab.REPOSTS) }
             )
