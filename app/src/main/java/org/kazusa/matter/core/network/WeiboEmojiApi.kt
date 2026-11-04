@@ -19,7 +19,7 @@ interface OnlineEmojiSource {
     suspend fun download(pack: OnlineEmojiPackage): ApiResult<ByteArray>
 }
 
-/** 移动客户端同样使用的只读官方目录；不需要发送账号 Cookie 或客户端签名。 */
+/** 只读的官方表情目录；不需要发送账号 Cookie 或客户端签名。 */
 class WeiboEmojiApi(private val client: HttpClient) : OnlineEmojiSource {
     override suspend fun catalog(): ApiResult<List<InstalledEmojiPackage>> = request {
         val response = client.get("https://api.weibo.com/2/emotions.json") { parameter("source", "7501641714") }

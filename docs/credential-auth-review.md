@@ -1,7 +1,6 @@
 # Matter 用户凭据保存与微博 API 鉴权 —— 安全评估报告
 
 评估对象：`d:/Project/Matter`（`org.kazusa.matter`，Android + Compose，微博第三方客户端）
-对照样本：`移动客户端` 反编译产物（`移动客户端` v1.1.6，复刻微博官方私有协议）
 评估日期：2026-10-24
 文档状态：**调研完成，未修改任何业务代码**（本轮只读）
 
@@ -131,7 +130,7 @@ Android 实现在 `core/platform/` 下用 `CookieManager.getInstance().removeAll
 
 ### 硬约束（不要做）
 
-- 不要引入 移动客户端的 `api.weibo.cn/2/` native 签名方案（`s`/`cum`/`X-Shanhai-Pass`），Matter 的 H5 路线是刻意选择。
+- 不要引入 `api.weibo.cn/2/` 的 native 签名方案（`s`/`cum`/`X-Shanhai-Pass`），Matter 的 H5 路线是刻意选择。
 - 不要为「安全」把 `WeiboApiService` 改造成 OkHttp 拦截器技术栈；现有 Ktor + OkHttp 引擎保留，加 Ktor plugin 即可。
 - 不要在 `core/datastore` 直接 import `android.webkit.*` / `android.security.*`，全部走接口（KMP 规范）。
 - 不要批量补 `@Stable` / `@Immutable`，不要改 ViewModel 的 Snapshot State 用法。
@@ -167,7 +166,7 @@ Matter 不走 OAuth、不持有 appkey，而是**直接持有微博网页端会�
 2. 登出与换号时 `CookieManager.getInstance().removeAllCookies { flush() }`。
 3. 删掉 `verifyConfig` 的响应预览日志、给 Ktor Logging 加 `BuildConfig.DEBUG` 判断。
 
-**不建议做的事**：不要为了「安全」去抄 移动客户端的 `api.weibo.cn/2/` 官方私有协议——它的鉴权依赖 `libSecShell.so` / `libwbutil.so` 里的 native 签名（`s` / `cum` / `X-Shanhai-Pass`），Matter 走 H5 路线是**正确且唯一可行**的选择（详见 §3.5）。
+**不建议做的事**：不要为了「安全」去接入 `api.weibo.cn/2/` 官方私有协议——它的鉴权依赖 `libSecShell.so` / `libwbutil.so` 里的 native 签名（`s` / `cum` / `X-Shanhai-Pass`），Matter 走 H5 路线是**正确且唯一可行**的选择。
 
 ---
 
@@ -411,35 +410,23 @@ class AuthPreferences(private val context: Context) {
 | web ajax | `ok: -100` / `X-Error-Code` 头 | 跳登录页 |
 | 官方私有 | `errno ∈ {21317, 21327, 21332, -100, 10006, 5011031072}`、`X-Auth-Gsid` 头 | 提示 + 重新登录 |
 
-移动客户端的实现（`defpackage/r3f.java:96-141`）对上述 errno 全部做了 switch，命中后弹「token 过期」并引导重登；`vbb.java:29-52` 是那个对话框。**没有静默 refresh**——因为微博官方链路根本没有 refresh_token（`s9f` 只有 `sut` + `gsid`）。
+上述 errno 命中后应提示「token 过期」并引导重登。**没有静默 refresh**——因为微博官方链路根本没有 refresh_token（只有 `sut` + `gsid`）。
 
 这条结论对 Matter 很重要：**"实现自动刷新 token" 是个伪需求**。H5 端能做的只有：
 1. 用现有 Cookie 周期性打 `/api/config` 探活；
 2. 失效后引导重新走 WebView 授权（拿到新 `SUB`）。
 
-### 3.5 移动客户端的可借鉴 / 不可借鉴清单
+### 3.5 凭据编排流程的改进方向
 
-**可借鉴（与协议无关的工程模式）**
+与协议无关的工程模式仍值得借鉴：
 
-| 移动客户端的做法 | 证据 | 对 Matter 的启示 |
-|---|---|---|
-| 鉴权集中在一个 OkHttp Interceptor | `defpackage/q6f.java:59-218` | 对应到 Ktor 就是一个 `createClient` 插件，消灭 40+ 处手写 Cookie |
-| 准备一个"裸 client"给非鉴权请求 | `bx7.java:162`（`new q6f(false,false,false)`） | 游客/公开接口应走独立 client，避免会话 Cookie 误带 |
-| `X-Validator` 取回 → 持久化 → 每请求回带 | `q6f.java:176-215`（MMKV `xvalidator`） | Matter 无此项（H5 端不需要），但「服务端下发的长期票据要留存并回带」这个模式值得记住 |
-| 登出清三处：DB 行 + `cache_at_user_<uid>` + `wb_ab_kv_<uid>`，再 `removeAllCookies` | `lj9.java:24-43`、`zge.java:15-50` | 直接对标 Matter 的 #3 缺陷 |
-| 登录后**先 `removeAllCookies` 再逐条重灌** | `zge.java:23-47` | 解决「WebView 残留旧账号」的标准做法 |
-| 换账号用 `sessionGeneration` 挡旧响应 | Matter 已有（`LikeRepository`） | 保持 |
+- 鉴权集中在 HTTP 客户端插件里，替代 40+ 处手写 Cookie。
+- 为非鉴权请求准备独立的裸 client，避免会话 Cookie 误带。
+- 服务端下发的长期票据要持久化并在后续请求中回带。
+- 登出与换号时清空 WebView Cookie，并先清后灌。
+- 换账号用 `sessionGeneration` 挡旧响应（Matter 已有）。
 
-**不可借鉴**
-
-| 移动客户端的做法 | 为什么不能抄 |
-|---|---|
-| `api.weibo.cn/2/` 私有接口 | 需要 `libSecShell.so`(`s`)、`libwbutil.so`(`cum`)、`lib*.so`(`X-Shanhai-Pass`) 三个 native 签名 + `aid` 设备注册 + 极验 `20062` 重放，工程门槛极高且随版本失效 |
-| 用 `mz3`（`c+47` 折叠）"混淆" appkey | 属于伪加密，字符串池里可还原（反编译即证）；Matter 不做这件事反而更干净 |
-| 明文存 `pass`（密码）字段 | 移动客户端的 `oge.java:49` 把密码写进了账号表，是**反面教材** |
-| 账号表明文 SQLite | 与 Matter 的明文 DataStore 同病，不能作为「安全参照」 |
-
-**结论**：移动客户端 在**凭据编排流程**（集中注入、换号清理、失效提示）上比 Matter 成熟；但在**凭据静态保护**上和 Matter 一样是明文。所以「抄流程，不抄协议」。
+私有协议本身不引入：`api.weibo.cn/2/` 的 native 签名（`s` / `cum` / `X-Shanhai-Pass`）工程门槛高且随版本失效；Matter 继续走 H5 路线。
 
 ---
 
@@ -531,7 +518,7 @@ class AuthPreferences(private val context: Context) {
 
 1. **短信/密码登录是否真的不可用**：结论基于「全仓无 `prelogin`/`pubkey`」的静态推断，未真机验证；若实测可用，则 T11 降级为 P2。
 2. ~~`api.weibo.com/2/friendships/groups.json` 用 Cookie 鉴权的成功率~~ 已实测：403 `auth by Null spi`，该分支已从分组读 / 写 / 排序中删除。
-3. `-100` 之外是否还存在 `errno 21332/21327` 出现在 H5 接口（移动客户端的样本来自 `api.weibo.cn/2/`，H5 端通常只有 `-100`）。
+3. `-100` 之外是否还存在 `errno 21332/21327` 出现在 H5 接口（这些值来自 `api.weibo.cn/2/` 的样本，H5 端通常只有 `-100`）。
 4. `st` 的有效期与「同一 Cookie 换 IP 后是否失效」——决定 `WeiboWriteSession` 的缓存是否够稳。
 5. WebView Cookies 数据库在 Android 14+ 的落盘位置与备份包含情况（不同 OEM 有差异）。
 
@@ -589,7 +576,7 @@ Matter 的鉴权**路线选对了**（H5 Cookie，不做 native 签名逆向）�
 
 | 日期 | 变更 | 说明 |
 |---|---|---|
-| 2026-10-24 | 初版 | 静态审计（Matter 主源码 + `移动客户端` jadx 反编译产物对照），未修改业务代码 |
+| 2026-10-24 | 初版 | 静态审计（Matter 主源码），未修改业务代码 |
 | 2026-10-24 | 增加「交接卡」 | 拆出 T1~T12 可执行分片、编号对照、改动指引、验证命令、已确认事实；供后续会话直接执行 |
 | 2026-10-24 | T1~T12 全部落地（12 个独立提交 db9fc6b…b761e99） | 每片一提交一验证：`./gradlew.bat :app:testDebugUnitTest` 全绿（223+ 用例，新增 AuthCookieSanitizerTest / AuthPreferencesTest / SessionExpiredBusTest / CookieInjectionTest / MessageApiTest 总线用例），`assembleDebug` 通过，merged manifest 实测 `allowBackup="false"`。**未验证（无真机）**：§6 中依赖设备的项目——logcat 全流程检查、登出后 `run-as` 检查 WebView Cookies、换号 A→B→A 三次 verifyConfig、datastore 密文 `run-as` 检查、KeystoreCredentialCipher 真机加解密（单测用假 Cipher 覆盖了 AuthPreferences 侧语义）。实现与报告的差异：① T2 连带删掉了时间线两处响应 `preview=`（完成定义要求 logcat 无 `preview=`）；② T4 的「旧账号 SUB 在前只保留新账号」由「登录页创建 WebView 前 removeAllCookies + 去重取首个非空值」共同保证（去重规则按关键改动指引的『同名以高优先级域为先』实现）；③ T5 的兜底注入只覆盖微博内容域且不主动请求游客凭据（避免插件内递归），游客获取仍由 `getEffectiveCookie` 显式触发；④ T7 探活加了 5 分钟节流；⑤ Ktor 3.6.0 的自定义插件 API 在 `io.ktor.client.plugins.api`。 |
 | 2026-10-27 | 新增端点层 `WeiboEndpoint.kt`（`WeiboHost` / `WeiboAuth` / `weiboGet` / `weiboPostForm` / `weiboPostJson`），`WeiboApiService` 全部 29 个请求点迁移；主页类读接口共用的「432 → 换游客凭据重试」脚手架收敛进 `weiboGetWithVisitorRetry`。同时删除评论改走 `weibo.com/ajax/statuses/destroyComment`（表单 + 详情页 Referer + 网页域 XSRF），m 站残留 7 处（登录校验、热搜、搜索、点赞列表、博主动态、关注/粉丝容器）。实测记录：网页分榜 `ajax/statuses/<榜名>` 需 SUB（游客可）、`hot_band` 匿名可、无同城榜端点 → 热搜保留 m 站。验证：`./gradlew.bat :app:testDebugUnitTest` 全绿（322 用例）。**未验证**：端点层无真机回归；`hot_band` 兜底方案仅记录未实现。 |

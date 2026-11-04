@@ -4,7 +4,7 @@
 
 ## 接口依据
 
-移动客户端 v1.1.6 的 `j3f` 接口使用移动客户端 `favorites/create`、`favorites/destroy`、`favorites`，需要客户端鉴权；其列表项包裹在 `status` 内。Matter 使用 Cookie 登录，收藏读写与点赞 / 关注一致走网页域（写操作受同一套账号级风控，m 站 `statuses/createfav` 已不再使用）：
+移动客户端的 `favorites/create`、`favorites/destroy`、`favorites` 接口需要客户端鉴权，列表项包裹在 `status` 内；Matter 不采用该路径，使用 Cookie 登录，收藏读写与点赞 / 关注一致走网页域（写操作受同一套账号级风控，m 站 `statuses/createfav` 已不再使用）：
 
 - `POST https://weibo.com/ajax/statuses/createFavorites`：JSON 体 `{"id": mid}`，`ok == 1` 才算成功。
 - `POST https://weibo.com/ajax/statuses/destoryFavorites`：同上（`destory` 是服务端路由本身的拼写）。
