@@ -126,7 +126,9 @@ fun TimelineScreen(
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
     backdrop: LayerBackdrop? = null,
-    bottomBarPadding: Dp = 0.dp
+    bottomBarPadding: Dp = 0.dp,
+    /** 顶栏是否随滑动收起（主框架按「滑动时隐藏顶栏」开关与底栏显隐算出） */
+    topBarHidden: Boolean = false
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val morphState = LocalImageMorphState.current
@@ -334,6 +336,7 @@ fun TimelineScreen(
         topBar = {
             ImmersiveTopBar(
                 listState = listState,
+                hidden = topBarHidden,
                 title = { scroll ->
                     TopBarTitleText(
                         text = uiState.currentGroupName,

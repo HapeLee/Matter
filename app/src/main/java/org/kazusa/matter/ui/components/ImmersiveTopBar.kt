@@ -1,6 +1,7 @@
 package org.kazusa.matter.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -16,6 +17,7 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -108,6 +110,8 @@ class TopBarScrollState internal constructor(
  *   与 [solidColor] 同源：滚动到顶时顶栏是页面自己颜色的一层淡底，而不是压一层黑）
  * @param solidColor 无滚动联动（实心形态）时的底色
  * @param barModifier 施加在 [TopAppBar] 自身上的 Modifier（如整体点击回到顶部）
+ * @param hidden 是否已随滑动收起：整根顶栏上移自身高度并同步淡出。
+ *   只做图层位移，不改变布局占位，内容不会因顶栏收起而跳动；收起后也不会再接收点击。
  * @param animationLabel 动画调试标签
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -125,6 +129,7 @@ fun ImmersiveTopBar(
     gradientColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = TopBarGradientSurfaceAlpha),
     solidColor: Color = MaterialTheme.colorScheme.surface,
     barModifier: Modifier = Modifier,
+    hidden: Boolean = false,
     animationLabel: String = "ImmersiveTopBarScrim"
 ) {
     val scrollDistancePx = with(LocalDensity.current) { scrollDistance.toPx() }
@@ -161,7 +166,23 @@ fun ImmersiveTopBar(
         TopBarScrollState(targetAlphaState, animatedAlpha)
     }
 
-    Box(modifier = modifier) {
+    // 收起进度：与底栏同一套弹簧手感（位移 + 同步淡出），而不是整块硬切。
+    // 位移量取图层实测高度（graphicsLayer 作用域里的 size），不需要额外的 onSizeChanged；
+    // 并在绘制阶段读取进度，动画每一帧都不触发重组（与下面的渐变层同一手法）。
+    val hideProgress by animateFloatAsState(
+        targetValue = if (hidden) 1f else 0f,
+        animationSpec = spring(stiffness = 400f, dampingRatio = 0.85f),
+        label = "ImmersiveTopBarHide"
+    )
+
+    Box(
+        modifier = modifier.graphicsLayer {
+            if (hideProgress > 0f) {
+                translationY = -size.height * hideProgress
+                alpha = 1f - hideProgress
+            }
+        }
+    ) {
         if (hasScrollSource) {
             Box(
                 modifier = Modifier

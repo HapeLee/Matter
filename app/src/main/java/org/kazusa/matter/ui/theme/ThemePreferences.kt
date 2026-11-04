@@ -102,7 +102,8 @@ data class AppThemeState(
     val seedColor: Color = Color(0xFFFF8200), // 自定义种子颜色 (Kolor)
     val isDarkTheme: Boolean? = null,  // null: 跟随系统, true: 深色, false: 浅色
     val paletteStyle: PaletteStyle = PaletteStyle.TonalSpot, // Kolor 调色板样式
-    val blurEffectsEnabled: Boolean = true // 模糊与液态玻璃效果总开关
+    val blurEffectsEnabled: Boolean = true, // 模糊与液态玻璃效果总开关
+    val topBarAutoHide: Boolean = false // 首页顶栏随滑动自动收起（与底栏同一套规则）
 )
 
 class ThemePreferences(private val context: Context) {
@@ -114,6 +115,7 @@ class ThemePreferences(private val context: Context) {
         val DARK_THEME_MODE = intPreferencesKey("dark_theme_mode") // 0: 跟随系统, 1: 浅色, 2: 深色
         val PALETTE_STYLE = stringPreferencesKey("palette_style")
         val BLUR_EFFECTS_ENABLED = booleanPreferencesKey("blur_effects_enabled")
+        val TOP_BAR_AUTO_HIDE = booleanPreferencesKey("top_bar_auto_hide")
     }
 
     val themeStateFlow: Flow<AppThemeState> = context.themeDataStore.data
@@ -146,9 +148,16 @@ class ThemePreferences(private val context: Context) {
                 seedColor = Color(seedColorArgb),
                 isDarkTheme = isDarkTheme,
                 paletteStyle = paletteStyle,
-                blurEffectsEnabled = prefs[Keys.BLUR_EFFECTS_ENABLED] ?: true
+                blurEffectsEnabled = prefs[Keys.BLUR_EFFECTS_ENABLED] ?: true,
+                topBarAutoHide = prefs[Keys.TOP_BAR_AUTO_HIDE] ?: false
             )
         }
+
+    suspend fun setTopBarAutoHide(enabled: Boolean) {
+        context.themeDataStore.edit { prefs ->
+            prefs[Keys.TOP_BAR_AUTO_HIDE] = enabled
+        }
+    }
 
     suspend fun setBlurEffectsEnabled(enabled: Boolean) {
         context.themeDataStore.edit { prefs ->

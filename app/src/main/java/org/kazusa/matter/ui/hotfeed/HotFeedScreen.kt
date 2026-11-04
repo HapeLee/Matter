@@ -68,6 +68,8 @@ fun HotFeedScreen(
     onTopicClick: (String) -> Unit = {},
     backdrop: LayerBackdrop? = null,
     bottomBarPadding: Dp = 0.dp,
+    /** 顶栏是否随滑动收起（主框架按「滑动时隐藏顶栏」开关与底栏显隐算出） */
+    topBarHidden: Boolean = false,
     /** 是否为主框架当前展示的内容；交叉淡化期间离场的那份不应再上报滚动状态 */
     isActive: Boolean = true,
     /** 本页是否已成为分页里的可见页；首次为 true 时才发起分类与首页请求 */
@@ -113,6 +115,7 @@ fun HotFeedScreen(
         topBar = {
             ImmersiveTopBar(
                 listState = listState,
+                hidden = topBarHidden,
                 animationLabel = "HotFeedTopBarScrim",
                 title = { scroll ->
                     TopBarTitleText(

@@ -80,6 +80,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -209,6 +211,14 @@ fun MainTabsScreen(
     val currentGid by remember { derivedStateOf { timelineState.currentGid } }
     val unreadCount by remember { derivedStateOf { timelineState.unreadCount } }
 
+    // 只订阅「顶栏随滑动收起」这一个开关：整个 AppThemeState 的变化（换调色板、改种子色等）
+    // 不该带着主框架和三个分页一起重组。
+    val topBarAutoHide by remember(themePreferences) {
+        themePreferences.themeStateFlow
+            .map { it.topBarAutoHide }
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = false)
+
     // 发布成功后回到动态页并刷新：新微博在时间线顶部，用户能立刻看到自己的内容。
     // 编辑器盖在本页之上时本页已经离开组合，所以按仓库的只增计数补处理（见 PublishRepository）。
     val publishRepository: PublishRepository = koinInject()
@@ -224,6 +234,9 @@ fun MainTabsScreen(
 
     // 检测瀑布流是否在向下滚动（向下滚时隐藏底栏以充分利用屏幕，向上滚或在顶部时展示底栏）
     var isBottomBarVisible by remember { mutableStateOf(true) }
+    // 顶栏跟随同一份判定（同一累积位移、同一阈值），因此两者始终同进同退；
+    // 是否真的收起还要看「滑动时隐藏顶栏」开关（topBarAutoHide）。
+    var isTopBarVisible by remember { mutableStateOf(true) }
     val scrollThreshold = with(LocalDensity.current) { 32.dp.toPx() }
     val scrollTracker = remember(scrollThreshold) { BottomBarScrollTracker(scrollThreshold) }
     val currentPendingRestore by rememberUpdatedState(pendingRestoreIndex)
@@ -243,9 +256,13 @@ fun MainTabsScreen(
                             activeListState.firstVisibleItemScrollOffset == 0
                         ) {
                             isBottomBarVisible = true
+                            isTopBarVisible = true
                             scrollTracker.reset()
                         } else {
-                            scrollTracker.onScroll(consumed.y)?.let { isBottomBarVisible = it }
+                            scrollTracker.onScroll(consumed.y)?.let { visible ->
+                                isBottomBarVisible = visible
+                                isTopBarVisible = visible
+                            }
                         }
                     }
                 }
@@ -255,6 +272,7 @@ fun MainTabsScreen(
     }
     LaunchedEffect(pagerState.currentPage, currentGid) {
         isBottomBarVisible = true
+        isTopBarVisible = true
         scrollTracker.reset()
     }
 
@@ -318,6 +336,9 @@ fun MainTabsScreen(
                                 listState = timelineListState,
                                 backdrop = timelineBackdrop,
                                 bottomBarPadding = bottomBarPadding,
+                                // 只在本页可见作用域里读这两个状态：顶栏显隐切换只重组本页，
+                                // 不带着主框架与另外两页一起重组
+                                topBarHidden = topBarAutoHide && !isTopBarVisible,
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -346,6 +367,7 @@ fun MainTabsScreen(
                                             // 过渡期间只有当前模式参与顶栏模糊采样，避免两层同时写入同一张 backdrop
                                             backdrop = searchBackdrop.takeIf { mode == discoverMode },
                                             bottomBarPadding = bottomBarPadding,
+                                            topBarHidden = topBarAutoHide && !isTopBarVisible,
                                             isActive = mode == discoverMode,
                                             // 相邻分页会被预组合，只有本页真正可见时才允许它发首屏请求
                                             isPageVisible = pagerState.currentPage == page,
@@ -364,6 +386,7 @@ fun MainTabsScreen(
                                             onSearchSubmit = onSearchSubmit,
                                             backdrop = searchBackdrop.takeIf { mode == discoverMode },
                                             bottomBarPadding = bottomBarPadding,
+                                            topBarHidden = topBarAutoHide && !isTopBarVisible,
                                             isActive = mode == discoverMode,
                                             onActiveListStateChanged = { state ->
                                                 if (discoverListState.value !== state) {

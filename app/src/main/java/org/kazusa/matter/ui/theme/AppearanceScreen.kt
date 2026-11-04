@@ -208,7 +208,21 @@ fun AppearanceScreen(
                     )
             }
 
-            // 2. Kolor 调色板与色彩引擎分组
+            // 2. 首页与滑动
+            SettingGroup(title = "首页与滑动") {
+                SwitchSettingItem(
+                    title = "滑动时隐藏顶栏",
+                    description = "在动态与热门页向下滑动时顶栏自动收起，向上滑动或回到顶部时重新出现（与底栏同步）",
+                    checked = themeState.topBarAutoHide,
+                    onCheckedChange = { enabled ->
+                        coroutineScope.launch {
+                            themePreferences.setTopBarAutoHide(enabled)
+                        }
+                    }
+                )
+            }
+
+            // 3. Kolor 调色板与色彩引擎分组
             SettingGroup(title = "Kolor 色彩引擎与调色板") {
                 // 调色板样式 (下拉菜单模式)
                 val currentStyle = AvailablePaletteStyles.find { it.style == themeState.paletteStyle }
@@ -275,7 +289,7 @@ fun AppearanceScreen(
                 )
             }
 
-            // 3. 实时色彩方案组件预览
+            // 4. 实时色彩方案组件预览
             SettingGroup(title = "色彩预览效果") {
                 SettingCard(cornerRadius = 16.dp) {
                     Column(modifier = Modifier.padding(16.dp)) {

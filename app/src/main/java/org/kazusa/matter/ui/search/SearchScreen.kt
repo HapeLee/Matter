@@ -84,6 +84,8 @@ fun HotSearchScreen(
     onSearchSubmit: (String) -> Unit,
     backdrop: LayerBackdrop? = null,
     bottomBarPadding: Dp = 0.dp,
+    /** 顶栏是否随滑动收起（主框架按「滑动时隐藏顶栏」开关与底栏显隐算出） */
+    topBarHidden: Boolean = false,
     /** 是否为主框架当前展示的内容；交叉淡化期间离场的那份不应再上报滚动状态 */
     isActive: Boolean = true,
     /** 上报当前榜单列表状态，主框架用它复刻动态页的「到顶立即显示底栏」判断 */
@@ -113,6 +115,7 @@ fun HotSearchScreen(
         topBar = {
             ImmersiveTopBar(
                 listState = topBarListState.value,
+                hidden = topBarHidden,
                 animationLabel = "HotSearchTopBarScrim",
                 title = { scroll ->
                     TopBarTitleText(
