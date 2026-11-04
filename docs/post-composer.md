@@ -5,7 +5,8 @@
 
 ## 入口与页面
 
-- 入口：动态页右下角的悬浮写作按钮（`MainTabsScreen`，与悬浮底栏同一套几何常量 `bottomBarPadding`）。
+- 入口：动态页悬浮底栏右侧的圆形写作按钮（`MainBottomBarLayer`，与热门 Tab 的右侧按钮同一套定位与尺寸，
+  胶囊会为它横向压缩让位；不随页面滚动画成独立悬浮层）。
 - 路由：`Screen.PostComposer`（`Destinations.kt`），全屏编辑器，离开即销毁（NavEntry 级 ViewModel）。
 - 页面：`ui/composer/post/PostComposerScreen.kt`
   - 顶栏：取消（有内容时二次确认放弃）、字数 `n/2000`、发布；

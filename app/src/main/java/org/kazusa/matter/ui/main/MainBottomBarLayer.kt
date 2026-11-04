@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.outlined.Explore
@@ -83,9 +84,10 @@ private val BAR_BUTTON_CENTER_INSET = 0.dp
  * 悬浮底栏层（全屏 overlay）：胶囊 + 左右两颗悬浮按钮。
  *
  * - **左侧按钮**：在「热门流」与「微博热搜」之间切换（只在热门 Tab 显示）；
- * - **右侧按钮**：展开当前模式的分类菜单 ——
+ * - **右侧按钮**：热门 Tab 展开当前模式的分类菜单 ——
  *   热门模式列出热门流分类（热门 / 同城 / 明星…），热搜模式列出热搜榜单（热搜 / 文娱 / 同城…）；
- * - 两颗按钮都只在热门 Tab 出现；底栏胶囊会在按钮出现时横向压缩让位。
+ *   动态 Tab 则是「发微博」入口，与热门 Tab 的右侧按钮同位同尺寸；
+ * - 两侧按钮只在各自的 Tab 出现；底栏胶囊会在按钮出现时横向压缩让位。
  */
 @Composable
 internal fun MainBottomBarLayer(
@@ -100,6 +102,8 @@ internal fun MainBottomBarLayer(
     onToggleDiscoverMode: () -> Unit,
     onHotCategorySelected: (HotFeedCategory) -> Unit,
     onHotSearchChannelSelected: (HotSearchChannel) -> Unit,
+    /** 「发微博」入口：只在动态 Tab 出现，位置与热门 Tab 的右侧按钮一致。 */
+    onComposeClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -131,6 +135,10 @@ internal fun MainBottomBarLayer(
     }
 
     val isDiscoverActive = selectedIndex == discoverPage
+    // 动态 Tab 的右侧按钮是「发微博」：位置、尺寸都跟热门 Tab 的右侧按钮同一套几何，
+    // 因此胶囊也要为它让位（否则窄屏上会和胶囊右缘重叠）。
+    val isComposeActive = selectedIndex == MainTab.Timeline.ordinal
+    val sideButtonActive = isDiscoverActive || isComposeActive
 
     // 分类菜单的展开状态只服务于这一层：返回键收起、切 Tab / 切模式收起
     var menuExpanded by remember { mutableStateOf(false) }
@@ -199,7 +207,7 @@ internal fun MainBottomBarLayer(
     // 1 = 原始宽度（按钮收起）；<1 = 被按钮挤压
     // 阻尼设为 0.66，挤压与还原时伴随果冻般 Q 弹的有机形变
     val capsuleScale by animateFloatAsState(
-        targetValue = if (isDiscoverActive) capsuleScaleTarget else 1f,
+        targetValue = if (sideButtonActive) capsuleScaleTarget else 1f,
         animationSpec = spring(stiffness = 300f, dampingRatio = 0.66f),
         label = "BottomBarCapsuleScale"
     )
@@ -216,6 +224,17 @@ internal fun MainBottomBarLayer(
             spring(stiffness = 340f, dampingRatio = 0.68f)
         },
         label = "DiscoverButtonsReveal"
+    )
+
+    // 「发微博」按钮的显隐：与热门 Tab 两侧按钮同一套果冻弹簧，切 Tab 时自然弹入 / 缩回
+    val composeReveal by animateFloatAsState(
+        targetValue = if (isComposeActive) 1f else 0f,
+        animationSpec = if (isComposeActive) {
+            spring(stiffness = 280f, dampingRatio = 0.62f)
+        } else {
+            spring(stiffness = 340f, dampingRatio = 0.68f)
+        },
+        label = "ComposeButtonReveal"
     )
 
     // 菜单玻璃的占位盒 = 面板 + 展开时的上移距离。占位盒的右下角对齐到按钮，
@@ -328,6 +347,42 @@ internal fun MainBottomBarLayer(
                         )
                     }
                 )
+            }
+        }
+
+        // Layer 2b：动态 Tab 的右侧「发微博」按钮 —— 与热门 Tab 的右侧按钮同位同尺寸
+        if (composeReveal > 0.01f) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    // 与分类按钮同一套定位：盒子右下角 = 按钮右下角
+                    .offset(
+                        x = -(screenWidthDp / 2 - buttonOffsetX - BAR_BUTTON_SIZE / 2),
+                        y = -(navigationBarBottom + BAR_BOTTOM_PADDING + BAR_BUTTON_CENTER_INSET)
+                    )
+                    .graphicsLayer {
+                        val p = composeReveal
+                        alpha = p.coerceIn(0f, 1f)
+                        val scale = (0.15f + 0.85f * p).coerceAtLeast(0f)
+                        scaleX = scale
+                        scaleY = scale
+                        val offsetFactor = 1f - p
+                        translationX = offsetFactor * 14.dp.toPx()
+                        translationY = offsetFactor * 18.dp.toPx()
+                    }
+            ) {
+                LiquidGlassIconButton(
+                    onClick = onComposeClick,
+                    backdrop = backdrop,
+                    size = BAR_BUTTON_SIZE,
+                    glassAlpha = 1f,
+                    tintAlpha = 1f
+                ) {
+                    LiquidGlassIcon(
+                        imageVector = Icons.Filled.Edit,
+                        contentDescription = "发微博"
+                    )
+                }
             }
         }
 

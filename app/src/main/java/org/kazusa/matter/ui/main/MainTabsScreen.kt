@@ -11,7 +11,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -20,12 +19,9 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Scaffold
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -38,7 +34,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -57,8 +52,6 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import org.kazusa.matter.core.datastore.AuthPreferences
 import org.kazusa.matter.data.repository.AuthRepository
 import org.kazusa.matter.data.repository.PublishRepository
-import org.kazusa.matter.ui.effect.liquid.LiquidGlassIcon
-import org.kazusa.matter.ui.effect.liquid.LiquidGlassIconButton
 import org.kazusa.matter.ui.theme.ThemePreferences
 import org.kazusa.matter.data.model.HotSearchChannel
 import org.kazusa.matter.data.model.WeiboStatusDto
@@ -121,7 +114,7 @@ fun MainTabsScreen(
     onNavigateToFollowing: () -> Unit = {},
     onNavigateToFollowers: () -> Unit = {},
     onNavigateToMessages: () -> Unit = {},
-    /** 打开发微博编辑器（悬浮写作按钮） */
+    /** 打开发微博编辑器（动态 Tab 底栏右侧按钮） */
     onNavigateToComposer: () -> Unit = {},
     onUserClick: (Long?) -> Unit = {},
     onPostClick: (WeiboStatusDto) -> Unit,
@@ -423,8 +416,8 @@ fun MainTabsScreen(
                 }
             }
 
-            // 悬浮底栏（胶囊 + 左右两颗按钮）叠在分页内容之上；
-            // 这一层不持有任何手势，点击会照常落到下面的内容区。
+            // 悬浮底栏（胶囊 + 两侧悬浮按钮）叠在分页内容之上：热门 Tab 两侧是模式切换 / 分类菜单，
+            // 动态 Tab 右侧是「发微博」。这一层不持有任何手势，点击会照常落到下面的内容区。
             MainBottomBarLayer(
                 pagerState = pagerState,
                 visible = isBottomBarVisible,
@@ -438,6 +431,7 @@ fun MainTabsScreen(
                     hotFeedViewModel.selectCategory(category)
                 },
                 onHotSearchChannelSelected = selectHotSearchChannel,
+                onComposeClick = onNavigateToComposer,
                 onReselect = { index ->
                     when (index) {
                         0 -> coroutineScope.launch {
@@ -467,28 +461,6 @@ fun MainTabsScreen(
                 }
             )
 
-            // 「发微博」入口：只在动态页、底栏可见时出现，停在底栏右上方。
-            // 尺寸与底栏按钮一致，位置复用底栏几何（bottomBarPadding），避免两套避让。
-            AnimatedVisibility(
-                visible = pagerState.currentPage == 0 && isBottomBarVisible,
-                enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.8f, animationSpec = tween(180)),
-                exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.8f, animationSpec = tween(140)),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = bottomBarPadding + 12.dp)
-            ) {
-                LiquidGlassIconButton(
-                    onClick = onNavigateToComposer,
-                    backdrop = bottomBarBackdrop,
-                    size = 52.dp,
-                    tintAlpha = 1f
-                ) {
-                    LiquidGlassIcon(
-                        imageVector = Icons.Filled.Edit,
-                        contentDescription = "发微博"
-                    )
-                }
-            }
         }
     }
 }
