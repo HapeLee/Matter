@@ -9,6 +9,8 @@
 
 普通 Compose 依赖使用 `koinInject()`，Activity 使用 `by inject()`。页面已有的显式参数可以继续用于测试；Repository 和 ViewModel 仍用构造函数接收依赖，不在业务类内访问全局 Koin。
 
+`TimelineRepository` 注入应用级 `FollowRepository`，关注流过滤优先使用统一的本会话关注状态，再回落到响应字段，不增加另一份关注状态存储。规则、分页及缓存处理见 [关注信息流过滤](timeline-filtering.md)。
+
 新增依赖时，在对应模块中注册定义；新增 ViewModel 时注册 `viewModel`，并在导航条目内调用 `koinViewModel()`。不要把 ViewModel 注册成应用单例，也不要把登录会话对象捕获到应用单例中。
 
 `AppModuleTest` 覆盖单例与资源关闭、账号收藏状态隔离和状态恢复参数。`ViewModelInjectionTest` 在 Robolectric Android 环境中解析生产依赖图，并验证导航条目内复用、条目间隔离及真实 `SavedStateHandle` 注入。

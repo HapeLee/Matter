@@ -20,6 +20,51 @@ import org.kazusa.matter.data.model.TimelineResponse
 class GroupTimelineApiTest {
 
     @Test
+    fun cursorFallbackUsesTheLastRawPostEvenIfItCannotBeDecoded() = runBlocking {
+        val client = cookieAwareClient {
+            respond("""{"ok":1,"statuses":[{"id":"101"},{"id":"90","text":{}}]}""")
+        }
+        try {
+            val result = WeiboApiService(client).getGroupTimeline("SUB=test", "4249162129677215") as ApiResult.Success
+            assertEquals(listOf(101L), result.data.statuses.map { it.id })
+            assertEquals(90L, result.data.nextMaxId)
+        } finally { client.close() }
+    }
+
+    @Test
+    fun cursorComesFromTheServerEvenWhenTheLastPostCannotBeDecoded() = runBlocking {
+        val client = cookieAwareClient {
+            respond("""{"ok":1,"statuses":[{"id":"101"},{"id":"90","text":{}}],"max_id_str":"70"}""")
+        }
+        try {
+            val result = WeiboApiService(client).getGroupTimeline("SUB=test", "4249162129677215") as ApiResult.Success
+            assertEquals(listOf(101L), result.data.statuses.map { it.id })
+            assertEquals(70L, result.data.nextMaxId)
+            assertTrue(result.data.hasMore)
+        } finally { client.close() }
+    }
+
+    @Test
+    fun wrappedCursorAndExplicitEndOfFeedArePreserved() = runBlocking {
+        val client = cookieAwareClient { request ->
+            if (request.url.parameters["max_id"] == null) {
+                respond("""{"ok":1,"data":{"statuses":[{"id":"101"}],"max_id":"70"}}""")
+            } else {
+                respond("""{"ok":1,"statuses":[{"id":"69"}],"max_id":0}""")
+            }
+        }
+        try {
+            val api = WeiboApiService(client)
+            val first = api.getGroupTimeline("SUB=test", "4249162129677215") as ApiResult.Success
+            assertEquals(70L, first.data.nextMaxId)
+            val last = api.getGroupTimeline("SUB=test", "4249162129677215", maxId = 70) as ApiResult.Success
+            assertEquals(69L, last.data.statuses.single().id)
+            assertNull(last.data.nextMaxId)
+            assertFalse(last.data.hasMore)
+        } finally { client.close() }
+    }
+
+    @Test
     fun routesGroupIdsLikeTheWebClient() {
         // 10001 + uid：全部关注
         assertEquals(GroupFeedRoute.PATH_ALL, resolveGroupFeedRoute("100011024125180916").path)

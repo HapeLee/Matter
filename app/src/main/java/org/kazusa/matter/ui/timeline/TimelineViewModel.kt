@@ -7,6 +7,8 @@ import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.data.repository.AuthRepository
 import org.kazusa.matter.data.repository.TimelineRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,9 +34,8 @@ class TimelineViewModel(
 
     private var scrollSnapshot = ScrollSnapshot()
 
-    @Volatile
-    private var lastRequestedPage = 0
     private var loadJob: kotlinx.coroutines.Job? = null
+    private var loadGeneration = 0
 
     /**
      * setGroup 的缓存加载任务。与 loadJob 分开管理：
@@ -80,6 +81,7 @@ class TimelineViewModel(
                         posts = posts,
                         page = cachedData.page,
                         hasMore = cachedData.hasMore,
+                        nextMaxId = cachedData.nextMaxId,
                         lastReadPostId = cachedData.lastReadPostId,
                         pendingRestoreIndex = targetIndex,
                         pendingRestoreOffset = savedPos.offset,
@@ -103,7 +105,7 @@ class TimelineViewModel(
         val name = groupName ?: "全部关注"
         val effectiveGid = if (gid == "all") null else gid
         if (_uiState.value.currentGid != effectiveGid) {
-            lastRequestedPage = 0
+            loadGeneration++
             // 切组必须掐掉在途请求：否则上一个分组的翻页响应回来时会被写进新分组
             // （posts 混料、page 错位，并把这个错误状态盖进新分组的磁盘缓存）。
             loadJob?.cancel()
@@ -116,8 +118,12 @@ class TimelineViewModel(
                     currentGroupName = name,
                     posts = emptyList(),
                     isLoading = true,
+                    isLoadingMore = false,
+                    isRefreshing = false,
+                    errorMessage = null,
                     page = 1,
                     hasMore = true,
+                    nextMaxId = null,
                     lastReadPostId = null,
                     pendingRestoreIndex = 0,
                     pendingRestoreOffset = 0
@@ -142,6 +148,7 @@ class TimelineViewModel(
                             posts = posts,
                             page = cached.page,
                             hasMore = cached.hasMore,
+                            nextMaxId = cached.nextMaxId,
                             lastReadPostId = cached.lastReadPostId,
                             pendingRestoreIndex = targetIndex,
                             pendingRestoreOffset = savedPos.offset,
@@ -163,19 +170,19 @@ class TimelineViewModel(
         if (!isRefresh && (currentState.isLoading || currentState.isLoadingMore || currentState.isRefreshing)) return
 
         val nextPage = if (isRefresh) 1 else currentState.page + 1
-        if (!isRefresh && nextPage <= lastRequestedPage && !currentState.hasMore) return
-        lastRequestedPage = nextPage
+        if (!isRefresh && !currentState.hasMore) return
 
         if (isRefresh) {
             loadJob?.cancel()
         }
+        val generation = ++loadGeneration
+        // 启动协程前同步占用加载状态，防止连续点击并发请求同一页。
+        _uiState.update {
+            if (isRefresh) it.copy(isRefreshing = true, errorMessage = null)
+            else it.copy(isLoadingMore = true, errorMessage = null)
+        }
 
         loadJob = viewModelScope.launch {
-            _uiState.update {
-                if (isRefresh) it.copy(isRefreshing = true, errorMessage = null)
-                else it.copy(isLoadingMore = true, errorMessage = null)
-            }
-
             if (isRefresh) {
                 when (val result = timelineRepository.getTimeline(
                     gid = currentState.currentGid,
@@ -183,7 +190,9 @@ class TimelineViewModel(
                     maxId = null
                 )) {
                     is ApiResult.Success -> {
-                        val firstPagePosts = result.data
+                        currentCoroutineContext().ensureActive()
+                        if (generation != loadGeneration) return@launch
+                        val firstPagePosts = result.data.posts
                         val previousPosts = currentState.posts
                         val previousFirstPost = previousPosts.firstOrNull()
                         val previousFirstId = previousFirstPost?.let { it.idStr ?: it.id?.toString() }
@@ -192,6 +201,8 @@ class TimelineViewModel(
                         var allIncomingNew: List<WeiboStatusDto> = emptyList()
                         var combined: List<WeiboStatusDto>
                         var targetPage = currentState.page
+                        var nextCursor = result.data.nextMaxId
+                        var hasMore = result.data.hasMore
                         var newLastReadId: String? = null
                         val hasIncomingNew: Boolean
                         val tip: String?
@@ -209,6 +220,9 @@ class TimelineViewModel(
                             }
 
                             if (overlapIdx != -1) {
+                                // 合并后列表底部仍是旧列表，必须继续使用旧列表的游标。
+                                nextCursor = currentState.nextMaxId
+                                hasMore = currentState.hasMore
                                 allIncomingNew = firstPagePosts.take(overlapIdx)
                                 if (allIncomingNew.isNotEmpty()) {
                                     hasIncomingNew = true
@@ -227,15 +241,24 @@ class TimelineViewModel(
                                 var currentFetchPage = 2
                                 val maxBridgePages = 3
 
-                                while (!foundOverlap && currentFetchPage <= maxBridgePages && accumulated.isNotEmpty()) {
-                                    val lastId = accumulated.lastOrNull()?.id ?: break
+                                while (!foundOverlap && currentFetchPage <= maxBridgePages && hasMore) {
+                                    val lastId = nextCursor ?: break
                                     val nextBatch = timelineRepository.getTimeline(
                                         gid = currentState.currentGid,
                                         page = currentFetchPage,
                                         maxId = lastId
                                     )
-                                    if (nextBatch is ApiResult.Success && nextBatch.data.isNotEmpty()) {
-                                        val batch = nextBatch.data
+                                    currentCoroutineContext().ensureActive()
+                                    if (generation != loadGeneration) return@launch
+                                    if (nextBatch is ApiResult.Error) {
+                                        _uiState.update { it.copy(isRefreshing = false, isLoading = false,
+                                            isLoadingMore = false, errorMessage = nextBatch.message) }
+                                        return@launch
+                                    }
+                                    if (nextBatch is ApiResult.Success) {
+                                        val batch = nextBatch.data.posts
+                                        nextCursor = nextBatch.data.nextMaxId
+                                        hasMore = nextBatch.data.hasMore
                                         val idx = batch.indexOfFirst { post ->
                                             val id = post.idStr ?: post.id?.toString()
                                             id != null && existingIds.contains(id)
@@ -243,6 +266,8 @@ class TimelineViewModel(
                                         if (idx != -1) {
                                             foundOverlap = true
                                             accumulated = (accumulated + batch.take(idx)).distinctBy { it.listKey }
+                                            nextCursor = currentState.nextMaxId
+                                            hasMore = currentState.hasMore
                                             break
                                         } else {
                                             accumulated = (accumulated + batch).distinctBy { it.listKey }
@@ -282,12 +307,14 @@ class TimelineViewModel(
                         viewModelScope.launch(Dispatchers.IO) {
                             timelineRepository.saveCache(
                                 gid = currentState.currentGid,
+                                ownerUid = result.data.ownerUid,
                                 posts = combined,
                                 page = targetPage,
-                                hasMore = true,
+                                hasMore = hasMore,
                                 scrollIndex = snapshot.index,
                                 scrollOffset = snapshot.offset,
-                                lastReadPostId = newLastReadId
+                                lastReadPostId = newLastReadId,
+                                nextMaxId = nextCursor
                             )
                         }
 
@@ -295,7 +322,8 @@ class TimelineViewModel(
                             state.copy(
                                 posts = combined,
                                 page = targetPage,
-                                hasMore = true,
+                                hasMore = hasMore,
+                                nextMaxId = nextCursor,
                                 isLoading = false,
                                 isRefreshing = false,
                                 isLoadingMore = false,
@@ -308,6 +336,8 @@ class TimelineViewModel(
                         }
                     }
                     is ApiResult.Error -> {
+                        currentCoroutineContext().ensureActive()
+                        if (generation != loadGeneration) return@launch
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
@@ -320,14 +350,16 @@ class TimelineViewModel(
                     ApiResult.Loading -> {}
                 }
             } else {
-                val maxId = currentState.posts.lastOrNull()?.id
+                val maxId = currentState.nextMaxId
                 when (val result = timelineRepository.getTimeline(
                     gid = currentState.currentGid,
                     page = nextPage,
                     maxId = maxId
                 )) {
                     is ApiResult.Success -> {
-                        val newPosts = result.data
+                        currentCoroutineContext().ensureActive()
+                        if (generation != loadGeneration) return@launch
+                        val newPosts = result.data.posts
                         val landed = _uiState.value
                         val combined = (landed.posts + newPosts).distinctBy { it.listKey }
                         val snapshot = scrollSnapshot
@@ -336,7 +368,8 @@ class TimelineViewModel(
                             it.copy(
                                 posts = combined,
                                 page = nextPage,
-                                hasMore = newPosts.isNotEmpty(),
+                                hasMore = result.data.hasMore,
+                                nextMaxId = result.data.nextMaxId,
                                 isLoading = false,
                                 isRefreshing = false,
                                 isLoadingMore = false,
@@ -349,16 +382,20 @@ class TimelineViewModel(
                         viewModelScope.launch(Dispatchers.IO) {
                             timelineRepository.saveCache(
                                 gid = landed.currentGid,
+                                ownerUid = result.data.ownerUid,
                                 posts = combined,
                                 page = nextPage,
-                                hasMore = newPosts.isNotEmpty(),
+                                hasMore = result.data.hasMore,
                                 scrollIndex = snapshot.index,
                                 scrollOffset = snapshot.offset,
-                                lastReadPostId = landed.lastReadPostId
+                                lastReadPostId = landed.lastReadPostId,
+                                nextMaxId = result.data.nextMaxId
                             )
                         }
                     }
                     is ApiResult.Error -> {
+                        currentCoroutineContext().ensureActive()
+                        if (generation != loadGeneration) return@launch
                         _uiState.update {
                             it.copy(
                                 isLoading = false,

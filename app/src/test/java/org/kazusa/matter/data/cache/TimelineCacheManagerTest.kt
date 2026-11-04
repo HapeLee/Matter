@@ -5,6 +5,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.kazusa.matter.data.model.WeiboStatusDto
@@ -17,6 +18,33 @@ import org.robolectric.annotation.Config
 class TimelineCacheManagerTest {
 
     private val manager = TimelineCacheManager(RuntimeEnvironment.getApplication())
+
+    @Test
+    fun originalCursorSurvivesCacheAndPositionUpdates() = runBlocking {
+        manager.saveCache("special", "100", listOf(WeiboStatusDto(id = 90)), 1, true, 0, 0, null,
+            nextMaxId = 70)
+        manager.updateScrollPosition("special", "100", 1, 8, null)
+        assertEquals(70L, manager.loadCache("special", "100")?.nextMaxId)
+    }
+
+    @Test
+    fun truncatedCacheDoesNotSkipPostsThatWereNotSaved() = runBlocking {
+        manager.saveCache("long", "100", (200L downTo 1L).map { WeiboStatusDto(id = it) },
+            8, false, 0, 0, null, nextMaxId = null)
+        val cached = manager.loadCache("long", "100")!!
+        assertEquals(150, cached.posts.size)
+        assertEquals(51L, cached.nextMaxId)
+        assertTrue(cached.hasMore)
+    }
+
+    @Test
+    fun legacyCacheWithoutRawCursorIsInvalidated() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        java.io.File(context.filesDir, "timeline_cache_legacy.json").writeText(
+            """{"uid":"100","posts":[{"id":90}],"hasMore":true}"""
+        )
+        assertNull(manager.loadCache("legacy", "100"))
+    }
 
     @Test
     fun cacheWrittenByAnotherAccountIsIgnored() = runBlocking {

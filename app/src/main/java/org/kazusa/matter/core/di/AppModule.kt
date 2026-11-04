@@ -94,7 +94,7 @@ val dataModule = module {
     single { TimelinePositionManager(androidContext()) }
 
     single { AuthRepository(get(), get(), get()) }
-    single { TimelineRepository(get(), get(), get(), get()) }
+    single { TimelineRepository(get(), get(), get(), get(), get()) }
     single { GroupRepository(get(), get()) }
     single { HotFeedRepository(get(), get()) }
     single { BrowsingHistoryRepository(get(), get(), get()) }

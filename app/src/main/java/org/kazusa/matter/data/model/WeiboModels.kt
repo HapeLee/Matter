@@ -17,7 +17,10 @@ data class TimelineResponse(
     val ok: Int = 1,
     val statuses: List<WeiboStatusDto> = emptyList(),
     @SerialName("total_number") val totalNumber: Int? = null,
-    val data: TimelineDataDto? = null
+    val data: TimelineDataDto? = null,
+    /** 原始页的游标，不随推荐过滤和去重改变。 */
+    val nextMaxId: Long? = null,
+    val hasMore: Boolean = statuses.isNotEmpty()
 )
 
 @Serializable

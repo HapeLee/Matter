@@ -24,6 +24,9 @@ data class TimelineCacheData(
      * 旧版本缓存没有这个字段（null），一律视为不属于当前账号。
      */
     val uid: String? = null,
+    val nextMaxId: Long? = null,
+    /** 旧缓存未保存过滤前的游标，升级后重新读取一次服务端。 */
+    val feedVersion: Int = 0,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -42,7 +45,8 @@ class TimelineCacheManager(private val context: Context) {
         hasMore: Boolean,
         scrollIndex: Int,
         scrollOffset: Int,
-        lastReadPostId: String?
+        lastReadPostId: String?,
+        nextMaxId: Long? = null
     ) = withContext(Dispatchers.IO) {
         try {
             val file = getCacheFile(gid)
@@ -50,11 +54,16 @@ class TimelineCacheManager(private val context: Context) {
             val data = TimelineCacheData(
                 posts = posts.take(150), // 限制最多缓存 150 条以保持轻巧高效
                 page = page,
-                hasMore = hasMore,
+                hasMore = hasMore || posts.size > 150,
                 scrollIndex = scrollIndex,
                 scrollOffset = scrollOffset,
                 lastReadPostId = lastReadPostId,
-                uid = uid
+                uid = uid,
+                // 缓存只保存前 150 条，不能带着完整列表末尾的游标跳过被裁掉的内容。
+                nextMaxId = if (posts.size > 150) {
+                    posts[149].idStr?.toLongOrNull() ?: posts[149].id
+                } else nextMaxId,
+                feedVersion = 1
             )
             val jsonString = KtorClientFactory.jsonConfig.encodeToString(TimelineCacheData.serializer(), data)
             tempFile.writeText(jsonString)
@@ -82,7 +91,7 @@ class TimelineCacheManager(private val context: Context) {
                 if (jsonString.isBlank()) return@withContext null
                 val data = KtorClientFactory.jsonConfig
                     .decodeFromString(TimelineCacheData.serializer(), jsonString)
-                if (data.uid != uid) return@withContext null
+                if (data.uid != uid || data.feedVersion != 1) return@withContext null
                 data
             } catch (e: Exception) {
                 android.util.Log.e("TimelineCache", "loadCache failed", e)
@@ -108,7 +117,8 @@ class TimelineCacheManager(private val context: Context) {
                     hasMore = current.hasMore,
                     scrollIndex = scrollIndex,
                     scrollOffset = scrollOffset,
-                    lastReadPostId = lastReadPostId ?: current.lastReadPostId
+                    lastReadPostId = lastReadPostId ?: current.lastReadPostId,
+                    nextMaxId = current.nextMaxId
                 )
             }
         } catch (e: Exception) {

@@ -14,6 +14,7 @@ data class TimelineUiState(
     val currentGroupName: String = "全部微博",
     val page: Int = 1,
     val hasMore: Boolean = true,
+    val nextMaxId: Long? = null,
     val unreadCount: Int = 0,
     val refreshTip: String? = null,
     val lastReadPostId: String? = null,

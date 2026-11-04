@@ -482,12 +482,19 @@ fun TimelineScreen(
                     }
                 }
                 uiState.posts.isEmpty() -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "暂无微博动态",
+                            text = if (uiState.hasMore) "暂未找到已关注博主的动态" else "暂无微博动态",
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextSecondary
                         )
+                        if (uiState.hasMore) {
+                            TextButton(onClick = { viewModel.loadTimeline(isRefresh = false) },
+                                enabled = !uiState.isLoadingMore) {
+                                Text(if (uiState.isLoadingMore) "正在加载…" else "继续加载")
+                            }
+                        }
                     }
                 }
                 else -> {
@@ -600,7 +607,15 @@ fun TimelineScreen(
                                     )
                                 }
                             }
-                                               }
+                        } else {
+                            item(contentType = "load_more") {
+                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    TextButton(onClick = { viewModel.loadTimeline(isRefresh = false) }) {
+                                        Text(if (uiState.errorMessage != null) "加载失败，点击重试" else "加载更多")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

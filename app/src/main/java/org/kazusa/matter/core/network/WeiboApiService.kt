@@ -414,8 +414,9 @@ class WeiboApiService(
      * 只走网页通道，没有任何 m 站兜底：`ok=1` + 空 `statuses` 就是该分组确实没有微博
      * （`total_number=0`），失败如实返回错误，不再换域名重试。
      *
-     * 分页是游标不是页码：`max_id` 传上一页最后一条微博 id（服务端回的 `max_id_str`
-     * 就是它），首屏不传该参数（空串会被判 400）。[page] 仅为兼容调用方保留，
+     * 分页是游标不是页码：优先回传服务端 `max_id_str` / `max_id`，缺省时才用原始页
+     * 最后一条微博 id；不能使用过滤后列表的末项。首屏不传该参数（空串会被判 400）。
+     * [page] 仅为兼容调用方保留，
      * 不参与请求。
      */
     suspend fun getGroupTimeline(
@@ -492,8 +493,23 @@ class WeiboApiService(
             val totalNumber = (root["total_number"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
                 ?: ((root["data"] as? JsonObject)?.get("total_number") as? JsonPrimitive)
                     ?.contentOrNull?.toIntOrNull()
+            val data = root["data"] as? JsonObject
+            val cursorElement = root["max_id_str"] ?: root["max_id"]
+                ?: data?.get("max_id_str") ?: data?.get("max_id")
+            // 必须从原始响应取游标：最后一条微博可能被过滤或解析失败。
+            val lastRaw = statusesArray.lastOrNull() as? JsonObject
+            val nextMaxId = (cursorElement as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+                ?: if (cursorElement == null) {
+                    sequenceOf("idstr", "id", "mid").mapNotNull { key ->
+                        (lastRaw?.get(key) as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+                    }.firstOrNull()
+                } else null
             ApiResult.Success(
-                TimelineResponse(ok = 1, statuses = posts, totalNumber = totalNumber)
+                TimelineResponse(
+                    ok = 1, statuses = posts, totalNumber = totalNumber,
+                    nextMaxId = nextMaxId?.takeIf { it > 0 },
+                    hasMore = nextMaxId != null && nextMaxId > 0
+                )
             )
         } catch (e: CancellationException) {
             throw e
