@@ -71,6 +71,23 @@ class CommentRepliesResponseTest {
         assertTrue(reply.comments.single().comments.isEmpty())
     }
 
+    /**
+     * 网页端一级评论用复数键 `like_counts` 下发点赞数，楼中楼回复用 `like_count`。
+     * 只用其中一个键时，另一边的点赞数会静默落成默认值 "0"，界面上就只剩一个空的点赞图标。
+     */
+    @Test
+    fun levelZeroCommentsAcceptPluralLikeCountsKey() {
+        val page = KtorClientFactory.jsonConfig.decodeFromString<CommentsDataDto>(
+            """{"data":[{
+                "id": 100, "text": "主评论", "like_counts": 14,
+                "comments": [{"id": 101, "text": "回复", "like_count": 2}]
+            }]}"""
+        )
+        val root = page.data.single()
+        assertEquals("14", root.likeCount)
+        assertEquals("2", root.comments.single().likeCount)
+    }
+
     @Test
     fun flatReplyPageDecodesStringCursorAndCount() {
         val result = decodeCommentReplies(

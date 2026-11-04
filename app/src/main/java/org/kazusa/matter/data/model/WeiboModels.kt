@@ -10,6 +10,7 @@ import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonNames
 
 @Serializable
 data class TimelineResponse(
@@ -1150,7 +1151,17 @@ data class WeiboCommentDto(
     val text: String = "",
     val user: WeiboUserDto? = null,
     @SerialName("created_at") val createdAt: String = "",
-    @Serializable(with = FlexibleStringSerializer::class) @SerialName("like_count") val likeCount: String = "0",
+    /**
+     * 评论点赞数。
+     *
+     * 网页端一级评论（`buildComments?is_mix=0&fetch_level=0`）下发的是复数键 `like_counts`，
+     * 楼中楼回复（`is_mix=1&fetch_level=1`）与 m 站下发的是 `like_count`，
+     * 两个键都要认，否则一级评论的点赞数会静默落到默认值 "0"。
+     */
+    @Serializable(with = FlexibleStringSerializer::class)
+    @SerialName("like_count")
+    @JsonNames("like_counts")
+    val likeCount: String = "0",
     @Serializable(with = CommentListSerializer::class) val comments: List<WeiboCommentDto> = emptyList(),
     @Serializable(with = FlexibleIntSerializer::class) @SerialName("total_number") val totalNumber: Int? = null,
     @Serializable(with = FlexibleLongSerializer::class) @SerialName("max_id") val maxId: Long? = null,
