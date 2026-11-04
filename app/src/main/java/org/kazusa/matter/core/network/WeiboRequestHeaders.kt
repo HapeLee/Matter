@@ -22,4 +22,30 @@ object WeiboRequestHeaders {
 
     /** 微博图片 CDN 防盗链校验的来源页；缺它直接 403。 */
     const val CDN_REFERER = "https://weibo.com/"
+
+    /**
+     * 需要补防盗链请求头的域名后缀：微博 / 新浪系 CDN 与网页域名。
+     *
+     * 视频 CDN（`f.video.weibocdn.com`、`f.us.sinaimg.cn`）与图片 CDN 同属一套校验，
+     * 播放器的请求也必须带上同一份指纹，否则会落到做校验的节点上被 403。
+     */
+    private val refererHostSuffixes = listOf(
+        "sinaimg.cn",
+        "sinajs.cn",
+        "sina.com.cn",
+        "weibocdn.com",
+        "weibo.com",
+        "weibo.cn",
+        "miaopai.com"
+    )
+
+    /** 播放器 / 下载器用的防盗链请求头（不含 User-Agent，UA 由各客户端单独设置）。 */
+    val CDN_REQUEST_HEADERS: Map<String, String> = mapOf("Referer" to CDN_REFERER)
+
+    /** 该主机是否属于微博 / 新浪系域名，需要补 [USER_AGENT] 与 [CDN_REFERER]。 */
+    fun isWeiboHost(host: String): Boolean {
+        val normalized = host.trim().lowercase()
+        if (normalized.isEmpty()) return false
+        return refererHostSuffixes.any { normalized == it || normalized.endsWith(".$it") }
+    }
 }

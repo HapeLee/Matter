@@ -52,6 +52,50 @@ class WeiboVideoModelTest {
     }
 
     @Test
+    fun blankDirectFieldsFallBackToNextPlayableField() {
+        // 微博会把未转码完成的档位下发成空串而不是 null，`?:` 判空会直接把空地址交给播放器
+        val json = """
+            {
+                "type": "video",
+                "page_title": "测试视频",
+                "media_info": {
+                    "mp4_720p_mp4": "",
+                    "mp4_hd_url": "https://video.weibo.com/test_hd.mp4",
+                    "stream_url": "https://video.weibo.com/test.mp4"
+                }
+            }
+        """.trimIndent()
+
+        val media = KtorClientFactory.jsonConfig
+            .decodeFromString<WeiboPageInfoDto>(json)
+            .mediaInfo!!
+
+        assertEquals("https://video.weibo.com/test_hd.mp4", media.bestVideoUrl)
+        assertEquals(
+            listOf("https://video.weibo.com/test_hd.mp4", "https://video.weibo.com/test.mp4"),
+            media.availableStreams.map { it.url }
+        )
+    }
+
+    @Test
+    fun protocolRelativeVideoUrlIsNormalized() {
+        val json = """
+            {
+                "type": "video",
+                "media_info": {
+                    "stream_url": "//f.video.weibocdn.com/o0/test.mp4"
+                }
+            }
+        """.trimIndent()
+
+        val media = KtorClientFactory.jsonConfig
+            .decodeFromString<WeiboPageInfoDto>(json)
+            .mediaInfo!!
+
+        assertEquals("https://f.video.weibocdn.com/o0/test.mp4", media.bestVideoUrl)
+    }
+
+    @Test
     fun deserializesWhenPlaybackListHasArrayWithMixedTypes() {
         val json = """
             {

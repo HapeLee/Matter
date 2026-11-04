@@ -425,16 +425,17 @@ data class WeiboMediaInfoDto(
 
             // 1. 优先解析现代微博视频的 playback_list
             playbackList.forEach { item ->
-                val playInfo = item.playInfo
-                val rawUrl = playInfo?.url
-                if (!rawUrl.isNullOrBlank() && seenUrls.add(rawUrl)) {
+                val playInfo = item.playInfo ?: return@forEach
+                // 空串 / 协议相对 / 非 http(s) 地址一律剔除：它们只会让播放器静默失败
+                val url = normalizeVideoUrl(playInfo.url) ?: return@forEach
+                if (seenUrls.add(url)) {
                     val label = item.meta?.label
                         ?: item.meta?.qualityDesc
                         ?: if ((playInfo.height ?: 0) > 0) "${playInfo.height}P" else "高清"
                     list.add(
                         VideoStreamInfo(
                             label = label,
-                            url = rawUrl,
+                            url = url,
                             width = playInfo.width ?: 0,
                             height = playInfo.height ?: 0,
                             bitrate = playInfo.bitrate ?: 0L
@@ -445,8 +446,9 @@ data class WeiboMediaInfoDto(
 
             // 2. 补充直接字段并去重
             fun addIfAbsent(label: String, url: String?, width: Int = 0, height: Int = 0) {
-                if (!url.isNullOrBlank() && seenUrls.add(url)) {
-                    list.add(VideoStreamInfo(label = label, url = url, width = width, height = height))
+                val normalized = normalizeVideoUrl(url) ?: return
+                if (seenUrls.add(normalized)) {
+                    list.add(VideoStreamInfo(label = label, url = normalized, width = width, height = height))
                 }
             }
 
@@ -464,8 +466,16 @@ data class WeiboMediaInfoDto(
             )
         }
 
+    /**
+     * 列表卡片点击直接进播放器用的地址。
+     *
+     * 注意不能只用 `?:` 判空：微博会把未转码档位下发成**空串**而不是 null，
+     * 这里必须用 [normalizeVideoUrl] 过滤，否则会返回空地址让播放器黑屏。
+     */
     val bestVideoUrl: String?
-        get() = mp4720p ?: mp4Hd ?: mp4Sd ?: streamUrl ?: availableStreams.firstOrNull()?.url
+        get() = listOf(mp4720p, mp4Hd, mp4Sd, streamUrl)
+            .firstNotNullOfOrNull { normalizeVideoUrl(it) }
+            ?: availableStreams.firstOrNull()?.url
 }
 
 // 微博卡片与搜索/热搜数据模型

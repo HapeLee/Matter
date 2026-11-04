@@ -16,6 +16,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PictureInPictureAlt
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -49,19 +51,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.util.Consumer
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import org.kazusa.matter.MainActivity
+import org.kazusa.matter.core.network.WeiboRequestHeaders
 import org.kazusa.matter.data.model.VideoStreamInfo
+import org.kazusa.matter.data.model.buildVideoPlaybackCandidates
 import androidx.activity.ComponentActivity
 import android.widget.Toast
 import androidx.compose.material.icons.filled.Download
@@ -76,9 +87,9 @@ import org.kazusa.matter.ui.navigation.weiboVideoSharedBounds
 
 /**
  * 微博视频全功能播放界面：
- * 1. 多挡位清晰度平滑无缝切换（1080P/720P/480P 等）
+ * 1. 多挡位清晰度切换，失败时按候选队列自动降级（1080P → 720P → 480P）
  * 2. Android 原生系统画中画 (Picture-in-Picture) 与 Android 12+ 自动进 PiP
- * 3. 磁盘 LRU 高速缓存 (Media3 SimpleCache)，避免重复网络下载与重放秒开
+ * 3. 与图片 / 下载链路一致的 UA 与防盗链 Referer（微博 CDN 会按节点校验）
  * 4. 自动音频焦点管理，避免与系统其他媒体产生冲突
  * 5. 支持类似图片 Morph 的容器共享元素转场（Shared Bounds Container Morph）
  */
@@ -97,17 +108,21 @@ fun VideoPlayerScreen(
     val activity = context as? Activity
     val componentActivity = context as? ComponentActivity
 
-    // 候选清晰度列表：有传入 streams 则使用，否则以 videoUrl 兜底
-    val candidateStreams = remember(streams, videoUrl) {
-        if (streams.isNotEmpty()) streams
-        else if (videoUrl.isNotBlank()) listOf(VideoStreamInfo(label = "默认", url = videoUrl))
-        else emptyList()
+    // 候选播放队列：默认档排第一，其余档位作为失败后的降级候选。
+    // 地址在这里统一规范化（空串 / 协议相对 / 非 http(s) 一律剔除），
+    // 否则 MediaItem.fromUri("") 只会让播放器静默黑屏。
+    val candidates = remember(streams, videoUrl) {
+        buildVideoPlaybackCandidates(videoUrl = videoUrl, streams = streams)
     }
+    var selectedIndex by remember(candidates) { mutableStateOf(0) }
+    val selectedCandidate = candidates.getOrNull(selectedIndex)
 
-    // 当前选中的清晰度流（默认优先选中传入的 videoUrl 对应档，或第一档最高画质）
-    var selectedStream by remember(candidateStreams) {
-        mutableStateOf(candidateStreams.firstOrNull { it.url == videoUrl } ?: candidateStreams.firstOrNull())
-    }
+    // 已尝试失败的地址：同一档位不重复重试，全部失败后直接给出可读的错误文案
+    var failedUrls by remember(candidates) { mutableStateOf(emptySet<String>()) }
+    var playbackError by remember(candidates) { mutableStateOf<String?>(null) }
+    // 用户重试 / 切换画质时自增，用于对同一地址强制重新 prepare
+    var reloadToken by remember(candidates) { mutableStateOf(0) }
+
     var showQualityMenu by remember { mutableStateOf(false) }
 
     // 画中画 (PiP) 支持与状态
@@ -123,7 +138,7 @@ fun VideoPlayerScreen(
     var isSaving by remember { mutableStateOf(false) }
 
     fun performSaveVideo() {
-        val downloadUrl = selectedStream?.url ?: videoUrl
+        val downloadUrl = selectedCandidate?.url ?: videoUrl
         if (downloadUrl.isBlank()) {
             Toast.makeText(context, "视频下载地址无效", Toast.LENGTH_SHORT).show()
             return
@@ -164,41 +179,71 @@ fun VideoPlayerScreen(
         }
     }
 
-    // 初始化带音频焦点与平滑播放的 ExoPlayer（由 videoUrl 驱动实例生命周期）
-    val exoPlayer = remember(videoUrl) {
+    // 初始化 ExoPlayer：音频焦点 + 与图片/下载链路一致的 UA / Referer。
+    // 之前用默认 HTTP 栈（UA 为 `ExoPlayerLib/x.y.z`、不带 Referer），落到微博 CDN
+    // 真正做防盗链校验的节点上会被 403，表现就是「有些视频一直转圈/黑屏」。
+    val exoPlayer = remember(context, videoUrl) {
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
             .build()
 
-        ExoPlayer.Builder(context)
-            .setAudioAttributes(audioAttributes, true) // 自动接管音频焦点
-            .build().apply {
-                val initialUrl = selectedStream?.url ?: videoUrl
-                if (initialUrl.isNotBlank()) {
-                    setMediaItem(MediaItem.fromUri(initialUrl))
-                    prepare()
-                    playWhenReady = true
-                }
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(WeiboRequestHeaders.USER_AGENT)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(20_000)
+            .setAllowCrossProtocolRedirects(true)
+
+        // Referer 只补给微博 / 新浪系 CDN：第三方视频站通常不校验来源页，
+        // 乱加请求头反而可能触发它们的校验规则（与 WeiboImageClient 同一套判断）。
+        val dataSourceFactory = ResolvingDataSource.Factory(
+            DefaultDataSource.Factory(context, httpDataSourceFactory)
+        ) { dataSpec: DataSpec ->
+            if (WeiboRequestHeaders.isWeiboHost(dataSpec.uri.host.orEmpty())) {
+                dataSpec.withRequestHeaders(WeiboRequestHeaders.CDN_REQUEST_HEADERS)
+            } else {
+                dataSpec
             }
+        }
+
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setAudioAttributes(audioAttributes, true) // 自动接管音频焦点
+            .build()
     }
 
-    // 播放错误自动降级回退（如 1080P 鉴权失败自动切换回默认可用流）
-    DisposableEffect(exoPlayer) {
+    // 播放失败按候选队列自动降级（1080P 被 CDN 拒绝 → 720P → 480P……），
+    // 全部失败才展示可读错误。以前只有「非默认档」才会降级回默认档，
+    // 默认档本身失败就是永久黑屏，这是「有些视频打不开」最直接的观感来源。
+    DisposableEffect(exoPlayer, candidates) {
         val errorListener = object : Player.Listener {
-            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                if (selectedStream?.url != videoUrl && videoUrl.isNotBlank()) {
-                    selectedStream = candidateStreams.firstOrNull { it.url == videoUrl }
-                        ?: VideoStreamInfo(label = "默认", url = videoUrl)
-                    exoPlayer.setMediaItem(MediaItem.fromUri(videoUrl))
-                    exoPlayer.prepare()
-                    exoPlayer.play()
+            override fun onPlayerError(error: PlaybackException) {
+                val failed = candidates.getOrNull(selectedIndex)?.url
+                    ?.let { failedUrls + it }
+                    ?: failedUrls
+                failedUrls = failed
+                val nextIndex = candidates.indexOfFirst { it.url !in failed }
+                if (nextIndex >= 0) {
+                    selectedIndex = nextIndex
+                } else {
+                    playbackError = error.toPlaybackMessage()
                 }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) playbackError = null
             }
         }
         exoPlayer.addListener(errorListener)
         onDispose {
             exoPlayer.removeListener(errorListener)
+        }
+    }
+
+    // 没有任何可用地址时直接给结论，不要留一个纯黑界面
+    LaunchedEffect(candidates) {
+        if (candidates.isEmpty()) {
+            playbackError = "该视频没有可用的播放地址（服务端未下发有效直链）"
         }
     }
 
@@ -253,19 +298,16 @@ fun VideoPlayerScreen(
         }
     }
 
-    // 清晰度平滑切换逻辑
-    LaunchedEffect(selectedStream?.url) {
-        val targetUrl = selectedStream?.url ?: return@LaunchedEffect
-        val currentUri = exoPlayer.currentMediaItem?.localConfiguration?.uri?.toString()
-        if (currentUri != null && currentUri != targetUrl) {
-            val position = exoPlayer.currentPosition
-            val isPlaying = exoPlayer.isPlaying
-            exoPlayer.setMediaItem(MediaItem.fromUri(targetUrl), position)
-            exoPlayer.prepare()
-            if (isPlaying) {
-                exoPlayer.play()
-            }
-        }
+    // 首屏播放 / 切换清晰度 / 播放失败降级：都走这里换源，保留当前进度
+    LaunchedEffect(exoPlayer, selectedIndex, reloadToken) {
+        val target = candidates.getOrNull(selectedIndex) ?: return@LaunchedEffect
+        val currentUrl = exoPlayer.currentMediaItem?.localConfiguration?.uri?.toString()
+        // reloadToken > 0 表示用户主动重试，即使地址相同也要重新 prepare
+        if (currentUrl == target.url && reloadToken == 0) return@LaunchedEffect
+        val position = if (currentUrl == null) 0L else exoPlayer.currentPosition.coerceAtLeast(0L)
+        exoPlayer.setMediaItem(MediaItem.fromUri(target.url), position)
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = true
     }
 
     // 按 Home 键（Android 8-11）监听兜底：只依赖监听相关的键，不跟随播放器重建
@@ -297,7 +339,11 @@ fun VideoPlayerScreen(
     }
 
     // 监听视频是否已渲染出首帧（首帧渲染前显示封面垫底，避免黑屏过渡）
-    var isFirstFrameRendered by remember { mutableStateOf(false) }
+    var isFirstFrameRendered by remember(exoPlayer) { mutableStateOf(false) }
+    // 换源后必须重新等首帧，否则封面垫底会在新画面出来前一直留着
+    LaunchedEffect(selectedIndex, reloadToken) {
+        isFirstFrameRendered = false
+    }
     DisposableEffect(exoPlayer) {
         val frameListener = object : Player.Listener {
             override fun onRenderedFirstFrame() {
@@ -328,6 +374,8 @@ fun VideoPlayerScreen(
                 }
             },
             update = { playerView ->
+                // 播放器实例可能因换视频重建，AndroidView 的 factory 不会重跑
+                if (playerView.player !== exoPlayer) playerView.player = exoPlayer
                 // 画中画模式下隐藏自带控制器，全屏时恢复
                 playerView.useController = !isInPipMode
             },
@@ -342,6 +390,48 @@ fun VideoPlayerScreen(
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize()
             )
+        }
+
+        // 播放失败：给出可读原因与重试入口，而不是一直黑屏
+        if (playbackError != null && !isInPipMode) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = playbackError.orEmpty(),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Surface(
+                    onClick = {
+                        playbackError = null
+                        failedUrls = emptySet()
+                        reloadToken++
+                    },
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.Black.copy(alpha = 0.54f),
+                    contentColor = Color.White
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "重试", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
         }
 
         // 顶部悬浮控制栏（画中画模式下完全隐藏，全屏模式下展示）
@@ -390,7 +480,7 @@ fun VideoPlayerScreen(
                 Spacer(modifier = Modifier.weight(1f))
 
                 // 清晰度选择药丸按钮
-                if (candidateStreams.size > 1) {
+                if (candidates.size > 1) {
                     Box {
                         Surface(
                             onClick = { showQualityMenu = true },
@@ -404,7 +494,7 @@ fun VideoPlayerScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = selectedStream?.label ?: "画质",
+                                    text = selectedCandidate?.label ?: "画质",
                                     style = MaterialTheme.typography.labelLarge,
                                     color = Color.White
                                 )
@@ -422,13 +512,13 @@ fun VideoPlayerScreen(
                             expanded = showQualityMenu,
                             onDismissRequest = { showQualityMenu = false }
                         ) {
-                            candidateStreams.forEach { stream ->
-                                val isSelected = stream.url == selectedStream?.url
+                            candidates.forEachIndexed { index, candidate ->
+                                val isSelected = index == selectedIndex
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
-                                                text = stream.label,
+                                                text = candidate.label,
                                                 color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                             )
                                             if (isSelected) {
@@ -443,7 +533,10 @@ fun VideoPlayerScreen(
                                         }
                                     },
                                     onClick = {
-                                        selectedStream = stream
+                                        selectedIndex = index
+                                        playbackError = null
+                                        failedUrls = emptySet()
+                                        reloadToken++
                                         showQualityMenu = false
                                     }
                                 )
@@ -498,4 +591,27 @@ fun VideoPlayerScreen(
             }
         }
     }
+}
+
+/**
+ * 把 Media3 的播放错误翻译成用户能理解的原因。
+ *
+ * 之前播放失败没有任何界面反馈（只有一帧黑屏 + 一直转圈），
+ * 既无法判断是网络、鉴权还是编码问题，也让「有些视频打不开」变成不可复现的猜测。
+ */
+private fun PlaybackException.toPlaybackMessage(): String = when (errorCode) {
+    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
+        "视频地址已失效或被 CDN 拒绝（HTTP 异常），可尝试切换画质"
+    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+        "网络连接失败，请检查网络后重试"
+    PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED ->
+        "该视频只提供明文 http 地址，系统已阻止播放"
+    PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+    PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED ->
+        "该视频格式暂不支持（可能是 HLS 直播流）"
+    PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+    PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ->
+        "当前设备不支持该视频编码"
+    else -> "视频播放失败（${errorCodeName}）"
 }

@@ -28,9 +28,6 @@ object WeiboImageClient {
     /** 1 次正常请求 + 1 次重试 */
     private const val MAX_ATTEMPTS = 2
 
-    /** 需要补请求头的域名后缀：微博图片 CDN、表情 CDN 与微博网页域名 */
-    private val refererHostSuffixes = listOf("sinaimg.cn", "sinajs.cn", "weibo.com", "weibo.cn")
-
     /**
      * 需要带会话 Cookie 的图片域名：私信 / 附件的 mss 通道（`attachment.api.weibo.com`）。
      * 实测不带 Cookie 一律 403，且与 Referer / UA 无关，所以只能补凭据。
@@ -70,8 +67,7 @@ object WeiboImageClient {
             }
             .build()
 
-    private fun isWeiboHost(host: String): Boolean =
-        refererHostSuffixes.any { host == it || host.endsWith(".$it") }
+    private fun isWeiboHost(host: String): Boolean = WeiboRequestHeaders.isWeiboHost(host)
 
     private fun requiresSessionCookie(host: String): Boolean =
         sessionCookieHostSuffixes.any { host == it || host.endsWith(".$it") }
