@@ -125,6 +125,18 @@ class ImageMorphState(
 
     val isPresent: Boolean get() = isOpen || progress.value > 0.001f
 
+    /**
+     * 收拢飞行期间是否允许上级页面继续接收滚动手势。
+     *
+     * 展开过渡 / 画廊浏览 / 跟手拖拽 / 预测返回全程都必须隔离触摸：此时手势属于查看器本身，
+     * 一旦下穿就会误触卡片进入正文，或让列表悄悄偏移、导致飞回槽位失真。
+     *
+     * 但 [collapse] 一旦开始就不可逆，这 300~400ms 里如果继续把滑动全部吞掉，
+     * 用户会明确感到「退出动画期间列表卡死」。所以只在这一阶段放行滚动；
+     * 此期间浮层不挂任何手势节点，防误触改为各点击回调内部延迟判 [isPresent]。
+     */
+    val allowsParentScroll: Boolean get() = !isPresent || isCollapsing
+
     val veilAlpha: Float get() = computeMorphVeil(progress.value) * dragVeilAlpha
 
     /**
@@ -306,15 +318,22 @@ class ImageMorphState(
                 initialVelocity = v
             )
             progress.snapTo(0f)
-            isOpen = false
-            isCollapsing = false
-            this@ImageMorphState.dragOffset = Offset.Zero
-            this@ImageMorphState.dragVeilAlpha = 1f
-            this@ImageMorphState.collapseScale = 1f
-            this@ImageMorphState.collapseOffset = Offset.Zero
-            this@ImageMorphState.currentDisplayUrl = null
-            this@ImageMorphState.ownerKey = null
+            finishCollapse()
         }
+    }
+
+    /**
+     * 收拢终态复位：所有「本次形变」的临时量必须归零，否则下一次打开会继承上一张的状态
+     */
+    private fun finishCollapse() {
+        isOpen = false
+        isCollapsing = false
+        dragOffset = Offset.Zero
+        dragVeilAlpha = 1f
+        collapseScale = 1f
+        collapseOffset = Offset.Zero
+        currentDisplayUrl = null
+        ownerKey = null
     }
 
     fun flyingFrame(): FlyingImageFrame? {

@@ -89,7 +89,6 @@ import androidx.compose.ui.unit.sp
 import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.components.WeiboPostCard
 import org.kazusa.matter.ui.media.morph.LocalImageMorphState
-import org.kazusa.matter.ui.media.morph.rememberImageMorphPresent
 import org.kazusa.matter.ui.theme.TextSecondary
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.geometry.Offset
@@ -132,8 +131,12 @@ fun TimelineScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val morphState = LocalImageMorphState.current
-    // 是否存在飞行中的大图：必须走 derivedStateOf，否则形变动画期间本页逐帧重组
-    val morphPresent by rememberImageMorphPresent(morphState)
+    // 大图在场期间是否允许列表滚动：必须走 derivedStateOf，否则形变动画期间本页逐帧重组。
+    // 展开 / 画廊 / 拖拽阶段禁用（避免形变途中列表悄悄偏移、导致飞回槽位失真），
+    // 收起飞行阶段放开（动画已不可逆，此时吞掉滑动只会被感知成「返回时列表卡住」）。
+    val morphAllowsScroll by remember(morphState) {
+        derivedStateOf { morphState?.allowsParentScroll != false }
+    }
 
     // 取一次列表快照：断点下标、分栏 key 与下面的 subList 必须来自同一份列表，
     // 否则下标可能落在上一份列表上，subList 会直接抛 IndexOutOfBoundsException（切分组时最容易触发）。
@@ -500,7 +503,7 @@ fun TimelineScreen(
                 else -> {
                     LazyColumn(
                         state = listState,
-                        userScrollEnabled = (!morphPresent && uiState.pendingRestoreIndex == null),
+                        userScrollEnabled = (morphAllowsScroll && uiState.pendingRestoreIndex == null),
                         modifier = Modifier
                             .fillMaxSize()
                             .background(MaterialTheme.colorScheme.surface),

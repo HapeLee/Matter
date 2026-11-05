@@ -167,7 +167,11 @@ fun StatusMediaGrid(
     val slotBoundsMap = remember(items) { mutableMapOf<Int, Rect>() }
     val slotRadiusMap = remember(items) { mutableMapOf<Int, Float>() }
 
-    val handleImageClick: (gridIndex: Int, Rect, Float) -> Unit = { gridIndex, bounds, cornerRadiusPx ->
+    val handleImageClick: (gridIndex: Int, Rect, Float) -> Unit = handler@{ gridIndex, bounds, cornerRadiusPx ->
+        // 大图在场期间（含收起飞行）不接受第二次打开：收起阶段浮层已不再拦触摸，
+        // 点击可能落到宫格上，重复 open 会把正在收尾的形变打断成一次新的展开。
+        // 放在回调里延迟读 isPresent，组合期不订阅进度，零重组成本。
+        if (morphState?.isPresent == true) return@handler
         val pictureIndex = pictureIndexOf[gridIndex]
         if (pictureIndex >= 0 && morphState != null && !bounds.isEmpty) {
             slotBoundsMap[pictureIndex] = bounds
@@ -318,6 +322,7 @@ private fun VideoMediaCard(
         { _, _, _, _, _ -> }
 ) {
     val sharedElementTarget = LocalSharedElementTarget.current
+    val morphState = LocalImageMorphState.current
     val sharedKey = remember(video.mid, video.videoUrl) { formatVideoSharedKey(video.mid, video.videoUrl) }
     Box(
         modifier = modifier
@@ -327,8 +332,11 @@ private fun VideoMediaCard(
             .clip(VideoCardShape)
             .background(Color.Black)
             .clickable {
-                sharedElementTarget?.selectVideo(sharedKey)
-                onVideoClick(video.videoUrl, video.title ?: fallbackTitle, video.streams, video.previewUrl, video.mid)
+                // 大图收起飞行期间浮层不再拦触摸，这里延迟判断，避免误跳到视频播放器
+                if (morphState?.isPresent != true) {
+                    sharedElementTarget?.selectVideo(sharedKey)
+                    onVideoClick(video.videoUrl, video.title ?: fallbackTitle, video.streams, video.previewUrl, video.mid)
+                }
             },
         contentAlignment = Alignment.Center
     ) {
@@ -365,6 +373,7 @@ private fun VideoGridCell(
         { _, _, _, _, _ -> }
 ) {
     val sharedElementTarget = LocalSharedElementTarget.current
+    val morphState = LocalImageMorphState.current
     val sharedKey = remember(video.mid, video.videoUrl) { formatVideoSharedKey(video.mid, video.videoUrl) }
     Box(
         modifier = modifier
@@ -373,8 +382,11 @@ private fun VideoGridCell(
             .clip(GridMediaShape)
             .background(Color.Black)
             .clickable {
-                sharedElementTarget?.selectVideo(sharedKey)
-                onVideoClick(video.videoUrl, video.title ?: fallbackTitle, video.streams, video.previewUrl, video.mid)
+                // 大图收起飞行期间浮层不再拦触摸，这里延迟判断，避免误跳到视频播放器
+                if (morphState?.isPresent != true) {
+                    sharedElementTarget?.selectVideo(sharedKey)
+                    onVideoClick(video.videoUrl, video.title ?: fallbackTitle, video.streams, video.previewUrl, video.mid)
+                }
             },
         contentAlignment = Alignment.Center
     ) {

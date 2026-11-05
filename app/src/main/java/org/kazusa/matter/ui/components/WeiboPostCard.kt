@@ -263,7 +263,10 @@ private fun PostCardContent(
                         )
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .clickable { onUserClick(post.user?.id) }
+                        .clickable {
+                            // 大图收起飞行期间浮层不再拦触摸：这里延迟判断，避免误跳到博主主页
+                            if (morphState?.isPresent != true) onUserClick(post.user?.id)
+                        }
                 )
 
                 Spacer(modifier = Modifier.width(10.dp))

@@ -58,6 +58,8 @@ import org.kazusa.matter.data.model.WeiboStatusDto
 import org.kazusa.matter.ui.group.GroupViewModel
 import org.kazusa.matter.ui.hotfeed.HotFeedScreen
 import org.kazusa.matter.ui.hotfeed.HotFeedViewModel
+import org.kazusa.matter.ui.media.morph.LocalImageMorphState
+import org.kazusa.matter.ui.media.morph.rememberImageMorphPresent
 import org.kazusa.matter.ui.navigation.LocalSharedTransitionSourceActive
 import org.kazusa.matter.ui.profile.ProfileScreen
 import org.kazusa.matter.ui.search.HotSearchBoardViewModel
@@ -204,6 +206,11 @@ fun MainTabsScreen(
     val currentGid by remember { derivedStateOf { timelineState.currentGid } }
     val unreadCount by remember { derivedStateOf { timelineState.unreadCount } }
 
+    // 大图在场期间禁止横向切页：收起飞行阶段垂直滚动是放开的（见 ImageMorphState.allowsParentScroll），
+    // 但横向滑动此时只会把页面横移走，属于纯误触。
+    val morphState = LocalImageMorphState.current
+    val morphPresent by rememberImageMorphPresent(morphState)
+
     // 只订阅「顶栏随滑动收起」这一个开关：整个 AppThemeState 的变化（换调色板、改种子色等）
     // 不该带着主框架和三个分页一起重组。
     val topBarAutoHide by remember(themePreferences) {
@@ -295,6 +302,7 @@ fun MainTabsScreen(
             HorizontalPager(
                 state = pagerState,
                 beyondViewportPageCount = 1,
+                userScrollEnabled = !morphPresent,
                 key = { it },
                 modifier = Modifier
                     .fillMaxSize()

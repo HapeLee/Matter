@@ -125,8 +125,11 @@ fun computeFlyingImageFrame(
     val cx = lerp(start.center.x, endCx, e1)
     val cy = lerp(start.center.y, endCy, e2)
 
+    // 必须与画廊层跟手时的缩放基准完全一致（都用拖拽向量长度，而不是只看竖向分量），
+    // 否则斜向拖拽抬手的那一帧，画廊层（缩得更小）与飞行层（缩得更大）尺寸对不上，
+    // 看起来就像「拖拽」和「飞回」两段动画中间被插了一帧跳变。
     val initialDragScale = if (dragOffset != Offset.Zero) {
-        (1f - (kotlin.math.abs(dragOffset.y) / 1800f)).coerceIn(0.65f, 1f)
+        (1f - (dragOffset.getDistance() / 1800f)).coerceIn(0.65f, 1f)
     } else {
         1f
     }

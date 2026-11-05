@@ -209,6 +209,18 @@ fun ImageMorphOverlay(
             morphState.reportScreenBounds(screenRect)
         }
 
+        // 跟手拖拽的渐隐系数：同时作用于背景遮罩与顶部/底部控件。
+        // 必须声明在下面两个 early return 之前，否则浮层卸载时这段组合直接消失，
+        // 复位 effect 永远不会执行，下一次打开会继承上一张图剩下的透明度。
+        var pageDragAlpha by remember { mutableFloatStateOf(1f) }
+        var isPageDragging by remember { mutableStateOf(false) }
+        LaunchedEffect(hostPresent) {
+            if (!hostPresent) {
+                pageDragAlpha = 1f
+                isPageDragging = false
+            }
+        }
+
         if (!morphState.isPresent) return@BoxWithConstraints
 
         val urls = morphState.urls
@@ -321,9 +333,6 @@ fun ImageMorphOverlay(
             currentDisplayDataUrl = currentTargetUrl
         }
 
-        var pageDragAlpha by remember { mutableFloatStateOf(1f) }
-        var isPageDragging by remember { mutableStateOf(false) }
-
         val currentLiveVideoUrl = remember(currentOriginalUrl, morphState.livePhotoMap) {
             morphState.getLivePhotoVideoUrl(currentOriginalUrl)
         }
@@ -332,21 +341,39 @@ fun ImageMorphOverlay(
         val isLivePlaying = (isLiveTogglePlaying || isLongPressPlaying) && morphState.progress.value >= 0.985f && !isPageDragging
 
         // 第一层：背景遮罩 (Veil) 与全屏触摸隔离盾（Touch Shield）
-        // 彻底拦截并消费浮层激活全周期（展开过渡、大图画廊、拖拽释放、收拢飞行）的一切触摸手势，
-        // 100% 杜绝任何手势下穿到底层微博卡片（防止误触卡片进入正文、防止误滑导致列表位置偏移）！
+        // 护盾分两档，区别只在「收拢飞行」这一段：
+        //
+        // 1) 展开过渡 / 大图画廊 / 跟手拖拽 / 预测返回预览：整段消费所有触摸。
+        //    此时手势属于查看器本身，下穿会误触卡片进入正文，或让列表悄悄偏移、
+        //    导致飞回槽位的终点矩形失真。
+        // 2) 收拢飞行（isCollapsing，300~400ms）：**完全不挂手势节点**，遮罩只画不拦。
+        //
+        // 为什么不选「只消费 down、放行 move」这种折中写法：
+        // 实测证明在 down 上 consume 会让下层整条识别链放弃本次手势（滚动、拖拽都拿不到），
+        // 表现为「归位完成后才能滑动」。Compose 的点击与滚动本来就靠
+        // 「clickable 消费 down / scrollable 只看 move 是否被消费」共存，
+        // 一旦中途插一个消费 down 的节点，这个共存关系就被破坏了。
+        // 所以这里交给下层一体化处理，点击防护改在各回调内部延迟判断 isPresent（零重组成本）。
+        val settling by remember(morphState) { derivedStateOf { morphState.isCollapsing } }
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        down.consume()
-                        do {
-                            val event = awaitPointerEvent()
-                            event.changes.forEach { it.consume() }
-                        } while (event.changes.any { it.pressed })
+                .then(
+                    if (settling) {
+                        Modifier
+                    } else {
+                        Modifier.pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                down.consume()
+                                do {
+                                    val event = awaitPointerEvent()
+                                    event.changes.forEach { it.consume() }
+                                } while (event.changes.any { it.pressed })
+                            }
+                        }
                     }
-                }
+                )
                 .drawBehind {
                     val currentVeil = (morphState.veilAlpha * pageDragAlpha * (1f - predictiveBackProgress * 0.35f)).coerceIn(0f, 1f)
                     drawRect(Color.Black.copy(alpha = currentVeil))
@@ -452,17 +479,29 @@ fun ImageMorphOverlay(
                     },
                     pageIndex = pageIndex,
                     isCurrentPage = (pagerState.currentPage == pageIndex),
-                    onCollapse = { dragOffset, initialVelocity, veilAlpha ->
+                    onCollapse = { dragOffset, fingerSpeedPx, veilAlpha ->
                         morphState.collapse(
                             scope = scope,
-                            initialVelocity = initialVelocity,
+                            // fingerSpeedPx 是手指速度（px/s），而 collapse 要的是 progress 速度（progress/s）。
+                            // 直接把正的 px/s 丢进去会被限幅成正的初速度，等于让 progress 先朝「展开」方向
+                            // 顶一下再回落，视觉上就是「跟手拖拽」与「飞回收拢」两段断裂。
+                            // 这里按整个拖拽行程归一化并取负号（progress 由 1 走向 0）。
+                            initialVelocity = if (fingerSpeedPx > 0f) {
+                                -(fingerSpeedPx / morphState.dragRangePx())
+                            } else {
+                                0f
+                            },
                             dragOffset = dragOffset,
-                            veilAlpha = veilAlpha,
+                            // 渐隐已经完全由 pageDragAlpha 承担；这里再叠一份 finalAlpha 就变成平方，
+                            // 抬手瞬间遮罩会突然变暗一档。
+                            veilAlpha = 1f,
                             initialScale = currentZoomScale,
                             initialOffset = currentZoomOffset,
                             displayUrl = currentDisplayDataUrl
                         )
-                        pageDragAlpha = 1f
+                        // 沿用手指离开时的渐隐程度，让遮罩与顶/底控件随 progress 一起淡出。
+                        // 之前这里直接复位成 1f，会让拖拽时已经隐掉的返回按钮在抬手瞬间闪回一次。
+                        pageDragAlpha = veilAlpha
                         isPageDragging = false
                     },
                     onZoomStateChanged = { scale, offset ->
@@ -501,13 +540,16 @@ fun ImageMorphOverlay(
             ) {
                 IconButton(
                     onClick = {
-                        morphState.updateCurrentZoom(currentZoomScale, currentZoomOffset, currentDisplayDataUrl)
-                        morphState.collapse(
-                            scope = scope,
-                            initialScale = currentZoomScale,
-                            initialOffset = currentZoomOffset,
-                            displayUrl = currentDisplayDataUrl
-                        )
+                        // 收起途中按钮还会停留几十毫秒，重复触发只会把飞行重新起一次
+                        if (!morphState.isCollapsing) {
+                            morphState.updateCurrentZoom(currentZoomScale, currentZoomOffset, currentDisplayDataUrl)
+                            morphState.collapse(
+                                scope = scope,
+                                initialScale = currentZoomScale,
+                                initialOffset = currentZoomOffset,
+                                displayUrl = currentDisplayDataUrl
+                            )
+                        }
                     },
                     modifier = Modifier
                         .clip(CircleShape)
