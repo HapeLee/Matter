@@ -50,7 +50,7 @@ class LivePhotoImageTest {
         val output = java.io.ByteArrayOutputStream()
         val clip = byteArrayOf(1, 2, 3)
         MotionPhotoComposer.compose(jpeg.toByteArray().inputStream(), clip.inputStream(), clip.size.toLong(), output)
-        val xmp = JpegContainer.read(output.toByteArray().inputStream())!!.xmpSegments.single().xml
+        val xmp = JpegContainer.read(output.toByteArray().inputStream())!!.xmpSegments.single().payload
         val document = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
             .newDocumentBuilder().parse(xmp.inputStream())
         assertEquals(1, document.getElementsByTagNameNS("http://ns.google.com/photos/1.0/container/", "Directory").length)

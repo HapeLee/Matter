@@ -123,12 +123,17 @@ data class WeiboStatusDto(
 
     /**
      * 映射每张图片的大图/原图 URL 或 picId 到对应的实况短视频 URL。
+     *
+     * 实况短视频的 `video` / `video_url` 字段历史上常带 `http://` 前缀（典型如
+     * `http://g.us.sinaimg.cn/o0/xxx.mp4`），而 targetSdk 28+ 的明文策略会直接拒绝这类请求，
+     * 表现为「保存实况」时抛出 `Cleartext HTTP traffic to … not permitted`、长按预览也黑屏。
+     * 这里统一走 [normalizeVideoUrl]：微博 CDN 升级到 https，非 http(s) 地址直接丢弃。
      */
     val livePhotoVideoMap: Map<String, String> by lazy {
         if (picInfos.isEmpty()) return@lazy emptyMap()
         val map = mutableMapOf<String, String>()
         for ((picId, info) in picInfos) {
-            val videoUrl = info.liveVideoUrl
+            val videoUrl = info.liveVideoUrl?.let { normalizeVideoUrl(it) }
             if (info.isLivePhoto && !videoUrl.isNullOrBlank()) {
                 map[picId] = videoUrl
                 info.large?.url?.let {

@@ -22,7 +22,7 @@ object MotionPhotoParser {
             val fileLength = input.length()
             if (layout.imageLength >= fileLength) return null
             for (segment in layout.xmpSegments) {
-                val metadata = readMetadata(segment.xml) ?: continue
+                val metadata = readMetadata(segment.payload) ?: continue
                 if (metadata.disabled) return null
                 val length = metadata.videoLength ?: continue
                 if (length > 0 && length <= fileLength - layout.imageLength) {

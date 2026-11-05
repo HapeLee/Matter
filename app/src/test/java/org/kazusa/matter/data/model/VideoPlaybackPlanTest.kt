@@ -40,6 +40,11 @@ class VideoPlaybackPlanTest {
             "https://f.us.sinaimg.cn/o0/a.mp4",
             normalizeVideoUrl("http://f.us.sinaimg.cn/o0/a.mp4")
         )
+        // 实况短视频的典型地址（保存实况时报 Cleartext 的就是这个 host）
+        assertEquals(
+            "https://g.us.sinaimg.cn/o0/live.mp4",
+            normalizeVideoUrl("http://g.us.sinaimg.cn/o0/live.mp4")
+        )
     }
 
     @Test
