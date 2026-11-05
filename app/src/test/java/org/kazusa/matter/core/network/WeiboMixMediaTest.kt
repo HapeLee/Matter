@@ -130,7 +130,7 @@ class WeiboMixMediaTest {
     }
 
     @Test
-    fun mixMediaWithOnlyPicturesDoesNotDuplicatePicIds() {
+    fun mixMediaTopsUpPicturesItOmitsWithoutDuplicating() {
         val post = decode(
             """
             {
@@ -147,8 +147,10 @@ class WeiboMixMediaTest {
             """.trimIndent()
         )
 
+        // mix 保持第一顺位，pic_ids 里 mix 漏掉的图按原顺序补在末尾（不重复 pic_e）
         val items = post.mediaItems
-        assertEquals(1, items.size)
+        assertEquals(2, items.size)
         assertEquals("https://wx1.sinaimg.cn/large/pic_e.jpg", (items[0] as StatusMediaItem.Picture).previewUrl)
+        assertEquals("https://wx1.sinaimg.cn/large/pic_f.jpg", (items[1] as StatusMediaItem.Picture).previewUrl)
     }
 }

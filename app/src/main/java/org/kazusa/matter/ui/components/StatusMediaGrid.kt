@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +68,9 @@ private val GridMediaShape = RoundedCornerShape(4.dp)
 /** 视频卡片（整行）的圆角 */
 private val VideoCardShape = RoundedCornerShape(8.dp)
 
+/** 折叠态九宫格铺满的格子数；第 10 项及以后收进最后一格的 "+N" 蒙层。 */
+private const val NINE_GRID_CELL_COUNT = 9
+
 /**
  * 信息流媒体区实际请求的地址：降到缩略图档位（约 440px），原图仅在查看器按需加载。
  *
@@ -105,7 +109,9 @@ internal fun WeiboStatusDto.videoTitleFallback(maxLength: Int = 20): String =
  * - 1 项：图片走单图自适应（不限比例 + 尺寸边界）；视频走整行封面卡
  * - 2 项：单行 2 列（宽 80%）
  * - 4 项：经典 2x2 田字格（宽 75%）
- * - 3、5~9 项：3 列九宫格，超出 9 项时第 9 格叠加 "+N" 蒙层
+ * - 3、5~9 项：3 列九宫格
+ * - 超过 9 项：默认仍是九宫格，第 9 格叠加 "+N" 蒙层；点击该格**在原地展开**全部图片，
+ *   而不是先打开大图 —— 否则最后几张在版面上永远看不到（只能靠查看器逐张翻）。
  *
  * 视频格子与图片格子同尺寸（正方形），封面 + 播放按钮 + 时长角标，
  * 点击进入播放器并与卡片/正文的对应格子做形变转场。
@@ -133,6 +139,10 @@ fun StatusMediaGrid(
         { _, _, _, _, _ -> }
 ) {
     if (items.isEmpty()) return
+
+    // 超过 9 项时默认折叠；点击 "+N" 格子后原地展开全部媒体单元。
+    // 用 items 作为 key：换一条微博（或同一卡片的媒体列表变化）时重新回到折叠态。
+    var expanded by rememberSaveable(items) { mutableStateOf(false) }
 
     // 图片查看器 / 共享元素只认图片，视频格子不参与图片形变
     val pictures = remember(items) {
@@ -196,7 +206,13 @@ fun StatusMediaGrid(
     }
 
     @Composable
-    fun mediaCell(index: Int, cellModifier: Modifier, extraOverlayText: String? = null) {
+    fun mediaCell(
+        index: Int,
+        cellModifier: Modifier,
+        extraOverlayText: String? = null,
+        /** 折叠格（"+N"）的点击动作：展开全部媒体单元，而不是打开大图查看器。 */
+        onFoldClick: (() -> Unit)? = null
+    ) {
         when (val item = items[index]) {
             is StatusMediaItem.Picture -> {
                 val pictureIndex = pictureIndexOf[index]
@@ -212,7 +228,9 @@ fun StatusMediaGrid(
                         slotBoundsMap[pictureIndex] = b
                         slotRadiusMap[pictureIndex] = r
                     },
-                    onClick = { bounds, radius -> handleImageClick(index, bounds, radius) }
+                    onClick = { bounds, radius ->
+                        if (onFoldClick != null) onFoldClick() else handleImageClick(index, bounds, radius)
+                    }
                 )
             }
             is StatusMediaItem.Video -> VideoGridCell(
@@ -276,10 +294,11 @@ fun StatusMediaGrid(
             }
         }
         else -> {
-            // 3、5~9 项及以上九宫格
-            val visibleCount = items.size.coerceAtMost(9)
+            // 3、5~9 项九宫格；超过 9 项时先折叠到第 9 格的 "+N" 蒙层，点它再原地展开全部
+            val extraCount = items.size - NINE_GRID_CELL_COUNT
+            val folded = !expanded && extraCount > 0
+            val visibleCount = if (folded) NINE_GRID_CELL_COUNT else items.size
             val rows = (0 until visibleCount).chunked(3)
-            val extraCount = items.size - 9
 
             Column(
                 modifier = modifier.fillMaxWidth(),
@@ -291,17 +310,39 @@ fun StatusMediaGrid(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         rowIndices.forEach { index ->
-                            val isLastOfNine = extraCount > 0 && index == 8
+                            val isFoldCell = folded && index == NINE_GRID_CELL_COUNT - 1
                             mediaCell(
                                 index = index,
                                 cellModifier = Modifier.weight(1f),
-                                extraOverlayText = if (isLastOfNine) "+$extraCount" else null
+                                extraOverlayText = if (isFoldCell) "+$extraCount" else null,
+                                onFoldClick = if (isFoldCell) {
+                                    { expanded = true }
+                                } else {
+                                    null
+                                }
                             )
                         }
                         // 补齐空白格保持对齐
                         repeat(3 - rowIndices.size) {
                             Box(modifier = Modifier.weight(1f))
                         }
+                    }
+                }
+
+                // 展开后给一个收起入口：信息流卡片展开成多行后必须能折回原状
+                if (!folded && extraCount > 0) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { expanded = false }
+                            .padding(vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "收起",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
             }

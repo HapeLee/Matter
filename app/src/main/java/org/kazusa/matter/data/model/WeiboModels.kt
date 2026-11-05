@@ -82,23 +82,34 @@ data class WeiboStatusDto(
     /**
      * 原图档 URL 列表。结果会被缓存，避免每次读取都重新 map 出新的 List。
      *
-     * 下游 `ImageGrid` 用 `remember(images)` 缓存插槽信息，若每次返回新实例会导致缓存失效，
+     * 下游宫格用 `remember(images)` 缓存插槽信息，若每次返回新实例会导致缓存失效，
      * 因此这里必须保证同一实例内引用稳定。
+     *
+     * **三组来源必须合并而不是二选一**：超过 9 张图时，服务端常见 `pic_urls` 只带前 9 条
+     * （旧字段为了兼容单页宫格做了截断），完整列表只在 `pic_ids` / `pic_infos` 里；
+     * 早期实现按 `picUrls -> picIds -> 单图` 的顺序短路取第一组非空结果，
+     * 于是第 10 张以后的图片整条链路（宫格 / 查看器）都拿不到。
+     * 这里按 picId（`{host}/{size}/{picId}.jpg` 里的 picId，与 CDN 主机、尺寸档无关）去重后合并，
+     * 既保留服务端顺序，也不会把同一张图重复铺两格。
      */
     val allLargeImageUrls: List<String> by lazy {
-        val fromPicUrls = picUrls.mapNotNull { pic ->
-            (pic.originalPic ?: pic.bmiddlePic ?: pic.thumbnailPic)
-                ?.withWeiboImageSize(WeiboImageSize.LARGE)
+        val merged = LinkedHashMap<String, String>()
+
+        fun add(rawUrl: String?) {
+            val url = rawUrl?.withWeiboImageSize(WeiboImageSize.LARGE)?.takeIf { it.isNotBlank() }
+                ?: return
+            merged.putIfAbsent(extractWeiboPicId(url) ?: url, url)
         }
-        when {
-            fromPicUrls.isNotEmpty() -> fromPicUrls
-            picIds.isNotEmpty() -> picIds.map { weiboImageUrlFromId(it, WeiboImageSize.LARGE) }
-            else -> {
-                val single = (originalPic ?: bmiddlePic ?: thumbnailPic)
-                    ?.withWeiboImageSize(WeiboImageSize.LARGE)
-                if (!single.isNullOrBlank()) listOf(single) else emptyList()
-            }
+
+        picUrls.forEach { pic -> add(pic.originalPic ?: pic.bmiddlePic ?: pic.thumbnailPic) }
+        picIds.forEach { add(weiboImageUrlFromId(it, WeiboImageSize.LARGE)) }
+        // `pic_infos` 是 picId -> 各档位详情的映射；只补前两组都没覆盖到的图，保持服务端顺序
+        picInfos.values.forEach { info ->
+            add(info.original?.url ?: info.large?.url ?: info.bmiddle?.url ?: info.thumbnail?.url)
         }
+        add(originalPic ?: bmiddlePic ?: thumbnailPic)
+
+        merged.values.toList()
     }
 
     /**
@@ -143,7 +154,8 @@ data class WeiboStatusDto(
      *
      * 顺序来源优先级：
      * 1. `mix_media_info.items[]`：图文混排微博的真实顺序（视频可能夹在图片中间）；
-     * 2. 仅图片（`pic_urls` / `pic_ids` / 单图字段）；
+     *    mix 里缺失的图片用 [allLargeImageUrls] 按 picId 去重后补到末尾（多图微博的 mix 可能也是截断的）；
+     * 2. 仅图片（`pic_urls` / `pic_ids` / `pic_infos` / 单图字段，见 [allLargeImageUrls]）；
      * 3. 服务端没有下发 `mix_media_info`、但同时有配图与 `page_info` 视频时，
      *    把视频并入同一列表末尾，仍然走同一个宫格，不再单独占一行。
      *
@@ -153,7 +165,18 @@ data class WeiboStatusDto(
         val hostMid = idStr ?: mid ?: id?.toString() ?: ""
         val mixed = mixMediaInfo?.items.orEmpty()
             .mapNotNull { it.toStatusMediaItem(hostMid) }
-        if (mixed.isNotEmpty()) return@lazy mixed
+        if (mixed.isNotEmpty()) {
+            // 混排顺序最权威，但不能整体信任：多图微博里 `mix_media_info.items` 也可能只带前 9 条。
+            // 用 pic_ids / pic_infos 把混排里缺失的图片按 picId 去重后补到末尾，
+            // 保证第 10 张及以后既能在宫格里展开、也能在查看器里翻到。
+            val presentIds = mixed.mapNotNullTo(mutableSetOf<String>()) { item ->
+                (item as? StatusMediaItem.Picture)?.previewUrl?.let(::extractWeiboPicId)
+            }
+            val missingPictures = allLargeImageUrls
+                .filter { url -> extractWeiboPicId(url)?.let { it in presentIds } != true }
+                .map { StatusMediaItem.Picture(it) }
+            return@lazy if (missingPictures.isEmpty()) mixed else mixed + missingPictures
+        }
 
         val pictures = allLargeImageUrls.map { StatusMediaItem.Picture(it) }
         val pageVideo = pageInfo?.toStatusVideo(hostMid)
