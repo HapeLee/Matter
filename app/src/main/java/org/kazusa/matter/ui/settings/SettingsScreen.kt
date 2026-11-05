@@ -50,8 +50,6 @@ import org.kazusa.matter.ui.components.SettingItem
 import org.kazusa.matter.ui.components.TopBarTitleText
 import org.kazusa.matter.ui.theme.AppThemeState
 import org.kazusa.matter.ui.theme.ThemePreferences
-import org.kazusa.matter.ui.theme.displayName
-import org.kazusa.matter.ui.theme.toHexString
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,7 +75,7 @@ fun SettingsScreen(
                 scrollState = scrollState,
                 title = { scroll ->
                     TopBarTitleText(
-                        text = "设置与外观",
+                        text = "设置",
                         scroll = scroll,
                         backdrop = backdrop,
                         onBackClick = onBackClick
@@ -101,22 +99,22 @@ fun SettingsScreen(
                 ),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. 外观个性化
-            SettingGroup(title = "外观与个性化") {
+            // 1. 外观
+            SettingGroup(title = "外观") {
                 SettingItem(
                     title = "主题与调色板",
                     description = if (themeState.dynamicColor)
-                        "系统壁纸 Monet 动态色彩"
+                        "跟随系统壁纸取色"
                     else
-                        "种子色 ${themeState.seedColor.toHexString()} · ${themeState.paletteStyle.displayName()} 风格",
+                        "自定义种子色与调色风格",
                     onClick = onNavigateToAppearance
                 )
             }
 
-            // 2. 图片与流量
-            SettingGroup(title = "图片与流量") {
+            // 2. 图片
+            SettingGroup(title = "图片") {
                 SettingItem(
-                    title = "大图清晰度",
+                    title = "图片清晰度",
                     description = mediaState.imageQualityMode.label(),
                     dropdownMenu = { onDismiss ->
                         ImageQualityMode.entries.forEach { mode ->
@@ -156,20 +154,16 @@ fun SettingsScreen(
                 )
             }
 
-            // 3. 关于与系统信息
-            SettingGroup(title = "关于应用") {
+            // 3. 关于
+            SettingGroup(title = "关于") {
                 SettingItem(
                     title = "开源组件",
-                    description = "组件版本、项目链接与开源许可证",
+                    description = "第三方库与开源许可证",
                     onClick = onNavigateToOpenSource
                 )
                 SettingItem(
                     title = "应用版本",
-                    description = "v${BuildConfig.VERSION_NAME} (构建 ${BuildConfig.VERSION_CODE})"
-                )
-                SettingItem(
-                    title = "架构与依赖",
-                    description = "Ktor + DataStore + Kolor + Media3"
+                    description = "v${BuildConfig.VERSION_NAME}"
                 )
             }
         }
@@ -183,7 +177,7 @@ private fun ImageQualityMode.label(): String = when (this) {
 }
 
 private fun ImageQualityMode.description(): String = when (this) {
-    ImageQualityMode.THUMBNAIL_ONLY -> "始终先加载中等档，需要时手动点按查看原图"
-    ImageQualityMode.WIFI_ORIGINAL -> "非计费网络自动加载原图，移动网络需手动点按"
-    ImageQualityMode.ALWAYS_ORIGINAL -> "始终自动加载原图，最清晰但更耗流量"
+    ImageQualityMode.THUMBNAIL_ONLY -> "仅小图，点击看原图"
+    ImageQualityMode.WIFI_ORIGINAL -> "Wi-Fi 下加载原图"
+    ImageQualityMode.ALWAYS_ORIGINAL -> "始终加载原图，更耗流量"
 }

@@ -1,6 +1,6 @@
 # 开源组件页面
 
-入口：「我的 → 更多设置 → 开源组件」。使用 AboutLibraries 15.3.0 的 Material 3 UI，展示当前构建使用的组件、版本、项目链接与许可证正文，跟随 Matter 的主题设置。
+入口：「我的 → 设置 → 开源组件」。使用 AboutLibraries 15.3.0 的 Material 3 UI，展示当前构建使用的组件、版本、项目链接与许可证正文，跟随 Matter 的主题设置。
 
 `com.mikepenz.aboutlibraries.plugin.android` 在 Android 构建时按变体自动生成 `R.raw.aboutlibraries`，不需要手工维护清单或单独执行导出命令。`includePlatform = false` 排除仅用于约束版本的 BOM。清单包括运行时的传递依赖，排除测试与编译器依赖。
 

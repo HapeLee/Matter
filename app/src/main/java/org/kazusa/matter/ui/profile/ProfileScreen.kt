@@ -24,10 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,7 +60,6 @@ import org.kazusa.matter.data.repository.AuthRepository
 import org.kazusa.matter.ui.components.ImmersiveTopBar
 import org.kazusa.matter.ui.components.MatterCard
 import org.kazusa.matter.ui.components.TopBarTitleText
-import org.kazusa.matter.ui.theme.ThemePreferences
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 
@@ -71,10 +68,7 @@ import kotlinx.coroutines.launch
 fun ProfileScreen(
     authPreferences: AuthPreferences,
     authRepository: AuthRepository,
-    themePreferences: ThemePreferences,
-    onNavigateToGroups: () -> Unit,
     onNavigateToSettings: () -> Unit,
-    onNavigateToAppearance: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
     onNavigateToSavedPosts: () -> Unit = {},
     onNavigateToMyPosts: () -> Unit = {},
@@ -286,21 +280,9 @@ fun ProfileScreen(
                         onClick = onNavigateToHistory
                     )
                     ProfileMenuRow(
-                        icon = Icons.Default.Palette,
-                        title = "外观与调色板",
-                        subtitle = "深浅色、种子色彩与 Kolor 调色风格",
-                        onClick = onNavigateToAppearance
-                    )
-                    ProfileMenuRow(
-                        icon = Icons.Default.FilterList,
-                        title = "关注分组管理",
-                        subtitle = "配置动态顶部展示分组、排序与管理",
-                        onClick = onNavigateToGroups
-                    )
-                    ProfileMenuRow(
                         icon = Icons.Default.Settings,
-                        title = "更多设置",
-                        subtitle = "大图清晰度、系统信息与关于",
+                        title = "设置",
+                        subtitle = "外观主题、图片清晰度与关于",
                         onClick = onNavigateToSettings
                     )
                 }

@@ -1,53 +1,27 @@
 package org.kazusa.matter.ui.theme
 
-import androidx.compose.foundation.shape.RoundedCornerShape
-
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -55,17 +29,15 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import org.kazusa.matter.ui.effect.rememberBlurEffectsEnabled
 import kotlinx.coroutines.launch
 import org.kazusa.matter.ui.components.ImmersiveTopBar
-import org.kazusa.matter.ui.components.SettingCard
 import org.kazusa.matter.ui.components.SettingGroup
 import org.kazusa.matter.ui.components.SettingItem
 import org.kazusa.matter.ui.components.SwitchSettingItem
 import org.kazusa.matter.ui.components.TopBarTitleText
-import kotlin.math.roundToInt
 
 /**
  * 外观与个性化独立设置页面 (包含深浅色、AMOLED 纯黑、Monet、Kolor 调色板样式、自定义种子色拾取器等)
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppearanceScreen(
     themePreferences: ThemePreferences,
@@ -174,7 +146,7 @@ fun AppearanceScreen(
                 // 模糊效果
                 SwitchSettingItem(
                     title = "模糊效果",
-                    description = "统一控制背景模糊与液态玻璃效果，关闭后使用实色背景",
+                    description = "背景模糊与液态玻璃效果",
                     checked = themeState.blurEffectsEnabled,
                     onCheckedChange = { enabled ->
                         coroutineScope.launch {
@@ -186,7 +158,7 @@ fun AppearanceScreen(
                 // AMOLED 纯黑背景
                 SwitchSettingItem(
                     title = "AMOLED 纯黑背景",
-                    description = "深色模式下使用纯黑(#000000)背景，屏幕更省电",
+                    description = "深色模式使用纯黑背景，更省电",
                     checked = themeState.isAmoled,
                     onCheckedChange = { checked ->
                         coroutineScope.launch {
@@ -198,7 +170,7 @@ fun AppearanceScreen(
                 // Android 12+ Monet 取色
                 SwitchSettingItem(
                         title = "系统壁纸动态取色 (Monet)",
-                        description = "提取当前系统桌面壁纸的主色调并全应用适配（开启时优先于自定义色彩）",
+                        description = "跟随壁纸配色，优先于自定义色彩",
                         checked = themeState.dynamicColor,
                         onCheckedChange = { checked ->
                             coroutineScope.launch {
@@ -212,7 +184,7 @@ fun AppearanceScreen(
             SettingGroup(title = "首页与滑动") {
                 SwitchSettingItem(
                     title = "滑动时隐藏顶栏",
-                    description = "在动态与热门页向下滑动时顶栏自动收起，向上滑动或回到顶部时重新出现（与底栏同步）",
+                    description = "下滑收起顶栏，上滑或回到顶部恢复",
                     checked = themeState.topBarAutoHide,
                     onCheckedChange = { enabled ->
                         coroutineScope.launch {
@@ -222,8 +194,8 @@ fun AppearanceScreen(
                 )
             }
 
-            // 3. Kolor 调色板与色彩引擎分组
-            SettingGroup(title = "Kolor 色彩引擎与调色板") {
+            // 3. 调色板
+            SettingGroup(title = "调色板") {
                 // 调色板样式 (下拉菜单模式)
                 val currentStyle = AvailablePaletteStyles.find { it.style == themeState.paletteStyle }
                 val currentStyleName = currentStyle?.title ?: themeState.paletteStyle.name
@@ -231,7 +203,7 @@ fun AppearanceScreen(
                 SettingItem(
                     title = "调色板样式",
                     description = if (themeState.dynamicColor)
-                        "跟随系统 Monet"
+                        "跟随系统壁纸"
                     else
                         currentStyleName,
                     dropdownMenu = { onDismiss ->
@@ -282,101 +254,11 @@ fun AppearanceScreen(
                 SettingItem(
                     title = "主题色彩",
                     description = if (themeState.dynamicColor)
-                        "系统壁纸 Monet 动态色彩"
+                        "跟随系统壁纸"
                     else
-                        "种子色 $seedColorLabel",
+                        seedColorLabel,
                     onClick = { showColorSheet = true }
                 )
-            }
-
-            // 4. 实时色彩方案组件预览
-            SettingGroup(title = "色彩预览效果") {
-                SettingCard(cornerRadius = 16.dp) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "组件与容器色彩效果",
-                            style = MaterialTheme.typography.bodyMediumEmphasized
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(MaterialTheme.colorScheme.primary),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "Primary",
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(MaterialTheme.colorScheme.secondary),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "Secondary",
-                                    color = MaterialTheme.colorScheme.onSecondary,
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(MaterialTheme.colorScheme.tertiary),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "Tertiary",
-                                    color = MaterialTheme.colorScheme.onTertiary,
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {},
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text("主按钮")
-                            }
-                            FilledTonalButton(
-                                onClick = {},
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text("强调按钮")
-                            }
-                            OutlinedButton(
-                                onClick = {},
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text("轮廓按钮")
-                            }
-                        }
-                    }
-                }
             }
         }
     }

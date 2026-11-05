@@ -45,15 +45,15 @@ data class PaletteStyleOption(
 )
 
 val AvailablePaletteStyles = listOf(
-    PaletteStyleOption(PaletteStyle.TonalSpot, "柔和", "默认 M3 风格，色调平衡和谐"),
-    PaletteStyleOption(PaletteStyle.Neutral, "中性", "低饱和度，沉稳素雅接近单色"),
-    PaletteStyleOption(PaletteStyle.Vibrant, "鲜艳", "高饱和度，活力明艳视觉冲击强"),
-    PaletteStyleOption(PaletteStyle.Expressive, "生动", "跳跃丰富，高对比与互补色"),
-    PaletteStyleOption(PaletteStyle.Rainbow, "彩虹", "色彩缤纷，柔美绚丽的多彩渐变"),
-    PaletteStyleOption(PaletteStyle.FruitSalad, "果盘", "果味撞色，明亮轻快的趣味感"),
-    PaletteStyleOption(PaletteStyle.Monochrome, "单色", "黑白灰阶，极简素净无彩色"),
-    PaletteStyleOption(PaletteStyle.Fidelity, "保真", "高保真，尽可能保留种子色原貌"),
-    PaletteStyleOption(PaletteStyle.Content, "内容", "内容优先，自适应低干扰浅淡色彩")
+    PaletteStyleOption(PaletteStyle.TonalSpot, "柔和", "色调平衡"),
+    PaletteStyleOption(PaletteStyle.Neutral, "中性", "低饱和，沉稳"),
+    PaletteStyleOption(PaletteStyle.Vibrant, "鲜艳", "高饱和，明艳"),
+    PaletteStyleOption(PaletteStyle.Expressive, "生动", "高对比，跳跃"),
+    PaletteStyleOption(PaletteStyle.Rainbow, "彩虹", "多彩渐变"),
+    PaletteStyleOption(PaletteStyle.FruitSalad, "果盘", "明亮撞色"),
+    PaletteStyleOption(PaletteStyle.Monochrome, "单色", "黑白灰阶"),
+    PaletteStyleOption(PaletteStyle.Fidelity, "保真", "保留种子色"),
+    PaletteStyleOption(PaletteStyle.Content, "内容", "浅淡低干扰")
 )
 
 fun PaletteStyle.displayName(): String {

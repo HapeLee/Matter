@@ -109,7 +109,6 @@ internal enum class MainTab(
 fun MainTabsScreen(
     onNavigateToGroups: () -> Unit,
     onNavigateToSettings: () -> Unit,
-    onNavigateToAppearance: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
     onNavigateToSavedPosts: () -> Unit = {},
     onNavigateToMyPosts: () -> Unit = {},
@@ -404,10 +403,7 @@ fun MainTabsScreen(
                             ProfileScreen(
                                 authPreferences = authPreferences,
                                 authRepository = authRepository,
-                                themePreferences = themePreferences,
-                                onNavigateToGroups = onNavigateToGroups,
                                 onNavigateToSettings = onNavigateToSettings,
-                                onNavigateToAppearance = onNavigateToAppearance,
                                 onNavigateToHistory = onNavigateToHistory,
                                 onNavigateToSavedPosts = onNavigateToSavedPosts,
                                 onNavigateToMyPosts = onNavigateToMyPosts,

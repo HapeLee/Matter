@@ -321,7 +321,7 @@ fun TopBarTitleCapsule(
 }
 
 /**
- * 标准顶栏标题文本胶囊（如「发现」、「关注分组」、「设置与外观」、「微博正文」）。
+ * 标准顶栏标题文本胶囊（如「发现」、「关注分组」、「设置」、「微博正文」）。
  *
  * 无胶囊时使用 headlineMediumEmphasized；胶囊显示时切换为 headlineSmallEmphasized。
  * 保留 [liquidTextShadow] 景深阴影与滚动内收动画。

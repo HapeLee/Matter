@@ -326,9 +326,6 @@ fun MatterNavGraph() {
                                                     onNavigateToSettings = {
                                                         navigate(Screen.Settings)
                                                     },
-                                                    onNavigateToAppearance = {
-                                                        navigate(Screen.Appearance)
-                                                    },
                                                     onNavigateToHistory = {
                                                         navigate(Screen.BrowsingHistory)
                                                     },
