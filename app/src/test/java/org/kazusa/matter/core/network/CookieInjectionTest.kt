@@ -7,8 +7,11 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.http.HttpHeaders
+import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -84,6 +87,76 @@ class CookieInjectionTest {
         } finally {
             c.close()
         }
+    }
+
+    @Test
+    fun `响应里的 SUB 轮换交给落盘回调`() = runBlocking {
+        val received = mutableListOf<Pair<String, List<String>>>()
+        val fallback = CookieFallbackSource().apply {
+            bind { "SUB=old" }
+            bindRotationSink { host, setCookies -> received.add(host to setCookies) }
+        }
+        val c = HttpClient(MockEngine {
+            respond(
+                "ok",
+                headers = headersOf(
+                    HttpHeaders.SetCookie,
+                    listOf("SUB=new; Path=/; Domain=.weibo.cn", "SUBP=newp; Path=/")
+                )
+            )
+        }) {
+            install(CookieAuth) { fallbackSource = fallback }
+        }
+        try {
+            c.get("https://m.weibo.cn/api/config")
+            assertEquals(1, received.size)
+            assertEquals("m.weibo.cn", received.single().first)
+            assertEquals(2, received.single().second.size)
+        } finally {
+            c.close()
+        }
+    }
+
+    @Test
+    fun `不含 SUB 的 Set-Cookie 不触发落盘`() = runBlocking {
+        val received = mutableListOf<Pair<String, List<String>>>()
+        val fallback = CookieFallbackSource().apply {
+            bind { "SUB=old" }
+            bindRotationSink { host, setCookies -> received.add(host to setCookies) }
+        }
+        val c = HttpClient(MockEngine {
+            respond(
+                "ok",
+                headers = headersOf(
+                    HttpHeaders.SetCookie,
+                    listOf("_T_WM=1; Path=/", "XSRF-TOKEN=abc; Path=/")
+                )
+            )
+        }) {
+            install(CookieAuth) { fallbackSource = fallback }
+        }
+        try {
+            c.get("https://m.weibo.cn/api/config")
+            assertTrue(received.isEmpty())
+        } finally {
+            c.close()
+        }
+    }
+
+    @Test
+    fun `Set-Cookie 的删除指令不被解析为凭据值`() {
+        // 实测：带 .weibo.com 的 SUB 请求 m.weibo.cn，服务端回 SUB=deleted; Max-Age=0
+        assertNull(parseSetCookie("SUB=deleted; expires=Thu, 01-Jan-1970 00:00:01 GMT; Max-Age=0; path=/"))
+        assertNull(parseSetCookie("SUB=DELETED; Max-Age=0"))
+        assertNull(parseSetCookie("SUB=; path=/"))
+        // 即使没写 deleted，Max-Age<=0 同样表示删除
+        assertNull(parseSetCookie("SUB=abc; Max-Age=0"))
+        assertNull(parseSetCookie("SUB=abc; Max-Age=-1"))
+
+        // 正常值原样返回；带引号的值去掉引号
+        assertEquals("SUB" to "abc", parseSetCookie("SUB=abc; path=/; domain=.weibo.cn"))
+        assertEquals("XSRF-TOKEN" to "506fe1", parseSetCookie("XSRF-TOKEN=506fe1; Max-Age=1200"))
+        assertEquals("SUB" to "quoted", parseSetCookie("SUB=\"quoted\"; path=/"))
     }
 
     @Test

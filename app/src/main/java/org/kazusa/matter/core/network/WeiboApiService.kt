@@ -8,6 +8,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.Parameters
 import io.ktor.http.decodeURLQueryComponent
@@ -36,6 +37,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.kazusa.matter.core.datastore.AuthPreferences
+import org.kazusa.matter.core.datastore.UserSession
+import org.kazusa.matter.core.session.SessionExpiryReason
 import org.kazusa.matter.core.network.KtorClientFactory.bodyText
 import org.kazusa.matter.core.network.KtorClientFactory.decodeBody
 import org.kazusa.matter.core.network.KtorClientFactory.jsonBody
@@ -131,6 +134,12 @@ internal fun resolveGroupFeedRoute(gid: String): GroupFeedRoute = when (gid.take
     else -> GroupFeedRoute(GroupFeedRoute.PATH_GROUP, count = 25, incremental = false, fid = false)
 }
 
+/**
+ * 会话凭据的最小可信长度。实测：用户 SUB 约 30~100 字符，游客 SUB 98 字符；
+ * 短于此的只可能是删除标记（`deleted`）或占位值，不能覆盖本地凭据。
+ */
+private const val MIN_SESSION_CREDENTIAL_LENGTH = 16
+
 class WeiboApiService(
     private val client: HttpClient,
     private val authPreferences: AuthPreferences? = null,
@@ -151,6 +160,99 @@ class WeiboApiService(
                 ""
             }
         }
+        // 反向通道：把服务端轮换后的 SUB/SUBP 落回 DataStore（cookie jar 语义）。
+        cookieFallbackSource?.bindRotationSink { host, setCookies ->
+            rotateSessionCookie(host, setCookies)
+        }
+    }
+
+    /**
+     * 上一次已处理过的轮换值。一次页面加载会并发几十个请求，风控 / 配置类响应
+     * 常带同一份 `Set-Cookie`；值没变就不必再读一遍会话（两次 Keystore 解密）。
+     */
+    @Volatile
+    private var lastRotatedSub: String? = null
+
+    @Volatile
+    private var lastRotatedSubp: String? = null
+
+    /**
+     * 服务端轮换的长期凭据回写。
+     *
+     * 微博的 `SUB` / `SUBP` 是滑动凭据，浏览器会跟着每次响应更新；Matter 此前
+     * 只在登录那一刻保存一次，之后本地凭据只旧不新。这是「用一阵子就掉登录」的
+     * 结构性原因——不补这条，任何其他加固都只能把掉线推迟几天。
+     *
+     * 只处理 `SUB` / `SUBP`：[UserSession.cookieHeader] 会用它俩覆盖 `rawCookie` 里的
+     * 同名项，因此不必每响应重写整串 `rawCookie`。写盘由
+     * [AuthPreferences.rotateCredentials] 负责 uid 代次校验与同值去重。
+     */
+    private suspend fun rotateSessionCookie(host: String, setCookies: List<String>) {
+        val prefs = authPreferences ?: return
+        var sub: String? = null
+        var subp: String? = null
+        var deleteInstruction: String? = null
+        setCookies.forEach { header ->
+            // parseSetCookie 会过滤掉 `SUB=deleted; Max-Age=0` 这类删除指令。
+            // 不过滤的话，带 .weibo.com 域 SUB 去访问 m.weibo.cn 就会把本地凭据
+            // 覆盖成字符串 "deleted"，之后每个请求都被判未登录。
+            val parsed = parseSetCookie(header)
+            if (parsed == null) {
+                val name = header.substringBefore('=').trim()
+                if (name.equals("SUB", ignoreCase = true) ||
+                    name.equals("SUBP", ignoreCase = true)
+                ) {
+                    deleteInstruction = name
+                }
+                return@forEach
+            }
+            val (name, value) = parsed
+            // SUB / SUBP 的真实长度都在 30 以上（游客 SUB 实测 98），
+            // 加一道长度下限挡住未知格式的占位值。
+            if (value.length < MIN_SESSION_CREDENTIAL_LENGTH) return@forEach
+            when {
+                name.equals("SUB", ignoreCase = true) -> sub = value
+                name.equals("SUBP", ignoreCase = true) -> subp = value
+            }
+        }
+        if (deleteInstruction != null) {
+            // 服务端在说「这个域上的凭据请删掉」。它不代表整个登录失效（另一个域可能
+            // 仍然有效），所以不落盘也不上报；但它是「凭据域不匹配」的直接证据。
+            CredentialAudit.log(
+                "set_cookie_deleted",
+                "host" to host,
+                "name" to deleteInstruction
+            )
+        }
+        if (sub == null && subp == null) return
+        if (sub == lastRotatedSub && subp == lastRotatedSubp) return
+        lastRotatedSub = sub ?: lastRotatedSub
+        lastRotatedSubp = subp ?: lastRotatedSubp
+
+        val session = try {
+            prefs.sessionFlow.firstOrNull()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        } ?: return
+        // 游客与未登录不该写凭据：游客 SUB 会被服务端频繁轮换，落盘只会污染会话。
+        if (!session.isLoggedIn || session.uid.isBlank() || session.uid == "guest") return
+        val subChanged = sub != null && sub != session.sub
+        val subpChanged = subp != null && subp != session.subp
+        if (!subChanged && !subpChanged) return
+        // 只有值真的变了才记：这条日志的频率就等于「服务端实际轮换频率」，
+        // 是判断「要不要做轮换落盘 / 要不要加静默续期」的第一手数据。
+        CredentialAudit.log(
+            "set_cookie",
+            "host" to host,
+            "subChanged" to subChanged,
+            "subpChanged" to subpChanged,
+            "newSub" to CredentialAudit.fingerprint(sub.orEmpty()),
+            "oldSub" to CredentialAudit.fingerprint(session.sub),
+            "uid" to session.uid
+        )
+        prefs.rotateCredentials(expectedUid = session.uid, sub = sub, subp = subp)
     }
 
     /**
@@ -192,6 +294,11 @@ class WeiboApiService(
      * 会话失效统一上报：请求确实携带了 Cookie 且微博返回 -100、本地又仍认为处于
      * 登录态（非游客）时，发一次全局失效事件。游客凭据被拒或未携带 Cookie 的 -100
      * 不算会话失效，不触发登出。
+     *
+     * 关键约束：**只有本次请求带的就是当前登录账号的 SUB** 才能证明登录凭据失效。
+     * [getEffectiveCookie] 在会话凭据读空（解密瞬时失败 / 字段缺失）时会回落游客 Cookie，
+     * 游客被拒的 -100 与「登录过期」在服务端看起来一模一样；不区分的话，一次本地
+     * 读失败就会把用户的凭据删掉。
      */
     private suspend fun reportSessionExpiredIfLoggedIn(usedCookie: String, code: Int?) {
         if (code != -100 || usedCookie.isBlank()) return
@@ -203,9 +310,33 @@ class WeiboApiService(
         } catch (_: Exception) {
             null
         } ?: return
-        if (session.isLoggedIn && session.uid.isNotBlank() && session.uid != "guest") {
-            sessionExpiredBus.notifySessionExpired()
+        if (!session.isLoggedIn || session.uid.isBlank() || session.uid == "guest") return
+        if (!carriesLoginCredential(usedCookie, session)) {
+            // -100 但本次带的是游客 / 别的账号凭据：不是登录失效，记下来避免误判被当成真失效
+            CredentialAudit.log(
+                "minus100_ignored",
+                "uid" to session.uid,
+                "usedSub" to CredentialAudit.fingerprint(parseCookieHeader(usedCookie)["SUB"].orEmpty()),
+                "sessionSub" to CredentialAudit.fingerprint(session.sub)
+            )
+            return
         }
+        CredentialAudit.log(
+            "minus100_expired",
+            "uid" to session.uid,
+            "sub" to CredentialAudit.fingerprint(session.sub),
+            "keys" to CredentialAudit.cookieKeys(usedCookie)
+        )
+        sessionExpiredBus.notifySessionExpired()
+    }
+
+    /** 这次请求是否真的带着当前登录账号的 SUB（游客凭据、空凭据都不算）。 */
+    private fun carriesLoginCredential(usedCookie: String, session: UserSession): Boolean {
+        val authoritative = session.sub.ifBlank {
+            parseCookieHeader(session.cookieHeader)["SUB"].orEmpty()
+        }
+        if (authoritative.isBlank()) return false
+        return parseCookieHeader(usedCookie)["SUB"] == authoritative
     }
 
     /**
@@ -281,7 +412,9 @@ class WeiboApiService(
         if (!session.isLoggedIn || session.uid == "guest") return ""
         val header = session.cookieHeader
         if (header.isBlank()) {
-            sessionExpiredBus.notifySessionExpired()
+            // 标记为已登录却读不出凭据：这是本地问题（解密失败 / 字段缺失），
+            // 不是服务端判定。单独一个原因，用户能在登录页看到区别。
+            sessionExpiredBus.notifySessionExpired(SessionExpiryReason.LOCAL_CREDENTIAL_MISSING)
         }
         return header
     }
@@ -358,6 +491,21 @@ class WeiboApiService(
                 val body = withContext(Dispatchers.IO) {
                     KtorClientFactory.jsonConfig.decodeFromString<WeiboConfigResponse>(rawText)
                 }
+                // 记「实际发出去的」凭据而不是传进来的：cookie 为空时插件会兜底注入
+                // 游客凭据，sentSub != localSub 就是「本地凭据读空被降级」的确证。
+                val sentCookie = response.call.request.headers[HttpHeaders.Cookie].orEmpty()
+                CredentialAudit.log(
+                    "verify",
+                    "login" to (body.data?.login ?: false),
+                    "uid" to body.data?.uid,
+                    "sentKeys" to CredentialAudit.cookieKeys(sentCookie),
+                    "sentSub" to CredentialAudit.fingerprint(
+                        parseCookieHeader(sentCookie)["SUB"].orEmpty()
+                    ),
+                    "localSub" to CredentialAudit.fingerprint(
+                        parseCookieHeader(cookie)["SUB"].orEmpty()
+                    )
+                )
                 if (body.data?.login == true) {
                     ApiResult.Success(body)
                 } else {
@@ -1899,8 +2047,9 @@ class WeiboApiService(
                 throw WriteGateException(429, WeiboWriteErrors.RATE_LIMITED_MESSAGE)
             }
             response.headers.getAll("Set-Cookie").orEmpty().forEach { header ->
-                val pair = header.substringBefore(';')
-                if ('=' in pair) cookies[pair.substringBefore('=').trim()] = pair.substringAfter('=').trim()
+                // 删除指令（SUB=deleted / Max-Age=0）不能合并进 Cookie 头
+                val (name, value) = parseSetCookie(header) ?: return@forEach
+                cookies[name] = value
             }
         }
         val csrf = cookies["XSRF-TOKEN"]?.takeIf { it.isNotBlank() }
@@ -1920,8 +2069,10 @@ class WeiboApiService(
         if (setCookies.isEmpty()) return
         val cookies = parseCookieHeader(credentials.cookieHeader)
         setCookies.forEach { header ->
-            val pair = header.substringBefore(';')
-            if ('=' in pair) cookies[pair.substringBefore('=').trim()] = pair.substringAfter('=').trim()
+            // 删除指令（SUB=deleted / Max-Age=0）不能合并：写缓存里一旦出现
+            // `SUB=deleted`，后续所有写操作都会被判未登录，且缓存不会自己恢复。
+            val (name, value) = parseSetCookie(header) ?: return@forEach
+            cookies[name] = value
         }
         val rotated = cookies["XSRF-TOKEN"]?.takeIf { it.isNotBlank() }
         cachedDesktopCredentials = credentials.copy(

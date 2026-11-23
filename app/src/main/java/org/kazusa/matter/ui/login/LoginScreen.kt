@@ -55,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.kazusa.matter.core.network.WeiboRequestHeaders
+import org.kazusa.matter.core.datastore.LastSessionExpiry
 import org.kazusa.matter.core.session.WebSessionCookieStore
 import org.kazusa.matter.data.repository.AuthCookieSanitizer
 import org.kazusa.matter.ui.components.ImmersiveTopBar
@@ -71,6 +72,16 @@ fun LoginScreen(
     viewModel: LoginViewModel,
     webCookieStore: WebSessionCookieStore,
     onLoginSuccess: () -> Unit,
+    /**
+     * 进入登录页时是否清空 WebView Cookie。
+     *
+     * 主动登出（凭据已删）时为 `true`：否则页面一加载就抓回旧账号的 SUB，用户永远换不了号。
+     * 会话被判定失效但凭据仍保留时为 `false`：WebView 里可能还躺着服务端仍然认可的那份
+     * 会话，留着它用户就能无感恢复，而不是被迫重新扫码 / 输密码。
+     */
+    clearWebCookiesOnEnter: Boolean = true,
+    /** 上一次自动退出的原因；主动登出时为 null。用来解释「为什么又退出了」。 */
+    lastSessionExpiry: LastSessionExpiry? = null,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -103,6 +114,24 @@ fun LoginScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            // 自动退出不是「平白无故掉线」：把原因和时间说清楚，用户才知道是服务端判定、
+            // 启动校验失败，还是本地凭据读不出来——三者的处理方式完全不同。
+            lastSessionExpiry?.let { expiry ->
+                val at = java.text.SimpleDateFormat("M月d日 HH:mm", java.util.Locale.CHINA)
+                    .format(java.util.Date(expiry.atEpochMillis))
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "上次登录已于 $at 自动退出：${expiry.reason.description}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+            }
+
             PrimaryScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
@@ -128,11 +157,15 @@ fun LoginScreen(
                     0 -> {
                         // 网页授权登录 (支持极验/易盾等各类人机验证并自动捕获 SUB Cookie)
                         var webViewRef by remember { mutableStateOf<WebView?>(null) }
-                        // 创建 WebView 前先清掉残留 Cookie：否则页面一加载就会
-                        // 抓回旧账号的 SUB 自动登录，用户永远换不了号
+                        // 主动登出后必须清残留 Cookie，否则页面一加载就抓回旧账号的 SUB
+                        // 自动登录，用户永远换不了号。会话仅「被判定失效」时不清：
+                        // 那份会话可能仍然有效，留着才能无感恢复。
                         var cookieStoreCleared by remember { mutableStateOf(false) }
+                        // 同一份 Cookie 串只自动校验一次：保留旧会话时页面会多次回调
+                        // （doUpdateVisitedHistory + onPageFinished），失败后不应反复打接口。
+                        var lastAttemptedCookie by remember { mutableStateOf("") }
                         LaunchedEffect(Unit) {
-                            webCookieStore.clearAll()
+                            if (clearWebCookiesOnEnter) webCookieStore.clearAll()
                             cookieStoreCleared = true
                         }
                         // 离开登录页释放 WebView：仅把它从组合树摘掉不会销毁原生实例。
@@ -196,7 +229,12 @@ fun LoginScreen(
                                                         currentUrl.contains("crossdomain")
                                                 )
 
-                                                if (hasSubCookie && isRedirectedToTarget && uiState !is LoginUiState.Success && uiState !is LoginUiState.Loading) {
+                                                if (hasSubCookie && isRedirectedToTarget &&
+                                                    sanitizedPool != lastAttemptedCookie &&
+                                                    uiState !is LoginUiState.Success &&
+                                                    uiState !is LoginUiState.Loading
+                                                ) {
+                                                    lastAttemptedCookie = sanitizedPool
                                                     viewModel.loginWithCookie(sanitizedPool)
                                                 }
                                             }

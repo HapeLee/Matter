@@ -40,6 +40,7 @@ import org.kazusa.matter.core.datastore.MediaPreferences
 import org.kazusa.matter.core.network.WeiboApiService
 import org.kazusa.matter.core.session.WebSessionCookieStore
 import org.kazusa.matter.core.session.SessionExpiredBus
+import org.kazusa.matter.core.session.SessionExpiryReason
 import org.kazusa.matter.data.repository.AuthRepository
 import org.kazusa.matter.data.repository.SessionProbe
 import org.kazusa.matter.data.repository.SearchHistoryRepository
@@ -207,15 +208,18 @@ fun MatterNavGraph() {
     // 收藏态同样在根收集一次：列表卡片不再各自 collectAsStateWithLifecycle
     val favoriteState = favoritesRepository.state.collectAsStateWithLifecycle()
 
-    // 会话失效统一收口：任一接口确认 -100 且当前确实处于登录态时，清会话
-    // （含 WebView Cookie，防自动登回旧账号）并回到登录页。游客与未登录的
-    // -100 不算失效；清掉 DataStore 后 session 变空，后续重复事件自然被挡。
+    // 会话失效统一收口：任一接口确认 -100 且当前确实处于登录态时，把会话标记为
+    // 未登录并回到登录页。这里**刻意不调用 logout()**：单次判定不足以证明凭据作废
+    // （风控 / 限流 / 游客降级 / 解密瞬时失败都会给同一信号），删掉密文就再也拿不回来。
+    // 保留凭据后：重新登录会整体覆盖；进登录页时也不再清 WebView（见 Screen.Login 分支），
+    // WebView 里若仍有服务端认可的会话，登录页会自动抓回并完成恢复，用户无需重新扫码。
     val sessionExpiredBus = koinInject<SessionExpiredBus>()
     LaunchedEffect(Unit) {
-        sessionExpiredBus.expired.collect {
+        sessionExpiredBus.expired.collect { reason ->
             val current = session ?: return@collect
             if (current.isLoggedIn && current.uid.isNotBlank() && current.uid != "guest") {
-                authRepository.logout()
+                // 原因会落盘，登录页据此显示「为什么退出了」，不再只有一句通用文案
+                authRepository.suspendSession(reason)
                 replaceRoot(Screen.Login)
             }
         }
@@ -233,7 +237,7 @@ fun MatterNavGraph() {
                     lastProbeElapsed = now
                     coroutineScope.launch {
                         if (authRepository.probeSession() == SessionProbe.EXPIRED) {
-                            sessionExpiredBus.notifySessionExpired()
+                            sessionExpiredBus.notifySessionExpired(SessionExpiryReason.PROBE_FAILED)
                         }
                     }
                 }
@@ -308,9 +312,19 @@ fun MatterNavGraph() {
 
                                         Screen.Login -> {
                                             val loginViewModel: LoginViewModel = koinViewModel()
+                                            // 自动退出的原因落盘在会话里，登录页据此解释「为什么又退出了」
+                                            val lastExpiry by authRepository.lastSessionExpiryFlow
+                                                .collectAsStateWithLifecycle(initialValue = null)
                                             LoginScreen(
                                                 viewModel = loginViewModel,
                                                 webCookieStore = webCookieStore,
+                                                lastSessionExpiry = lastExpiry,
+                                                // 凭据还在（只是被判失效）就别清 WebView：
+                                                // 里面可能仍是服务端认可的那份会话，用户可无感恢复。
+                                                // 主动登出已经删掉凭据，这里必然清空，防换号被旧 SUB 劫持。
+                                                clearWebCookiesOnEnter = session?.let { current ->
+                                                    current.sub.isBlank() && current.rawCookie.isBlank()
+                                                } ?: true,
                                                 onLoginSuccess = {
                                                     replaceRoot(Screen.MainTabs)
                                                 }

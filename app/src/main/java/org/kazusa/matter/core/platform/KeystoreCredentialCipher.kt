@@ -3,6 +3,7 @@ package org.kazusa.matter.core.platform
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import org.kazusa.matter.BuildConfig
 import org.kazusa.matter.core.session.CredentialCipher
 import java.security.KeyStore
 import java.security.GeneralSecurityException
@@ -49,27 +50,42 @@ class KeystoreCredentialCipher : CredentialCipher {
     override fun decrypt(value: String): String {
         if (!isEncrypted(value)) return value
         return try {
+            // 解密路径禁止新建密钥：新密钥解不开任何已存密文，一次「别名暂时取不到」
+            // 就会把所有用户的凭据永久作废，而日志里只会显示「登录已过期」。
+            val key = obtainKey(allowCreate = false) ?: return ""
             val data = Base64.decode(value.removePrefix(PREFIX), Base64.NO_WRAP)
             val iv = data.copyOfRange(0, GCM_IV_BYTES)
             val cipherText = data.copyOfRange(GCM_IV_BYTES, data.size)
             val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.DECRYPT_MODE, obtainKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
             String(cipher.doFinal(cipherText), Charsets.UTF_8)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             // 可能是密钥被系统重置（换机恢复 / 清除凭据）：丢掉缓存，下次重新取
             cachedKey = null
+            if (BuildConfig.DEBUG) {
+                // 与 CredentialAudit 共用 TAG：诊断时 `adb logcat -s CredAuthAudit:D`
+                // 能同时看到「凭据读空」和它的成因。只记密文长度，不记任何凭据内容。
+                android.util.Log.w(
+                    "CredAuthAudit",
+                    "decrypt_failed len=${value.length} reason=${e.javaClass.simpleName}"
+                )
+            }
             ""
         }
     }
 
     override fun isEncrypted(value: String): Boolean = value.startsWith(PREFIX)
 
-    private fun obtainKey(): SecretKey {
+    private fun obtainKey(allowCreate: Boolean): SecretKey? {
         cachedKey?.let { return it }
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        val key = (keyStore.getKey(keyAlias, null) as? SecretKey) ?: generateKey()
-        cachedKey = key
-        return key
+        val existing = keyStore.getKey(keyAlias, null) as? SecretKey
+        if (existing != null) {
+            cachedKey = existing
+            return existing
+        }
+        if (!allowCreate) return null
+        return generateKey().also { cachedKey = it }
     }
 
     private fun generateKey(): SecretKey {
@@ -89,16 +105,19 @@ class KeystoreCredentialCipher : CredentialCipher {
         return generator.generateKey()
     }
 
-    /** 取密钥；已被系统判定失效时删旧建新一次，仍失败则抛出让 encrypt/decrypt 兜底。 */
+    /** 取密钥（写路径）；已被系统判定失效时删旧建新一次，仍失败则抛出让 encrypt 兜底。 */
     private fun freshKey(): SecretKey = try {
-        obtainKey()
+        requireKey()
     } catch (_: GeneralSecurityException) {
         cachedKey = null
         runCatching {
             KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.deleteEntry(keyAlias)
         }
-        obtainKey()
+        requireKey()
     }
+
+    private fun requireKey(): SecretKey =
+        obtainKey(allowCreate = true) ?: throw GeneralSecurityException("AndroidKeyStore 不可用")
 
     private companion object {
         const val ANDROID_KEYSTORE = "AndroidKeyStore"

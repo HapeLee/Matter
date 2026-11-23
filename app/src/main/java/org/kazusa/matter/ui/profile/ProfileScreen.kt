@@ -63,6 +63,12 @@ import org.kazusa.matter.ui.components.TopBarTitleText
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 
+/**
+ * 剩余天数低于这个值时把「登录有效期」标红。
+ * 取 7 天：服务端给 30 天且不续期，留一周足够用户安排重新授权。
+ */
+private const val SESSION_EXPIRY_WARNING_DAYS = 7L
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
@@ -200,6 +206,35 @@ fun ProfileScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            // 会话硬过期时间来自 Cookie 里的 ALF（实测 = 登录时刻 + 30 天，服务端不续期）。
+                            // 显示它是为了把「某天突然掉线」变成「还有几天」——到期只能重新授权，没有静默续期。
+                            val currentSession = session
+                            val expiresAtEpoch = currentSession?.sessionExpiresAt
+                            if (expiresAtEpoch != null &&
+                                currentSession.uid.isNotBlank() &&
+                                currentSession.uid != "guest"
+                            ) {
+                                val expiresLabel = java.text.SimpleDateFormat(
+                                    "yyyy年M月d日",
+                                    java.util.Locale.CHINA
+                                ).format(java.util.Date(expiresAtEpoch * 1000))
+                                val remainingDays =
+                                    currentSession.sessionDaysRemaining(System.currentTimeMillis() / 1000)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (remainingDays == null) {
+                                        "登录有效期至 $expiresLabel"
+                                    } else {
+                                        "登录有效期至 $expiresLabel（剩 $remainingDays 天）"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (remainingDays != null && remainingDays <= SESSION_EXPIRY_WARNING_DAYS) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
                         }
                     }
 

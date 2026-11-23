@@ -7,10 +7,13 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.kazusa.matter.core.session.CredentialCipher
+import org.kazusa.matter.core.session.SessionExpiryReason
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
@@ -54,6 +57,89 @@ class AuthPreferencesTest {
         assertEquals("好友", prefs.lastGroupFlow.first().second)
         assertEquals(setOf("gid2"), prefs.hiddenGroupIdsFlow.first())
         assertEquals(listOf("gid1", "gid2"), prefs.groupCustomOrderFlow.first())
+    }
+
+    /**
+     * 重新登录必须整体覆盖凭据：新串里没有 SUB 时要把旧的清掉。
+     * 之前的 `if (isNotBlank())` 守卫会让旧账号的 SUB 留下来，与新的 uid / rawCookie
+     * 混搭成自相矛盾的凭据，表现就是「刚登录就失效」。
+     */
+    @Test
+    fun 重新登录清掉旧账号残留凭据() = runTest {
+        val prefs = AuthPreferences(RuntimeEnvironment.getApplication() as Context)
+        prefs.clearSession()
+
+        prefs.saveSession(uid = "A", sub = "sub_a", subp = "subp_a", rawCookie = "SUB=sub_a")
+        prefs.saveSession(uid = "B", sub = "", subp = "subp_b", rawCookie = "SUBP=subp_b")
+
+        val session = prefs.sessionFlow.first()
+        assertEquals("B", session.uid)
+        assertEquals("", session.sub)
+        assertEquals("subp_b", session.subp)
+        assertEquals("SUBP=subp_b", session.rawCookie)
+    }
+
+    /** 服务端轮换回写：同值不写、换号后旧响应不写、写入后 cookieHeader 立即跟上。 */
+    @Test
+    fun 轮换凭据校验账号代次并去重() = runTest {
+        val prefs = AuthPreferences(RuntimeEnvironment.getApplication() as Context)
+        prefs.clearSession()
+        prefs.saveSession(uid = "uid_1", sub = "old_sub", subp = "old_subp", rawCookie = "SUB=old_sub")
+
+        assertTrue(prefs.rotateCredentials("uid_1", sub = "new_sub"))
+        var session = prefs.sessionFlow.first()
+        assertEquals("new_sub", session.sub)
+        assertEquals("old_subp", session.subp)
+        // cookieHeader 以 sub 覆盖 rawCookie 同名项，轮换后立即生效
+        assertTrue(session.cookieHeader.contains("SUB=new_sub"))
+
+        // 同一份值不重复落盘（每次 edit 都会让 sessionFlow 重新发射）
+        assertFalse(prefs.rotateCredentials("uid_1", sub = "new_sub"))
+        // 换号后旧响应晚到：uid 不匹配，不得写入
+        assertFalse(prefs.rotateCredentials("uid_2", sub = "stale_sub"))
+        session = prefs.sessionFlow.first()
+        assertEquals("new_sub", session.sub)
+    }
+
+    /** 判定失效只置未登录标记，凭据密文必须保留（误判可恢复的唯一前提）。 */
+    @Test
+    fun 判定失效保留凭据() = runTest {
+        val prefs = AuthPreferences(RuntimeEnvironment.getApplication() as Context)
+        prefs.clearSession()
+        prefs.saveSession(uid = "123", sub = "s", subp = "p", rawCookie = "SUB=s")
+
+        prefs.markSessionInvalid(SessionExpiryReason.API_REJECTED)
+
+        val session = prefs.sessionFlow.first()
+        assertFalse(session.isLoggedIn)
+        assertEquals("123", session.uid)
+        assertEquals("s", session.sub)
+        assertEquals("p", session.subp)
+        assertEquals("SUB=s", session.rawCookie)
+    }
+
+    /**
+     * 自动退出要留下可解释的痕迹：原因 + 时间。
+     * 重新登录成功后必须清掉，否则登录页会一直显示过期的「上次退出」。
+     */
+    @Test
+    fun 记录失效原因并重新登录后清除() = runTest {
+        val prefs = AuthPreferences(RuntimeEnvironment.getApplication() as Context)
+        prefs.clearSession()
+        prefs.saveSession(uid = "1", sub = "s", rawCookie = "SUB=s")
+
+        assertNull(prefs.lastSessionExpiryFlow.first())
+
+        prefs.markSessionInvalid(SessionExpiryReason.PROBE_FAILED)
+
+        val recorded = prefs.lastSessionExpiryFlow.first()
+        assertEquals(SessionExpiryReason.PROBE_FAILED, recorded?.reason)
+        assertTrue((recorded?.atEpochMillis ?: 0L) > 0L)
+        // 凭据仍保留，只是标记未登录
+        assertEquals("s", prefs.sessionFlow.first().sub)
+
+        prefs.saveSession(uid = "1", sub = "s2", rawCookie = "SUB=s2")
+        assertNull(prefs.lastSessionExpiryFlow.first())
     }
 
     /** 简单可逆变换，模拟 Keystore 实现验证 AuthPreferences 的加解密与迁移语义。 */

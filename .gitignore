@@ -62,3 +62,8 @@ tmp_*
 
 # 本地工具产物（计划草稿等）
 .zcode/
+
+# 实验用凭据文件（docs/credential-verification-playbook.md），绝不允许入库
+cookies.txt
+*cookies*.txt
+credentials.txt
